@@ -1,0 +1,40 @@
+name: Mirror to GitLab
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "*"
+  workflow_dispatch:
+
+concurrency:
+  group: mirror-to-gitlab-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    if: ${{ vars.MIRROR_TO_GITLAB == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Push mirror to GitLab
+        env:
+          GITLAB_PUSH_TOKEN: ${{ secrets.GITLAB_PUSH_TOKEN }}
+          GITLAB_HOST: gitlab.5dlabs.ai
+          GITLAB_NAMESPACE: 5dlabs
+          GITLAB_PROJECT: ${{ github.event.repository.name }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GITLAB_PUSH_TOKEN:-}" ]; then
+            echo "GITLAB_PUSH_TOKEN is not set; skipping mirror." >&2
+            exit 0
+          fi
+          remote="https://oauth2:${GITLAB_PUSH_TOKEN}@${GITLAB_HOST}/${GITLAB_NAMESPACE}/${GITLAB_PROJECT}.git"
+          git remote remove gitlab 2>/dev/null || true
+          git remote add gitlab "$remote"
+          git push --prune gitlab +refs/heads/*:refs/heads/* +refs/tags/*:refs/tags/*

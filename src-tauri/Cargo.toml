@@ -1,0 +1,38 @@
+[package]
+name = "cto-app"
+version = "0.1.0"
+description = "CTO Desktop"
+authors = ["5dlabs"]
+license = "MIT"
+repository = "https://github.com/5dlabs/cto-app"
+edition = "2021"
+rust-version = "1.77"
+
+[lib]
+name = "cto_app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-shell = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+tauri-plugin-process = "2"
+tauri-plugin-notification = "2"
+tauri-plugin-os = "2"
+tauri-plugin-store = "2"
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+anyhow = "1"
+thiserror = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+
+[features]
+custom-protocol = ["tauri/custom-protocol"]

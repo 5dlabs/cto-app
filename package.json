@@ -1,0 +1,21 @@
+{
+  "name": "cto-app",
+  "version": "0.1.0",
+  "private": true,
+  "description": "CTO Desktop — Tauri shell + React UI",
+  "license": "MIT",
+  "workspaces": [
+    "ui"
+  ],
+  "scripts": {
+    "dev": "npm --workspace ui run dev",
+    "build": "npm --workspace ui run build",
+    "preview": "npm --workspace ui run preview",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.1.0"
+  }
+}
