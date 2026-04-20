@@ -17,6 +17,17 @@ import {
   IconPalette,
   IconBracket,
 } from "./views/icons";
+import { MorganView } from "./views/MorganView";
+import { ProjectsView } from "./views/ProjectsView";
+import { GitLabView } from "./views/GitLabView";
+import { ApplicationsView } from "./views/ApplicationsView";
+import { MemoryView } from "./views/MemoryView";
+import { CostView } from "./views/CostView";
+import { QualityView } from "./views/QualityView";
+import { InfrastructureView } from "./views/InfrastructureView";
+import { IntegrationsView } from "./views/IntegrationsView";
+import { SettingsView } from "./views/SettingsView";
+import { NewAgentModal } from "./views/NewAgentModal";
 
 type NavKey =
   | "morgan"
@@ -39,7 +50,7 @@ interface NavItem {
 
 const primaryNav: NavItem[] = [
   { key: "morgan", label: "Morgan", icon: IconSparkles },
-  { key: "gitlab", label: "GitLab", icon: IconGit, badge: "sync" },
+  { key: "gitlab", label: "GitLab", icon: IconGit },
   { key: "projects", label: "Projects", icon: IconFolder },
   { key: "applications", label: "Applications", icon: IconApps },
   { key: "memory", label: "Memory", icon: IconDocs },
@@ -52,8 +63,52 @@ const platformNav: NavItem[] = [
   { key: "integrations", label: "Integrations", icon: IconPalette },
 ];
 
+const TITLES: Record<NavKey, { title: string; sub: string }> = {
+  morgan: {
+    title: "Morgan",
+    sub: "Intake, routing, and the always-on studio companion",
+  },
+  gitlab: {
+    title: "GitLab",
+    sub: "Parallel registry · 32 projects mirrored — skinned embed (MVP)",
+  },
+  projects: {
+    title: "Projects",
+    sub: "Pending · In Progress · Complete — debate runs by default",
+  },
+  applications: {
+    title: "Applications",
+    sub: "Extension packs — Accounting, Marketing, RMS, Voice",
+  },
+  memory: {
+    title: "Memory",
+    sub: "mem0 graph for cross-project, cross-agent housekeeping",
+  },
+  cost: {
+    title: "Cost",
+    sub: "LLM spend by provider, project, and agent · Grafana-backed",
+  },
+  quality: {
+    title: "Quality",
+    sub: "Per-task tokens, cost, and iterations to acceptance",
+  },
+  infrastructure: {
+    title: "Infrastructure",
+    sub: "17 5D services across 9 categories · operator-provisioned",
+  },
+  integrations: {
+    title: "Integrations",
+    sub: "External surfaces — PM, Comms, Observability, SCM/CI, Security",
+  },
+  settings: {
+    title: "Settings",
+    sub: "Secure API keys · profile · themes · shortcuts",
+  },
+};
+
 export default function App() {
   const [active, setActive] = useState<NavKey>("morgan");
+  const [showNewAgent, setShowNewAgent] = useState(false);
 
   return (
     <div className="app-shell" data-motif="cyan" data-claw="angle" data-chrome="plain">
@@ -73,7 +128,11 @@ export default function App() {
           <button className="ghost-btn" type="button" aria-label="Notifications">
             <IconBell size={14} />
           </button>
-          <button className="primary-btn" type="button">
+          <button
+            className="primary-btn"
+            type="button"
+            onClick={() => setShowNewAgent(true)}
+          >
             <IconPlus size={12} /> New agent
           </button>
         </div>
@@ -128,6 +187,8 @@ export default function App() {
         <span className="statusbar__spacer" />
         <span>v0.1.0 · dev</span>
       </footer>
+
+      <NewAgentModal open={showNewAgent} onClose={() => setShowNewAgent(false)} />
     </div>
   );
 }
@@ -156,76 +217,53 @@ function NavButton({
 }
 
 function ContentPane({ active }: { active: NavKey }) {
-  const titles: Record<NavKey, string> = {
-    morgan: "Morgan",
-    gitlab: "GitLab",
-    projects: "Projects",
-    applications: "Applications",
-    memory: "Memory",
-    cost: "Cost",
-    quality: "Quality",
-    infrastructure: "Infrastructure",
-    integrations: "Integrations",
-    settings: "Settings",
-  };
-
-  const subtitles: Record<NavKey, string> = {
-    morgan: "Intake & PRD processing agent",
-    gitlab: "Parallel registry · 32 projects mirrored",
-    projects: "Kanban across swarms",
-    applications: "Deployed via ArgoCD",
-    memory: "HSG contextual + temporal facts",
-    cost: "Token spend and compute",
-    quality: "Test coverage, lint, security",
-    infrastructure: "17 platform services",
-    integrations: "External API surfaces",
-    settings: "Profile · themes · shortcuts",
-  };
+  const head = TITLES[active];
 
   return (
-    <div className="pane">
+    <div className="pane pane--wide">
       <header className="pane__header">
         <div>
           <div className="pane__eyebrow">5D Platform</div>
-          <h1 className="pane__title">{titles[active]}</h1>
-          <p className="pane__sub">{subtitles[active]}</p>
+          <h1 className="pane__title">{head.title}</h1>
+          <p className="pane__sub">{head.sub}</p>
         </div>
         <div className="pane__actions">
           <button className="ghost-btn" type="button">
             <IconUsers size={12} /> Team
           </button>
-          <button className="primary-btn" type="button">
-            <IconSparkles size={12} /> Open
-          </button>
         </div>
       </header>
 
       <section className="pane__body">
-        <div className="card">
-          <div className="card__eyebrow">Status</div>
-          <div className="card__title">Ready</div>
-          <p className="card__body">
-            This surface is scaffolded. Content ports from the staged design
-            drop will land here next.
-          </p>
-        </div>
-        <div className="card">
-          <div className="card__eyebrow">Source</div>
-          <div className="card__title">.task/.docs/design</div>
-          <p className="card__body">
-            Canonical spec + prompts live in the design drop. Views ported
-            incrementally from .jsx → .tsx.
-          </p>
-        </div>
-        <div className="card">
-          <div className="card__eyebrow">Next</div>
-          <div className="card__title">Full IA</div>
-          <p className="card__body">
-            Infrastructure (17 cards), Projects kanban, GitLab sync board,
-            and Morgan console are on deck.
-          </p>
-        </div>
+        <ViewRouter active={active} />
       </section>
     </div>
   );
+}
+
+function ViewRouter({ active }: { active: NavKey }) {
+  switch (active) {
+    case "morgan":
+      return <MorganView />;
+    case "gitlab":
+      return <GitLabView />;
+    case "projects":
+      return <ProjectsView />;
+    case "applications":
+      return <ApplicationsView />;
+    case "memory":
+      return <MemoryView />;
+    case "cost":
+      return <CostView />;
+    case "quality":
+      return <QualityView />;
+    case "infrastructure":
+      return <InfrastructureView />;
+    case "integrations":
+      return <IntegrationsView />;
+    case "settings":
+      return <SettingsView />;
+    default:
+      return null;
+  }
 }

@@ -193,3 +193,93 @@ export const IconGit = (p: IconProps) => (
     <path d="M16.5 12A6.5 6.5 0 0 0 10 5.5" />
   </Icon>
 );
+export const IconShield = (p: IconProps) => (
+  <Icon {...p} d="M12 2l8 4v6c0 5-3.5 9-8 10-4.5-1-8-5-8-10V6l8-4z" />
+);
+export const IconDatabase = (p: IconProps) => (
+  <Icon {...p}>
+    <ellipse cx="12" cy="5" rx="9" ry="3" />
+    <path d="M3 5v6c0 1.7 4 3 9 3s9-1.3 9-3V5" />
+    <path d="M3 11v6c0 1.7 4 3 9 3s9-1.3 9-3v-6" />
+  </Icon>
+);
+export const IconCpu = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="4" y="4" width="16" height="16" rx="2" />
+    <rect x="9" y="9" width="6" height="6" />
+    <path d="M9 1v3M15 1v3M9 20v3M15 20v3M1 9h3M1 15h3M20 9h3M20 15h3" />
+  </Icon>
+);
+export const IconRadio = (p: IconProps) => (
+  <Icon {...p}>
+    <circle cx="12" cy="12" r="2" />
+    <path d="M16.24 7.76a6 6 0 0 1 0 8.49M7.76 16.24a6 6 0 0 1 0-8.49M20.49 4a10 10 0 0 1 0 16M3.51 20a10 10 0 0 1 0-16" />
+  </Icon>
+);
+export const IconCloud = (p: IconProps) => (
+  <Icon {...p} d="M18 10a5 5 0 0 0-9.6-2A4 4 0 1 0 7 17h11a4 4 0 0 0 0-7z" />
+);
+export const IconHeart = (p: IconProps) => (
+  <Icon {...p} d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1-1a5.5 5.5 0 0 0-7.8 7.8l1 1L12 22l7.8-8.5 1-1a5.5 5.5 0 0 0 0-7.9z" />
+);
+export const IconKey = (p: IconProps) => (
+  <Icon {...p}>
+    <circle cx="7" cy="14" r="4" />
+    <path d="M10 11l11-11M17 7l3 3M19 5l3 3" />
+  </Icon>
+);
+export const IconEye = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+    <circle cx="12" cy="12" r="3" />
+  </Icon>
+);
+export const IconEyeOff = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a19.58 19.58 0 0 1 5.17-6.17" />
+    <path d="M9.9 4.24A10.93 10.93 0 0 1 12 4c7 0 11 8 11 8a19.5 19.5 0 0 1-2.26 3.3M1 1l22 22" />
+  </Icon>
+);
+export const IconUpload = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+    <path d="M17 8l-5-5-5 5M12 3v12" />
+  </Icon>
+);
+export const IconCheck = (p: IconProps) => <Icon {...p} d="M20 6L9 17l-5-5" />;
+export const IconCoin = (p: IconProps) => (
+  <Icon {...p}>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M12 6v12M9 9h5a2 2 0 1 1 0 4H9h6" />
+  </Icon>
+);
+export const IconCurrency = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M12 1v22" />
+    <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+  </Icon>
+);
+export const IconPackage = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M21 16V8l-9-5-9 5v8l9 5 9-5z" />
+    <path d="M3.27 6.96L12 12l8.73-5.04M12 22V12" />
+  </Icon>
+);
+export const IconPuzzle = (p: IconProps) => (
+  <Icon {...p} d="M20 10h-2a2 2 0 0 1-2-2V6a2 2 0 0 0-4 0v2a2 2 0 0 1-2 2H8a2 2 0 0 0 0 4h2a2 2 0 0 1 2 2v2a2 2 0 0 0 4 0v-2a2 2 0 0 1 2-2h2a2 2 0 0 0 0-4z" />
+);
+export const IconActivity = (p: IconProps) => (
+  <Icon {...p} d="M22 12h-4l-3 9L9 3l-3 9H2" />
+);
+export const IconLink = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1" />
+    <path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1" />
+  </Icon>
+);
+export const IconGlobe = (p: IconProps) => (
+  <Icon {...p}>
+    <circle cx="12" cy="12" r="10" />
+    <path d="M2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20" />
+  </Icon>
+);
