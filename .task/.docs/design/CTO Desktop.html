@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>CTO · 5D Labs desktop</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="styles/tokens.css" />
+<link rel="stylesheet" href="styles/shell.css" />
+<link rel="stylesheet" href="styles/views.css" />
+<style>
+  html, body { margin: 0; height: 100%; background: #0a0a0a; overflow: hidden; }
+  body { color-scheme: dark; }
+  #root { height: 100vh; width: 100vw; }
+  .main-shell { display: grid; grid-template-rows: 36px 1fr 22px; height: 100vh; background: var(--bg-app); }
+  .main-body { display: grid; grid-template-columns: 232px 1fr; min-height: 0; border-top: 1px solid var(--border-subtle); }
+  .main-content { min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--bg-app); position: relative; }
+  .content-header { height: 48px; padding: 0 18px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--border-subtle); background: var(--bg-surface); flex-shrink: 0; }
+  .content-title { font-size: 13.5px; font-weight: 550; letter-spacing: -0.2px; color: var(--fg-primary); }
+  .content-sub { font-size: 11.5px; color: var(--fg-muted); font-family: var(--font-mono); }
+  .content-header-actions { margin-left: auto; display: inline-flex; gap: 6px; align-items: center; }
+  .content-body { flex: 1; min-height: 0; overflow: auto; }
+
+  /* Command palette */
+  .palette-scrim { position: fixed; inset: 0; background: rgba(0,0,0,0.55); backdrop-filter: blur(4px); z-index: 100; display: flex; justify-content: center; padding-top: 13vh; }
+  .palette { width: min(640px, 92vw); background: var(--bg-elevated); border: 1px solid var(--border-strong); border-radius: var(--radius); box-shadow: 0 24px 80px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.02) inset; overflow: hidden; }
+  .palette-input { width: 100%; box-sizing: border-box; background: transparent; border: none; outline: none; padding: 14px 16px; color: var(--fg-primary); font: 14px var(--font-ui); border-bottom: 1px solid var(--border-subtle); }
+  .palette-input::placeholder { color: var(--fg-faint); }
+  .palette-list { max-height: 360px; overflow: auto; padding: 6px; }
+  .palette-section { padding: 8px 10px 4px; font-size: 10.5px; color: var(--fg-faint); text-transform: uppercase; letter-spacing: 0.1em; font-weight: 550; }
+  .palette-item { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: var(--radius-sm); color: var(--fg-secondary); font-size: 13px; cursor: pointer; }
+  .palette-item:hover, .palette-item.active { background: var(--bg-hover); color: var(--fg-primary); }
+  .palette-item .icon { color: var(--fg-muted); }
+  .palette-item .shortcut { margin-left: auto; }
+
+  /* Tweaks */
+  .tweaks-panel { position: fixed; bottom: 36px; right: 20px; width: 280px; background: var(--bg-elevated); border: 1px solid var(--border-strong); border-radius: var(--radius); box-shadow: 0 12px 40px rgba(0,0,0,0.45); padding: 12px; z-index: 90; font-size: 12px; }
+  .tweaks-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--border-subtle); }
+  .tweaks-title { font-weight: 600; color: var(--fg-primary); font-size: 12.5px; letter-spacing: -0.1px; }
+  .tweaks-tag { font-size: 9.5px; color: var(--fg-faint); text-transform: uppercase; letter-spacing: 0.1em; font-family: var(--font-mono); }
+  .tweaks-group { margin-bottom: 12px; }
+  .tweaks-label { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--fg-muted); margin-bottom: 6px; font-weight: 550; }
+  .tweak-row { display: flex; gap: 6px; flex-wrap: wrap; }
+  .swatch-btn { flex: 1; min-width: 44px; height: 28px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); cursor: pointer; position: relative; background: transparent; display: flex; align-items: center; justify-content: center; gap: 4px; font-size: 10px; color: var(--fg-muted); font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.05em; }
+  .swatch-btn .dot { width: 10px; height: 10px; border-radius: 50%; }
+  .swatch-btn.active { border-color: var(--accent); color: var(--fg-primary); background: var(--accent-ghost); }
+  .motif-btn { flex: 1; height: 28px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); cursor: pointer; background: transparent; color: var(--fg-muted); font-size: 10.5px; font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.05em; }
+  .motif-btn.active { border-color: var(--accent); color: var(--fg-primary); background: var(--accent-ghost); }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="components/icons.jsx"></script>
+<script type="text/babel" src="components/shell.jsx"></script>
+<script type="text/babel" src="components/view-morgan.jsx"></script>
+<script type="text/babel" src="components/view-prds.jsx"></script>
+<script type="text/babel" src="components/view-rest.jsx"></script>
+
+<script type="text/babel">
+const TWEAKS = /*EDITMODE-BEGIN*/{
+  "motif": "cyan",
+  "claw": "angle",
+  "chrome": "plain"
+}/*EDITMODE-END*/;
+
+const ACCENTS = {
+  amber:      { label: "Amber",      hex: "#D9A441" },
+  violet:     { label: "Violet",     hex: "#B982E8" },
+  cyan:       { label: "Cyan",       hex: "#6EC1D9" },
+  chartreuse: { label: "Chartreuse", hex: "#8EC46E" },
+};
+
+const applyMotif = (key) => {
+  document.documentElement.setAttribute("data-motif", key);
+};
+const applyChrome = (key) => {
+  document.documentElement.setAttribute("data-chrome", key);
+};
+const applyClaw = (key) => {
+  document.documentElement.setAttribute("data-claw", key);
+};
+
+const VIEW_MAP = {
+  morgan:   { label: "Morgan",       sub: "Project manager · live", comp: () => <Morgan /> },
+  prds:     { label: "PRDs",         sub: "product docs · markdown", comp: () => <PRDs /> },
+  tasks:    { label: "Tasks",        sub: "code-server · remote workspaces", comp: () => <Tasks /> },
+  apps:     { label: "Applications", sub: "argocd · prod clusters",  comp: () => <Applications /> },
+  design:   { label: "Design",       sub: "component library",       comp: () => <Design /> },
+  memory:   { label: "Memory",       sub: "mem0 · graph of context", comp: () => <MemoryGraph /> },
+  agents:   { label: "Agents",       sub: "fleet · CLI routing",     comp: () => <Agents /> },
+  settings: { label: "Settings",     sub: "workspace",               comp: () => <Settings /> },
+};
+
+const ContentHeader = ({ tab, onCommand }) => (
+  <div className="content-header">
+    <div>
+      <div className="content-title">{tab.label}</div>
+    </div>
+    <span className="content-sub">· {tab.sub}</span>
+    <div className="content-header-actions">
+      <button className="btn btn-ghost" onClick={onCommand}>
+        <IconCommand size={12} />
+        Command
+        <span className="kbd-row" style={{ marginLeft: 6 }}><span className="kbd">⌘</span><span className="kbd">K</span></span>
+      </button>
+      <button className="btn"><IconPlus size={12} /> New</button>
+    </div>
+  </div>
+);
+
+const Palette = ({ open, onClose, onGo }) => {
+  const [q, setQ] = React.useState("");
+  React.useEffect(() => { if (open) setQ(""); }, [open]);
+  if (!open) return null;
+  const items = [
+    { section: "Navigate", kind: "morgan",   icon: IconUsers,    label: "Open Morgan",      sk: "⌘ 0" },
+    { section: "Navigate", kind: "prds",     icon: IconDocs,     label: "Open PRDs",        sk: "⌘ 1" },
+    { section: "Navigate", kind: "tasks",    icon: IconTerminal, label: "Open Tasks",       sk: "⌘ 2" },
+    { section: "Navigate", kind: "apps",     icon: IconApps,     label: "Open Applications",sk: "⌘ 3" },
+    { section: "Navigate", kind: "memory",   icon: IconGraph,    label: "Open Memory",      sk: "⌘ 4" },
+    { section: "Navigate", kind: "agents",   icon: IconUsers,    label: "Open Agents",      sk: "⌘ 5" },
+    { section: "Actions",  kind: "new-prd",  icon: IconPlus,     label: "New PRD in conduit", sk: "⌘ N" },
+    { section: "Actions",  kind: "standup",  icon: IconBolt,     label: "Run standup with Morgan", sk: "⌘ ↵" },
+    { section: "Actions",  kind: "deploy",   icon: IconGit,      label: "Deploy cto-pay to staging", sk: "" },
+    { section: "Ask",      kind: "ask",      icon: IconSparkles, label: "Ask Morgan…",       sk: "⌘ /" },
+  ].filter(i => !q || i.label.toLowerCase().includes(q.toLowerCase()));
+  const sections = Array.from(new Set(items.map(i => i.section)));
+  return (
+    <div className="palette-scrim" onClick={onClose}>
+      <div className="palette" onClick={(e) => e.stopPropagation()}>
+        <input
+          className="palette-input" autoFocus
+          placeholder="Type a command, search a PRD, or ask Morgan…"
+          value={q} onChange={e => setQ(e.target.value)}
+          onKeyDown={e => { if (e.key === "Escape") onClose(); if (e.key === "Enter" && items[0]) { onGo(items[0]); onClose(); } }}
+        />
+        <div className="palette-list">
+          {sections.map(sec => (
+            <div key={sec}>
+              <div className="palette-section">{sec}</div>
+              {items.filter(i => i.section === sec).map((i, idx) => (
+                <div key={i.label} className={`palette-item ${idx === 0 && sec === sections[0] ? "active" : ""}`} onClick={() => { onGo(i); onClose(); }}>
+                  <i.icon size={14} />
+                  <span>{i.label}</span>
+                  {i.sk && <span className="shortcut"><span className="kbd-row">{i.sk.split(" ").map((k, j) => <span key={j} className="kbd">{k}</span>)}</span></span>}
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const TweaksPanel = ({ values, onChange, onClose }) => (
+  <div className="tweaks-panel">
+    <div className="tweaks-head">
+      <div>
+        <div className="tweaks-title">Tweaks</div>
+        <div className="tweaks-tag">accent · motif · density</div>
+      </div>
+      <button className="titlebar-btn" onClick={onClose}><IconClose size={12} /></button>
+    </div>
+    <div className="tweaks-group">
+      <div className="tweaks-label">Motif accent</div>
+      <div className="tweak-row">
+        {Object.entries(ACCENTS).map(([k, a]) => (
+          <button key={k} className={`swatch-btn ${values.motif === k ? "active" : ""}`} onClick={() => onChange({ motif: k })}>
+            <span className="dot" style={{ background: a.hex }} />
+            {a.label}
+          </button>
+        ))}
+      </div>
+    </div>
+    <div className="tweaks-group">
+      <div className="tweaks-label">Claw mark shape</div>
+      <div className="tweak-row">
+        {[["angle","Angle"],["tick","Tick"],["none","Off"]].map(([k, l]) => (
+          <button key={k} className={`motif-btn ${values.claw === k ? "active" : ""}`} onClick={() => onChange({ claw: k })}>{l}</button>
+        ))}
+      </div>
+    </div>
+    <div className="tweaks-group">
+      <div className="tweaks-label">Chrome texture</div>
+      <div className="tweak-row">
+        {[["plain","Plain"],["hatch","Hatch"],["grid","Grid"],["prism","Prism"]].map(([k, l]) => (
+          <button key={k} className={`motif-btn ${values.chrome === k ? "active" : ""}`} onClick={() => onChange({ chrome: k })}>{l}</button>
+        ))}
+      </div>
+    </div>
+  </div>
+);
+
+const App = () => {
+  const [active, setActive] = React.useState(() => localStorage.getItem("cto.tab") || "morgan");
+  const [paletteOpen, setPaletteOpen] = React.useState(false);
+  const [tweaks, setTweaks] = React.useState(TWEAKS);
+  const [tweaksOpen, setTweaksOpen] = React.useState(false);
+
+  React.useEffect(() => localStorage.setItem("cto.tab", active), [active]);
+  React.useEffect(() => { applyMotif(tweaks.motif); applyChrome(tweaks.chrome); applyClaw(tweaks.claw); }, [tweaks]);
+
+  // Keyboard
+  React.useEffect(() => {
+    const onKey = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "k") { e.preventDefault(); setPaletteOpen(o => !o); }
+      if ((e.metaKey || e.ctrlKey) && !isNaN(parseInt(e.key))) {
+        const n = parseInt(e.key);
+        const map = ["morgan","prds","tasks","apps","memory","agents"];
+        if (map[n]) { e.preventDefault(); setActive(map[n]); }
+      }
+      if (e.key === "Escape") setPaletteOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  // Tweak protocol
+  React.useEffect(() => {
+    const onMsg = (e) => {
+      if (e.data?.type === "__activate_edit_mode") setTweaksOpen(true);
+      if (e.data?.type === "__deactivate_edit_mode") setTweaksOpen(false);
+    };
+    window.addEventListener("message", onMsg);
+    window.parent.postMessage({ type: "__edit_mode_available" }, "*");
+    return () => window.removeEventListener("message", onMsg);
+  }, []);
+
+  const applyTweaks = (edits) => {
+    const next = { ...tweaks, ...edits };
+    setTweaks(next);
+    window.parent.postMessage({ type: "__edit_mode_set_keys", edits }, "*");
+  };
+
+  const tab = VIEW_MAP[active] || VIEW_MAP.morgan;
+
+  return (
+    <div className="main-shell" data-screen-label={`CTO · ${tab.label}`}>
+      <Titlebar tab={tab} motif={tweaks.motif} chrome={tweaks.chrome} />
+      <div className="main-body">
+        <Sidebar active={active} onSelect={setActive} />
+        <div className="main-content">
+          <ContentHeader tab={tab} onCommand={() => setPaletteOpen(true)} />
+          <div className="content-body">{tab.comp()}</div>
+        </div>
+      </div>
+      <StatusBar tab={tab} motif={tweaks.motif} claw={tweaks.claw} />
+      <Palette open={paletteOpen} onClose={() => setPaletteOpen(false)} onGo={(i) => { if (VIEW_MAP[i.kind]) setActive(i.kind); }} />
+      {tweaksOpen && <TweaksPanel values={tweaks} onChange={applyTweaks} onClose={() => setTweaksOpen(false)} />}
+    </div>
+  );
+};
+
+setTimeout(() => {
+  ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+}, 30);
+</script>
+</body>
+</html>

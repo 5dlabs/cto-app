@@ -1,0 +1,177 @@
+/* ============================================================
+   CTO Desktop — design tokens
+   Adapted from Logseq (Radix 12-step scale, HSL tokens, shadcn layer)
+   Cooled neutral ramp, 5D-lab motif accent variations.
+   ============================================================ */
+
+:root {
+  /* -------- Radix-like 12-step cool gray (subtle blue tint) -------- */
+  /* L: 11 → 98, chroma ≈ 0.006–0.012, hue ~258 (toward blue/violet) */
+  --rx-gray-01: oklch(14.5% 0.008 258);
+  --rx-gray-02: oklch(17.8% 0.009 258);
+  --rx-gray-03: oklch(21.5% 0.010 258);
+  --rx-gray-04: oklch(25.0% 0.011 258);
+  --rx-gray-05: oklch(29.0% 0.012 258);
+  --rx-gray-06: oklch(34.5% 0.012 258);
+  --rx-gray-07: oklch(41.0% 0.012 258);
+  --rx-gray-08: oklch(52.0% 0.012 258);
+  --rx-gray-09: oklch(61.0% 0.012 258);
+  --rx-gray-10: oklch(70.0% 0.010 258);
+  --rx-gray-11: oklch(82.0% 0.008 258);
+  --rx-gray-12: oklch(96.5% 0.004 258);
+
+  --rx-gray-06-alpha: oklch(34.5% 0.012 258 / 0.55);
+  --rx-gray-07-alpha: oklch(41.0% 0.012 258 / 0.55);
+
+  /* -------- Motif accent presets (toggled via data-motif) --------
+     Each motif picks a --accent hue. Shades are auto-derived. */
+
+  /* Default: C — Deep violet ("studio/creative-tech") */
+  --accent-hue: 282;
+  --accent-chroma: 0.165;
+
+  --accent-01: oklch(20% var(--accent-chroma) var(--accent-hue));
+  --accent-02: oklch(28% var(--accent-chroma) var(--accent-hue));
+  --accent-03: oklch(36% calc(var(--accent-chroma) * 1.05) var(--accent-hue));
+  --accent-05: oklch(52% calc(var(--accent-chroma) * 1.1) var(--accent-hue));
+  --accent-07: oklch(63% calc(var(--accent-chroma) * 1.1) var(--accent-hue));
+  --accent-09: oklch(72% calc(var(--accent-chroma) * 0.9) var(--accent-hue));
+  --accent-11: oklch(86% calc(var(--accent-chroma) * 0.5) var(--accent-hue));
+
+  --accent: var(--accent-07);
+  --accent-soft: oklch(63% calc(var(--accent-chroma) * 1.1) var(--accent-hue) / 0.12);
+  --accent-softer: oklch(63% calc(var(--accent-chroma) * 1.1) var(--accent-hue) / 0.06);
+  --accent-border: oklch(63% calc(var(--accent-chroma) * 1.1) var(--accent-hue) / 0.35);
+  --accent-glow: oklch(63% calc(var(--accent-chroma) * 1.1) var(--accent-hue) / 0.25);
+
+  /* Semantic surface tokens (shadcn-style) */
+  --bg-app: var(--rx-gray-01);
+  --bg-chrome: oklch(11.5% 0.008 258);
+  --bg-sidebar: var(--rx-gray-01);
+  --bg-surface: var(--rx-gray-02);
+  --bg-surface-2: var(--rx-gray-03);
+  --bg-surface-3: var(--rx-gray-04);
+  --bg-hover: var(--rx-gray-03);
+  --bg-active: var(--rx-gray-04);
+
+  --fg-primary: var(--rx-gray-12);
+  --fg-secondary: var(--rx-gray-11);
+  --fg-muted: var(--rx-gray-09);
+  --fg-subtle: var(--rx-gray-08);
+  --fg-faint: var(--rx-gray-07);
+
+  --border-subtle: oklch(25.0% 0.011 258 / 0.7);
+  --border-default: var(--rx-gray-05);
+  --border-strong: var(--rx-gray-06);
+
+  /* Semantic state */
+  --state-success: oklch(72% 0.15 155);
+  --state-warning: oklch(78% 0.15 82);
+  --state-danger: oklch(65% 0.22 22);
+  --state-info: oklch(72% 0.12 230);
+
+  /* Structure */
+  --radius: 8px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+  --radius-xl: 14px;
+
+  --shadow-1: 0 1px 0 0 rgba(255, 255, 255, 0.03) inset, 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-2: 0 1px 0 0 rgba(255, 255, 255, 0.04) inset, 0 4px 14px rgba(0, 0, 0, 0.5);
+  --shadow-lift: 0 1px 0 0 rgba(255, 255, 255, 0.05) inset, 0 10px 30px rgba(0, 0, 0, 0.55);
+
+  --kbd-glow-top: rgba(255, 255, 255, 0.12);
+  --kbd-glow-bottom: rgba(0, 0, 0, 0.35);
+
+  /* Type */
+  --font-ui: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --font-display: "Inter", var(--font-ui);
+
+  /* Motion */
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Motif variants — swap accent + optional surface tint */
+[data-motif="violet"] {
+  --accent-hue: 282;
+  --accent-chroma: 0.165;
+}
+[data-motif="amber"] {
+  --accent-hue: 68;
+  --accent-chroma: 0.155;
+}
+[data-motif="cyan"] {
+  --accent-hue: 215;
+  --accent-chroma: 0.14;
+}
+[data-motif="chartreuse"] {
+  --accent-hue: 130;
+  --accent-chroma: 0.16;
+}
+
+/* Chrome variants */
+[data-chrome="hatch"] {
+  --chrome-texture: repeating-linear-gradient(
+    45deg,
+    transparent 0px,
+    transparent 3px,
+    rgba(255, 255, 255, 0.008) 3px,
+    rgba(255, 255, 255, 0.008) 4px
+  );
+}
+[data-chrome="grid"] {
+  --chrome-texture:
+    linear-gradient(rgba(255, 255, 255, 0.015) 1px, transparent 1px) 0 0 / 24px 24px,
+    linear-gradient(90deg, rgba(255, 255, 255, 0.015) 1px, transparent 1px) 0 0 / 24px 24px;
+}
+[data-chrome="plain"] {
+  --chrome-texture: none;
+}
+[data-chrome="prism"] {
+  --chrome-texture: radial-gradient(
+    circle at 10% 0%,
+    oklch(63% 0.15 var(--accent-hue) / 0.08),
+    transparent 40%
+  ),
+  radial-gradient(
+    circle at 90% 100%,
+    oklch(63% 0.15 calc(var(--accent-hue) + 40) / 0.05),
+    transparent 35%
+  );
+}
+
+/* Base reset */
+* {
+  box-sizing: border-box;
+}
+html, body {
+  margin: 0;
+  padding: 0;
+  font-family: var(--font-ui);
+  font-feature-settings: "cv11", "ss01", "ss03";
+  color: var(--fg-primary);
+  background: var(--bg-app);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow: hidden;
+}
+
+button {
+  font-family: inherit;
+  color: inherit;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--rx-gray-04); border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background: var(--rx-gray-06); background-clip: padding-box; border: 2px solid transparent; }
+
+/* Selection */
+::selection {
+  background: var(--accent-soft);
+  color: var(--fg-primary);
+}
