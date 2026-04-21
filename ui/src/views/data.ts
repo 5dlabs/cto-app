@@ -592,8 +592,9 @@ export const AGENTS: AgentCard[] = [
   },
 ];
 
+// `ew=false` is code-server's exit-welcome flag; keeps the first-run walkthrough suppressed.
 export const CODER_URL =
-  "https://coder.5dlabs.ai/?folder=/home/coder/workspace/repos";
+  "https://coder.5dlabs.ai/?folder=/home/coder/workspace/repos&ew=false";
 
 export type TaskState = "queued" | "running" | "blocked" | "review" | "done";
 

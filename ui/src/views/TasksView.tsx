@@ -1,24 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   IconTerminal,
-  IconVideo,
-  IconMic,
-  IconChat,
   IconFilter,
   IconSearch,
   IconExternal,
   IconClose,
-  IconBolt,
   IconRefresh,
-  IconSend,
-  IconFile,
   IconGit,
-  IconChevRight,
 } from "./icons";
 import { AGENTS, TASKS, CODER_URL, type TaskCard, type TaskState } from "./data";
 
 type StateFilter = "all" | TaskState;
-type Mode = "video" | "voice" | "text";
 type SessionView = "list" | "session";
 
 const STATE_LABEL: Record<TaskState, string> = {
@@ -216,22 +208,14 @@ function SessionStage({
   onBack: () => void;
   onSwitchTask: (id: string) => void;
 }) {
-  const agent = AGENTS.find((a) => a.id === task.agentId);
-  const [mode, setMode] = useState<Mode>("video");
-  const [prompt, setPrompt] = useState("");
+  void onSwitchTask;
   const [tweaksOpen, setTweaksOpen] = useState(true);
-  const [rail, setRail] = useState<"overview" | "files" | "branches">("overview");
-  const hue = agent?.hue ?? 200;
 
   const coderUrl = useMemo(() => {
     const base = CODER_URL;
     if (!task.branch) return base;
     return `${base}&branch=${encodeURIComponent(task.branch)}`;
   }, [task.branch]);
-
-  const runningPeers = TASKS.filter(
-    (t) => t.state === "running" && t.id !== task.id,
-  ).slice(0, 4);
 
   return (
     <div className="session">
@@ -277,173 +261,7 @@ function SessionStage({
         </a>
       </div>
 
-      <div className="session__body">
-        <aside className="session__agent">
-          <div className="session__agent-head">
-            <div className="session__agent-brand">
-              <span className="session__agent-brand-5d">5D</span>
-              <span className="session__agent-brand-title">
-                5DLABS CTO: CTO AGENTS
-              </span>
-            </div>
-            <div className="session__agent-modes">
-              <button
-                type="button"
-                className={`session__mode-chip${mode === "video" ? " is-active" : ""}`}
-                onClick={() => setMode("video")}
-              >
-                <IconVideo size={10} /> Vid
-              </button>
-              <button
-                type="button"
-                className={`session__mode-chip${mode === "voice" ? " is-active" : ""}`}
-                onClick={() => setMode("voice")}
-              >
-                <IconMic size={10} /> Mic
-              </button>
-              <button
-                type="button"
-                className={`session__mode-chip${mode === "text" ? " is-active" : ""}`}
-                onClick={() => setMode("text")}
-              >
-                <IconChat size={10} /> Txt
-              </button>
-            </div>
-          </div>
-
-          <div className="session__agent-stage">
-            <div className="session__agent-rail">
-              <button
-                type="button"
-                className={`session__rail-btn${rail === "overview" ? " is-active" : ""}`}
-                onClick={() => setRail("overview")}
-                aria-label="Overview"
-                title="Overview"
-              >
-                5D
-              </button>
-              <button
-                type="button"
-                className={`session__rail-btn${rail === "files" ? " is-active" : ""}`}
-                onClick={() => setRail("files")}
-                aria-label="Files"
-                title="Files"
-              >
-                <IconFile size={14} />
-              </button>
-              <button
-                type="button"
-                className={`session__rail-btn${rail === "branches" ? " is-active" : ""}`}
-                onClick={() => setRail("branches")}
-                aria-label="Branches"
-                title="Branches"
-              >
-                <IconGit size={14} />
-              </button>
-            </div>
-
-            <div className="session__agent-stage-main">
-              <div
-                className="session__agent-portrait"
-                style={{ ["--hue" as string]: `${hue}` }}
-              >
-                <div className="session__agent-portrait-ring" />
-                <div className="session__agent-portrait-inner">
-                  {agent?.name.charAt(0) ?? "?"}
-                </div>
-              </div>
-              <div className="session__agent-name">{agent?.name ?? task.agentId}</div>
-              <div className="session__agent-meta tiny muted">
-                {task.cli} · {task.harness} · listening
-              </div>
-
-              {rail === "overview" && runningPeers.length > 0 ? (
-                <div className="session__peers">
-                  <div className="tiny muted">Other active sessions</div>
-                  {runningPeers.map((peer) => {
-                    const a = AGENTS.find((x) => x.id === peer.agentId);
-                    return (
-                      <button
-                        key={peer.id}
-                        type="button"
-                        className="session__peer"
-                        onClick={() => onSwitchTask(peer.id)}
-                      >
-                        <span
-                          className="session__peer-dot"
-                          style={{ background: `oklch(0.65 0.14 ${a?.hue ?? 200})` }}
-                        />
-                        <span className="session__peer-name">{a?.name ?? peer.agentId}</span>
-                        <span className="session__peer-branch mono tiny muted">
-                          {peer.branch ?? peer.projectName}
-                        </span>
-                        <IconChevRight size={10} />
-                      </button>
-                    );
-                  })}
-                </div>
-              ) : null}
-
-              {rail === "files" ? (
-                <div className="session__peers">
-                  <div className="tiny muted">Files in this session</div>
-                  {(task.files ?? []).map((f) => (
-                    <div key={f.path} className="session__peer" style={{ cursor: "default" }}>
-                      <IconFile size={11} />
-                      <span className="session__peer-name">{f.label}</span>
-                      <span className="session__peer-branch mono tiny muted">
-                        {f.language}
-                      </span>
-                    </div>
-                  ))}
-                  {(task.files ?? []).length === 0 ? (
-                    <div className="tiny muted">
-                      File list is sourced from the embedded code-server.
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
-
-              {rail === "branches" ? (
-                <div className="session__peers">
-                  <div className="tiny muted">Branches on this repo</div>
-                  {[task.branch, "main"].filter(Boolean).map((b) => (
-                    <div key={b as string} className="session__peer" style={{ cursor: "default" }}>
-                      <IconGit size={11} />
-                      <span className="session__peer-name">{b}</span>
-                    </div>
-                  ))}
-                </div>
-              ) : null}
-            </div>
-          </div>
-
-          <form
-            className="session__prompt"
-            onSubmit={(e) => {
-              e.preventDefault();
-              setPrompt("");
-            }}
-          >
-            <input
-              type="text"
-              placeholder="Describe what to build"
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              className="session__prompt-input"
-            />
-            <button type="submit" className="session__prompt-send" aria-label="Send">
-              <IconSend size={12} />
-            </button>
-          </form>
-          <div className="session__prompt-foot">
-            <span className="chip">
-              <IconBolt size={10} /> Auto
-            </span>
-            <span className="tiny muted">Offline</span>
-          </div>
-        </aside>
-
+      <div className="session__body session__body--solo">
         <section className="session__coder">
           <iframe
             id="coder-iframe"
@@ -459,7 +277,7 @@ function SessionStage({
             <span>·</span>
             <span>{task.cli.split(" ")[0]}</span>
             <span>·</span>
-            <span>live diff from code-server</span>
+            <span>agent UI lives inside the code-server sidebar extension</span>
           </div>
         </section>
       </div>
