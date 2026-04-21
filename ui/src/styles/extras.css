@@ -1219,3 +1219,117 @@
 
 /* Session tweaks layout override — take over the pane */
 .pane--wide .pane__body:has(.session) { padding-bottom: 0; }
+
+/* ----- Applications · Runtime (Lens-style) ----- */
+.runtime-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+.runtime-stat {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  padding: 12px 14px;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.runtime-stat__eyebrow {
+  font-size: 10px; letter-spacing: 1px; text-transform: uppercase;
+  color: var(--fg-muted);
+}
+.runtime-stat__value {
+  font-family: var(--font-display);
+  font-size: 24px; font-weight: 600;
+  color: var(--fg-primary);
+  letter-spacing: -0.3px;
+}
+.runtime-stat__unit { font-size: 12px; font-weight: 400; color: var(--fg-muted); margin-left: 2px; }
+.runtime-stat__sub {
+  font-size: 11.5px; color: var(--fg-muted);
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+}
+.runtime-stat__sub .dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
+.runtime-stat__sub .dot--ok { background: var(--state-success); }
+.runtime-stat__sub .dot--warn { background: var(--state-warning); }
+.runtime-stat__sub .dot--err { background: var(--state-danger); }
+
+.pod-table { display: flex; flex-direction: column; }
+.pod-table__head,
+.pod-table__row {
+  display: grid;
+  grid-template-columns: minmax(260px, 2.4fr) 90px minmax(110px, 1fr) 120px 70px 70px;
+  gap: 12px;
+  padding: 8px 10px;
+  align-items: center;
+  font-size: 12.5px;
+}
+.pod-table__head {
+  font-size: 10px; letter-spacing: 1px; text-transform: uppercase;
+  color: var(--fg-muted);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.pod-table__row {
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  text-align: left;
+  color: var(--fg-secondary);
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.pod-table__row:hover { background: var(--bg-surface-2); }
+.pod-table__row--active {
+  background: var(--bg-surface-2);
+  border-color: var(--border-default);
+}
+.pod-table__name {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--fg-primary);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.pod-table__num { text-align: right; font-variant-numeric: tabular-nums; }
+.pod-table__dots { display: inline-flex; gap: 4px; }
+.pod-table__dots .dot {
+  width: 8px; height: 8px; border-radius: 50%; display: inline-block;
+}
+.pod-table__dots .dot--ok { background: var(--state-success); }
+.pod-table__dots .dot--warn { background: var(--state-warning); }
+.pod-table__dots .dot--err { background: var(--state-danger); }
+
+.log-panel {
+  margin: 0;
+  background: var(--bg-elev-1, #0e1117);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.65;
+  color: var(--fg-secondary);
+  max-height: 240px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.log-line { opacity: 0.92; }
+.log-line + .log-line { margin-top: 2px; }
+
+.argo-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+}
+.argo-card {
+  background: var(--bg-surface-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.argo-card__name {
+  font-family: var(--font-mono);
+  font-size: 12px; font-weight: 600;
+  color: var(--fg-primary);
+}
+.argo-card__row { display: flex; gap: 6px; flex-wrap: wrap; }
