@@ -486,59 +486,77 @@
 }
 .keys-row__actions { display: inline-flex; gap: 6px; }
 
-/* ----- GitLab embed skin ----- */
-.gitlab-embed {
+/* ----- GitLab full-bleed iframe (replaces the old mock facade) ----- */
+.gitlab-fullbleed {
+  /* eat the .content padding so the iframe sits flush */
+  margin: -20px -24px;
+  height: calc(100vh - var(--app-header-h, 56px));
+  display: flex;
+  flex-direction: column;
   background: var(--bg-surface);
-  border: 1px solid var(--border-subtle);
-  border-radius: 10px;
-  overflow: hidden;
-  display: flex; flex-direction: column;
-  min-height: 600px;
 }
-.gitlab-embed__bar {
+.gitlab-fullbleed__bar {
   display: flex; align-items: center; gap: 8px;
-  padding: 10px 14px;
+  padding: 8px 14px;
   background: oklch(12% 0.03 280);
   border-bottom: 1px solid var(--border-subtle);
   color: var(--fg-muted);
-  font-family: var(--font-mono); font-size: 11.5px;
+  font-size: 11.5px;
+  flex-shrink: 0;
 }
-.gitlab-embed__stage {
-  flex: 1;
-  display: grid; grid-template-columns: 220px 1fr;
+.gitlab-fullbleed__host {
+  color: var(--fg-primary);
+  font-weight: 600;
 }
-.gitlab-embed__nav {
-  background: oklch(10% 0.03 280);
-  border-right: 1px solid var(--border-subtle);
-  padding: 12px;
-  display: flex; flex-direction: column; gap: 4px;
+.gitlab-fullbleed__path {
+  color: var(--fg-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
 }
-.gitlab-embed__nav-header {
-  font-size: 10px; letter-spacing: 1.2px; text-transform: uppercase;
-  color: var(--fg-faint);
-  padding: 4px 10px 6px;
+.gitlab-fullbleed__spacer { flex: 1; }
+.gitlab-fullbleed__divider {
+  width: 1px; height: 18px;
+  background: var(--border-subtle);
+  margin: 0 4px;
 }
-.gitlab-embed__nav-item {
-  display: flex; align-items: center; gap: 8px;
-  padding: 6px 10px; border-radius: 6px;
-  color: var(--fg-secondary); font-size: 12.5px;
+.gitlab-fullbleed__chip {
+  padding: 3px 10px;
+  background: transparent;
+  color: var(--fg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 120ms, color 120ms, border-color 120ms;
+}
+.gitlab-fullbleed__chip:hover {
+  background: var(--bg-hover);
+  color: var(--fg-primary);
+}
+.gitlab-fullbleed__chip--active {
+  background: var(--accent-soft);
+  color: var(--fg-primary);
+  border-color: var(--accent);
+}
+.gitlab-fullbleed__icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px;
+  background: transparent;
+  color: var(--fg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
   cursor: pointer;
 }
-.gitlab-embed__nav-item:hover { background: oklch(20% 0.02 280); color: var(--fg-primary); }
-.gitlab-embed__nav-item--active { background: var(--accent-soft); color: var(--fg-primary); }
-.gitlab-embed__main {
-  background: oklch(8% 0.02 280);
-  padding: 20px;
-  display: flex; flex-direction: column; gap: 14px;
-  font-size: 12.5px; color: var(--fg-secondary);
+.gitlab-fullbleed__icon:hover {
+  background: var(--bg-hover);
+  color: var(--fg-primary);
 }
-.gl-row {
-  display: grid; grid-template-columns: 1fr auto auto auto;
-  gap: 14px; align-items: center;
-  padding: 10px 14px;
+.gitlab-fullbleed__iframe {
+  flex: 1;
+  width: 100%;
+  border: 0;
   background: var(--bg-surface);
-  border: 1px solid var(--border-subtle);
-  border-radius: 8px;
+  min-height: 0;
 }
 
 /* ----- Task chrome (video/voice/text + harness) ----- */
