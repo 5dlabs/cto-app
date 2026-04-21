@@ -5,23 +5,25 @@
    ============================================================ */
 
 :root {
-  /* -------- Radix-like 12-step cool gray (subtle blue tint) -------- */
-  /* L: 11 → 98, chroma ≈ 0.006–0.012, hue ~258 (toward blue/violet) */
-  --rx-gray-01: oklch(14.5% 0.008 258);
-  --rx-gray-02: oklch(17.8% 0.009 258);
-  --rx-gray-03: oklch(21.5% 0.010 258);
-  --rx-gray-04: oklch(25.0% 0.011 258);
-  --rx-gray-05: oklch(29.0% 0.012 258);
-  --rx-gray-06: oklch(34.5% 0.012 258);
-  --rx-gray-07: oklch(41.0% 0.012 258);
-  --rx-gray-08: oklch(52.0% 0.012 258);
-  --rx-gray-09: oklch(61.0% 0.012 258);
-  --rx-gray-10: oklch(70.0% 0.010 258);
-  --rx-gray-11: oklch(82.0% 0.008 258);
-  --rx-gray-12: oklch(96.5% 0.004 258);
+  /* -------- Radix-like 12-step warm-dark ramp (violet cast) -------- */
+  /* L: 14 → 97, chroma ≈ 0.006–0.012, hue 282 (matches --accent-hue)
+     Prototype reference: #1c1c21 bg, #191920 sidebar, #212128 surface,
+     #28282f elevated, from 5d-sidebar-items-draft / Logseq motif. */
+  --rx-gray-01: oklch(15.5% 0.008 282);
+  --rx-gray-02: oklch(18.5% 0.009 282);
+  --rx-gray-03: oklch(22.0% 0.010 282);
+  --rx-gray-04: oklch(25.5% 0.011 282);
+  --rx-gray-05: oklch(29.5% 0.012 282);
+  --rx-gray-06: oklch(35.0% 0.012 282);
+  --rx-gray-07: oklch(41.5% 0.012 282);
+  --rx-gray-08: oklch(52.5% 0.012 282);
+  --rx-gray-09: oklch(61.5% 0.012 282);
+  --rx-gray-10: oklch(70.5% 0.010 282);
+  --rx-gray-11: oklch(82.0% 0.008 282);
+  --rx-gray-12: oklch(96.5% 0.004 282);
 
-  --rx-gray-06-alpha: oklch(34.5% 0.012 258 / 0.55);
-  --rx-gray-07-alpha: oklch(41.0% 0.012 258 / 0.55);
+  --rx-gray-06-alpha: oklch(35.0% 0.012 282 / 0.55);
+  --rx-gray-07-alpha: oklch(41.5% 0.012 282 / 0.55);
 
   /* -------- Motif accent presets (toggled via data-motif) --------
      Each motif picks a --accent hue. Shades are auto-derived. */
@@ -46,8 +48,8 @@
 
   /* Semantic surface tokens (shadcn-style) */
   --bg-app: var(--rx-gray-01);
-  --bg-chrome: oklch(11.5% 0.008 258);
-  --bg-sidebar: var(--rx-gray-01);
+  --bg-chrome: oklch(12.5% 0.008 282);
+  --bg-sidebar: oklch(13.5% 0.008 282);
   --bg-surface: var(--rx-gray-02);
   --bg-surface-2: var(--rx-gray-03);
   --bg-surface-3: var(--rx-gray-04);
@@ -60,7 +62,7 @@
   --fg-subtle: var(--rx-gray-08);
   --fg-faint: var(--rx-gray-07);
 
-  --border-subtle: oklch(25.0% 0.011 258 / 0.7);
+  --border-subtle: oklch(25.5% 0.011 282 / 0.7);
   --border-default: var(--rx-gray-05);
   --border-strong: var(--rx-gray-06);
 
