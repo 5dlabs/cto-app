@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   IconSend,
   IconVideo,
@@ -9,11 +9,151 @@ import {
   IconExternal,
 } from "./icons";
 import { LemonSliceWidget, PRODUCT_MORGAN_AGENT_ID } from "../components/LemonSliceWidget";
+import { MorganAvatar } from "../components/MorganAvatar";
+import { VoiceClient, type VoiceStatus } from "../components/VoiceClient";
 
 type Mode = "video" | "voice" | "text";
 
+const MORGAN_PORTRAIT = "/uploads/morgan-hero.png";
+
+function statusLabel(status: VoiceStatus, connected: boolean): string {
+  if (!connected) return "DISCONNECTED";
+  switch (status) {
+    case "connecting":
+      return "CONNECTING";
+    case "listening":
+      return "LISTENING";
+    case "streaming_user":
+      return "YOU · SPEAKING";
+    case "awaiting_reply":
+      return "MORGAN · THINKING";
+    case "speaking":
+      return "MORGAN · SPEAKING";
+    case "error":
+      return "ERROR";
+    default:
+      return "IDLE";
+  }
+}
+
 export function MorganView() {
   const [mode, setMode] = useState<Mode>("video");
+  const [voiceConnected, setVoiceConnected] = useState(false);
+  const [voiceStatus, setVoiceStatus] = useState<VoiceStatus>("idle");
+  const [voiceError, setVoiceError] = useState<string | null>(null);
+  const [transcript, setTranscript] = useState("");
+  const [reply, setReply] = useState("");
+  const [inputAnalyser, setInputAnalyser] = useState<AnalyserNode | null>(null);
+  const [outputAnalyser, setOutputAnalyser] = useState<AnalyserNode | null>(null);
+  const [textDraft, setTextDraft] = useState("");
+  const clientRef = useRef<VoiceClient | null>(null);
+
+  const ensureClient = useCallback((): VoiceClient => {
+    if (clientRef.current) return clientRef.current;
+    const client = new VoiceClient({
+      onStatus: setVoiceStatus,
+      onTranscript: (t) => setTranscript(t),
+      onReplyDelta: (t) => setReply((prev) => prev + t),
+      onReplyText: (t) => setReply(t),
+      onTurnDone: () => {
+        // keep transcript/reply on screen; next turn will reset on start
+      },
+      onError: (err) => setVoiceError(err),
+      onInputAnalyser: setInputAnalyser,
+      onOutputAnalyser: setOutputAnalyser,
+    });
+    clientRef.current = client;
+    return client;
+  }, []);
+
+  const connectVoice = useCallback(async () => {
+    setVoiceError(null);
+    const client = ensureClient();
+    try {
+      await client.connect();
+      setVoiceConnected(true);
+    } catch (err) {
+      setVoiceError(err instanceof Error ? err.message : String(err));
+    }
+  }, [ensureClient]);
+
+  const disconnectVoice = useCallback(() => {
+    clientRef.current?.close();
+    clientRef.current = null;
+    setVoiceConnected(false);
+    setVoiceStatus("idle");
+    setInputAnalyser(null);
+    setOutputAnalyser(null);
+  }, []);
+
+  const startUtterance = useCallback(async () => {
+    setTranscript("");
+    setReply("");
+    const client = ensureClient();
+    if (!voiceConnected) {
+      await client.connect();
+      setVoiceConnected(true);
+    }
+    try {
+      await client.startUtterance();
+    } catch (err) {
+      setVoiceError(err instanceof Error ? err.message : String(err));
+    }
+  }, [ensureClient, voiceConnected]);
+
+  const endUtterance = useCallback(async () => {
+    try {
+      await clientRef.current?.endUtterance(textDraft);
+      setTextDraft("");
+    } catch (err) {
+      setVoiceError(err instanceof Error ? err.message : String(err));
+    }
+  }, [textDraft]);
+
+  const sendTextTurn = useCallback(async () => {
+    if (!textDraft.trim()) return;
+    setTranscript(textDraft);
+    setReply("");
+    const client = ensureClient();
+    if (!voiceConnected) {
+      try {
+        await client.connect();
+        setVoiceConnected(true);
+      } catch (err) {
+        setVoiceError(err instanceof Error ? err.message : String(err));
+        return;
+      }
+    }
+    client.sendText(textDraft);
+    setTextDraft("");
+  }, [ensureClient, textDraft, voiceConnected]);
+
+  // Auto-connect when entering voice mode; disconnect when leaving.
+  useEffect(() => {
+    if (mode === "voice") {
+      void connectVoice();
+    } else if (clientRef.current) {
+      disconnectVoice();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode]);
+
+  useEffect(
+    () => () => {
+      clientRef.current?.close();
+      clientRef.current = null;
+    },
+    [],
+  );
+
+  const avatarState =
+    voiceStatus === "streaming_user"
+      ? "listening"
+      : voiceStatus === "awaiting_reply"
+      ? "thinking"
+      : voiceStatus === "speaking"
+      ? "speaking"
+      : "idle";
   return (
     <div className="section">
       <div className="debate" style={{ minHeight: 520 }}>
@@ -32,6 +172,85 @@ export function MorganView() {
             {mode === "video" ? (
               <div style={{ width: "100%", height: "100%", minHeight: 440, display: "flex", justifyContent: "center" }}>
                 <LemonSliceWidget agentId={PRODUCT_MORGAN_AGENT_ID} autoStartConversation={false} />
+              </div>
+            ) : mode === "voice" ? (
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  gap: 14,
+                  padding: "24px 0",
+                }}
+              >
+                <MorganAvatar
+                  src={MORGAN_PORTRAIT}
+                  inputAnalyser={inputAnalyser}
+                  outputAnalyser={outputAnalyser}
+                  state={avatarState}
+                  size={340}
+                />
+                <div style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 12, letterSpacing: 0.8 }}>
+                  <span style={{ opacity: 0.7 }}>Morgan</span>
+                  <span className="debate__tile-speaking">● {statusLabel(voiceStatus, voiceConnected)}</span>
+                </div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  {voiceStatus === "streaming_user" ? (
+                    <button
+                      type="button"
+                      className="primary-btn"
+                      onClick={() => void endUtterance()}
+                    >
+                      <IconMic size={12} /> Stop & send
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="primary-btn"
+                      onClick={() => void startUtterance()}
+                      disabled={voiceStatus === "awaiting_reply" || voiceStatus === "speaking"}
+                    >
+                      <IconMic size={12} /> Hold to talk
+                    </button>
+                  )}
+                  {voiceConnected ? (
+                    <button type="button" className="debate__mode-btn" onClick={disconnectVoice}>
+                      Disconnect
+                    </button>
+                  ) : (
+                    <button type="button" className="debate__mode-btn" onClick={() => void connectVoice()}>
+                      Connect
+                    </button>
+                  )}
+                </div>
+                {(transcript || reply || voiceError) && (
+                  <div
+                    style={{
+                      width: "min(520px, 90%)",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 6,
+                      fontSize: 12.5,
+                      lineHeight: 1.55,
+                    }}
+                  >
+                    {voiceError && (
+                      <div style={{ color: "#f87171" }}>voice-bridge: {voiceError}</div>
+                    )}
+                    {transcript && (
+                      <div style={{ opacity: 0.78 }}>
+                        <strong style={{ opacity: 0.6 }}>You: </strong>
+                        {transcript}
+                      </div>
+                    )}
+                    {reply && (
+                      <div>
+                        <strong style={{ opacity: 0.6 }}>Morgan: </strong>
+                        {reply}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             ) : (
               <div
@@ -163,9 +382,21 @@ export function MorganView() {
         <div className="row" style={{ gap: 8 }}>
           <input
             className="field__input"
-            placeholder="Message Morgan — she'll route to the right agent"
+            placeholder={
+              mode === "voice"
+                ? "Type to merge with your voice turn — press Send to mix in"
+                : "Message Morgan — she'll route to the right agent"
+            }
+            value={textDraft}
+            onChange={(e) => setTextDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                void sendTextTurn();
+              }
+            }}
           />
-          <button type="button" className="primary-btn">
+          <button type="button" className="primary-btn" onClick={() => void sendTextTurn()}>
             <IconSend size={12} /> Send
           </button>
         </div>
