@@ -209,7 +209,7 @@ function SessionStage({
   onSwitchTask: (id: string) => void;
 }) {
   void onSwitchTask;
-  const [tweaksOpen, setTweaksOpen] = useState(true);
+  const [tweaksOpen, setTweaksOpen] = useState(false);
 
   const coderUrl = useMemo(() => {
     const base = CODER_URL;
@@ -218,31 +218,36 @@ function SessionStage({
   }, [task.branch]);
 
   return (
-    <div className="session">
-      <div className="session__chrome">
+    <div className="session-full">
+      <iframe
+        id="coder-iframe"
+        className="session-full__iframe"
+        src={coderUrl}
+        title="Coder workspace — task CRD"
+        allow="clipboard-read; clipboard-write; fullscreen"
+      />
+
+      <div className="session-full__overlay">
         <button
           type="button"
-          className="ghost-btn"
+          className="session-full__back"
           onClick={onBack}
           aria-label="Back to sessions list"
         >
           ← Sessions
         </button>
         {task.branch ? (
-          <span className="session__branch">
+          <span className="session-full__branch">
             <IconGit size={12} /> {task.branch}
           </span>
         ) : null}
         <span className={`chip chip--${STATE_CHIP[task.state]}`}>
           {STATE_LABEL[task.state]}
         </span>
-        <span className="session__spacer" />
-        <span className="session__url mono tiny muted">
-          coder.5dlabs.ai/?folder=/home/coder/workspace/repos/{task.projectId}
-        </span>
+        <span className="session-full__spacer" />
         <button
           type="button"
-          className="ghost-btn"
+          className="session-full__icon-btn"
           title="Reload workspace"
           onClick={() => {
             const el = document.getElementById("coder-iframe") as HTMLIFrameElement | null;
@@ -252,34 +257,14 @@ function SessionStage({
           <IconRefresh size={12} />
         </button>
         <a
-          className="primary-btn"
+          className="session-full__icon-btn"
           href={coderUrl}
           target="_blank"
           rel="noreferrer"
+          title="Open in new tab"
         >
-          Open full <IconExternal size={10} />
+          <IconExternal size={12} />
         </a>
-      </div>
-
-      <div className="session__body session__body--solo">
-        <section className="session__coder">
-          <iframe
-            id="coder-iframe"
-            className="session__coder-iframe"
-            src={coderUrl}
-            title="Coder workspace — task CRD"
-            allow="clipboard-read; clipboard-write; fullscreen"
-          />
-          <div className="session__coder-foot tiny muted">
-            <span className="mono">{task.branch ?? ""}</span>
-            <span>·</span>
-            <span>{task.harness}</span>
-            <span>·</span>
-            <span>{task.cli.split(" ")[0]}</span>
-            <span>·</span>
-            <span>agent UI lives inside the code-server sidebar extension</span>
-          </div>
-        </section>
       </div>
 
       {tweaksOpen ? (
@@ -287,7 +272,7 @@ function SessionStage({
       ) : (
         <button
           type="button"
-          className="session__tweaks-open"
+          className="session-full__tweaks-open"
           onClick={() => setTweaksOpen(true)}
         >
           Tweaks
