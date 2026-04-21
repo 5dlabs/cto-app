@@ -486,59 +486,77 @@
 }
 .keys-row__actions { display: inline-flex; gap: 6px; }
 
-/* ----- GitLab embed skin ----- */
-.gitlab-embed {
+/* ----- GitLab full-bleed iframe (replaces the old mock facade) ----- */
+.gitlab-fullbleed {
+  /* eat the .content padding so the iframe sits flush */
+  margin: -20px -24px;
+  height: calc(100vh - var(--app-header-h, 56px));
+  display: flex;
+  flex-direction: column;
   background: var(--bg-surface);
-  border: 1px solid var(--border-subtle);
-  border-radius: 10px;
-  overflow: hidden;
-  display: flex; flex-direction: column;
-  min-height: 600px;
 }
-.gitlab-embed__bar {
+.gitlab-fullbleed__bar {
   display: flex; align-items: center; gap: 8px;
-  padding: 10px 14px;
+  padding: 8px 14px;
   background: oklch(12% 0.03 280);
   border-bottom: 1px solid var(--border-subtle);
   color: var(--fg-muted);
-  font-family: var(--font-mono); font-size: 11.5px;
+  font-size: 11.5px;
+  flex-shrink: 0;
 }
-.gitlab-embed__stage {
-  flex: 1;
-  display: grid; grid-template-columns: 220px 1fr;
+.gitlab-fullbleed__host {
+  color: var(--fg-primary);
+  font-weight: 600;
 }
-.gitlab-embed__nav {
-  background: oklch(10% 0.03 280);
-  border-right: 1px solid var(--border-subtle);
-  padding: 12px;
-  display: flex; flex-direction: column; gap: 4px;
+.gitlab-fullbleed__path {
+  color: var(--fg-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
 }
-.gitlab-embed__nav-header {
-  font-size: 10px; letter-spacing: 1.2px; text-transform: uppercase;
-  color: var(--fg-faint);
-  padding: 4px 10px 6px;
+.gitlab-fullbleed__spacer { flex: 1; }
+.gitlab-fullbleed__divider {
+  width: 1px; height: 18px;
+  background: var(--border-subtle);
+  margin: 0 4px;
 }
-.gitlab-embed__nav-item {
-  display: flex; align-items: center; gap: 8px;
-  padding: 6px 10px; border-radius: 6px;
-  color: var(--fg-secondary); font-size: 12.5px;
+.gitlab-fullbleed__chip {
+  padding: 3px 10px;
+  background: transparent;
+  color: var(--fg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 120ms, color 120ms, border-color 120ms;
+}
+.gitlab-fullbleed__chip:hover {
+  background: var(--bg-hover);
+  color: var(--fg-primary);
+}
+.gitlab-fullbleed__chip--active {
+  background: var(--accent-soft);
+  color: var(--fg-primary);
+  border-color: var(--accent);
+}
+.gitlab-fullbleed__icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px;
+  background: transparent;
+  color: var(--fg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
   cursor: pointer;
 }
-.gitlab-embed__nav-item:hover { background: oklch(20% 0.02 280); color: var(--fg-primary); }
-.gitlab-embed__nav-item--active { background: var(--accent-soft); color: var(--fg-primary); }
-.gitlab-embed__main {
-  background: oklch(8% 0.02 280);
-  padding: 20px;
-  display: flex; flex-direction: column; gap: 14px;
-  font-size: 12.5px; color: var(--fg-secondary);
+.gitlab-fullbleed__icon:hover {
+  background: var(--bg-hover);
+  color: var(--fg-primary);
 }
-.gl-row {
-  display: grid; grid-template-columns: 1fr auto auto auto;
-  gap: 14px; align-items: center;
-  padding: 10px 14px;
+.gitlab-fullbleed__iframe {
+  flex: 1;
+  width: 100%;
+  border: 0;
   background: var(--bg-surface);
-  border: 1px solid var(--border-subtle);
-  border-radius: 8px;
+  min-height: 0;
 }
 
 /* ----- Task chrome (video/voice/text + harness) ----- */
@@ -1041,7 +1059,8 @@
 }
 
 /* ----- Tweaks panel (floating) ----- */
-.session__tweaks-open {
+.session__tweaks-open,
+.session-full__tweaks-open {
   position: fixed;
   right: 24px;
   bottom: 48px;
@@ -1056,6 +1075,82 @@
   border-radius: 8px;
   cursor: pointer;
   z-index: 40;
+}
+
+/* ----- Full-bleed session overlay (code-server iframe owns the viewport) ----- */
+.session-full {
+  position: fixed;
+  inset: 0;
+  background: #101015;
+  z-index: 30;
+  display: block;
+}
+.session-full__iframe {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #101015;
+}
+.session-full__overlay {
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  right: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: oklch(14.5% 0.008 258 / 0.72);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  z-index: 35;
+  pointer-events: auto;
+}
+.session-full__back {
+  padding: 4px 10px;
+  background: transparent;
+  color: var(--fg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.session-full__back:hover {
+  background: var(--bg-hover);
+  color: var(--fg-primary);
+}
+.session-full__branch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 6px;
+  background: var(--bg-surface-2);
+  border: 1px solid var(--border-subtle);
+  color: var(--fg-secondary);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+.session-full__spacer { flex: 1; }
+.session-full__icon-btn {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+  color: var(--fg-muted);
+  border-radius: 6px;
+  cursor: pointer;
+  text-decoration: none;
+}
+.session-full__icon-btn:hover {
+  background: var(--bg-hover);
+  color: var(--fg-primary);
 }
 
 .tweaks {
@@ -1142,3 +1237,141 @@
 
 /* Session tweaks layout override — take over the pane */
 .pane--wide .pane__body:has(.session) { padding-bottom: 0; }
+
+/* ----- Applications · Runtime (Lens-style) ----- */
+.runtime-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+.runtime-stat {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  padding: 12px 14px;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.runtime-stat__eyebrow {
+  font-size: 10px; letter-spacing: 1px; text-transform: uppercase;
+  color: var(--fg-muted);
+}
+.runtime-stat__value {
+  font-family: var(--font-display);
+  font-size: 24px; font-weight: 600;
+  color: var(--fg-primary);
+  letter-spacing: -0.3px;
+}
+.runtime-stat__unit { font-size: 12px; font-weight: 400; color: var(--fg-muted); margin-left: 2px; }
+.runtime-stat__sub {
+  font-size: 11.5px; color: var(--fg-muted);
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+}
+.runtime-stat__sub .dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
+.runtime-stat__sub .dot--ok { background: var(--state-success); }
+.runtime-stat__sub .dot--warn { background: var(--state-warning); }
+.runtime-stat__sub .dot--err { background: var(--state-danger); }
+
+.pod-table { display: flex; flex-direction: column; }
+.pod-table__head,
+.pod-table__row {
+  display: grid;
+  grid-template-columns: minmax(260px, 2.4fr) 90px minmax(110px, 1fr) 120px 70px 70px;
+  gap: 12px;
+  padding: 8px 10px;
+  align-items: center;
+  font-size: 12.5px;
+}
+.pod-table__head {
+  font-size: 10px; letter-spacing: 1px; text-transform: uppercase;
+  color: var(--fg-muted);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.pod-table__row {
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  text-align: left;
+  color: var(--fg-secondary);
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.pod-table__row:hover { background: var(--bg-surface-2); }
+.pod-table__row--active {
+  background: var(--bg-surface-2);
+  border-color: var(--border-default);
+}
+.pod-table__name {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--fg-primary);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.pod-table__num { text-align: right; font-variant-numeric: tabular-nums; }
+.pod-table__dots { display: inline-flex; gap: 4px; }
+.pod-table__dots .dot {
+  width: 8px; height: 8px; border-radius: 50%; display: inline-block;
+}
+.pod-table__dots .dot--ok { background: var(--state-success); }
+.pod-table__dots .dot--warn { background: var(--state-warning); }
+.pod-table__dots .dot--err { background: var(--state-danger); }
+
+.log-panel {
+  margin: 0;
+  background: var(--bg-elev-1, #0e1117);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.65;
+  color: var(--fg-secondary);
+  max-height: 240px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.log-line { opacity: 0.92; }
+.log-line + .log-line { margin-top: 2px; }
+
+.argo-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+}
+.argo-card {
+  background: var(--bg-surface-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.argo-card__name {
+  font-family: var(--font-mono);
+  font-size: 12px; font-weight: 600;
+  color: var(--fg-primary);
+}
+.argo-card__row { display: flex; gap: 6px; flex-wrap: wrap; }
+
+/* ----- Logseq-style blocks (Morgan briefing) ----- */
+.mem-list--logseq {
+  gap: 2px;
+  padding-left: 10px;
+  border-left: 2px solid var(--border-subtle);
+}
+.mem-list--logseq .mem-list-item {
+  position: relative;
+  padding-left: 14px;
+  border-bottom: none;
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+.mem-list--logseq .mem-list-item::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 12px;
+  width: 4px; height: 4px;
+  border-radius: 50%;
+  background: var(--fg-muted);
+  opacity: 0.7;
+}
