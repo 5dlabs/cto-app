@@ -90,7 +90,7 @@ const TITLES: Record<NavKey, { title: string; sub: string }> = {
   },
   tasks: {
     title: "Tasks",
-    sub: "Global board across all projects · live video/voice/text with runtime chrome",
+    sub: "Open a task to drop into its code-server session — the task CRD's workspace embed",
   },
   applications: {
     title: "Applications",

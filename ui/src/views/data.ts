@@ -575,9 +575,34 @@ export const AGENTS: AgentCard[] = [
     tasksShipped: 11,
     publishedOnChain: true,
   },
+  {
+    id: "rex",
+    name: "Rex",
+    role: "Infra + chart custodian · CTO agents workspace",
+    soul: "Chart budgets, not vibes — every bump gets a reason.",
+    hue: 32,
+    status: "running",
+    harness: "OpenClaw",
+    cli: "codex 1.4",
+    models: [{ model: "claude-opus-4-7", provider: "anthropic" }],
+    skills: ["helm.edit", "chart.ci", "kaniko.build"],
+    tasksActive: 1,
+    tasksShipped: 6,
+    publishedOnChain: true,
+  },
 ];
 
+export const CODER_URL =
+  "https://coder.5dlabs.ai/?folder=/home/coder/workspace/repos";
+
 export type TaskState = "queued" | "running" | "blocked" | "review" | "done";
+
+export interface TaskFileDiff {
+  path: string;
+  label: string;
+  active?: boolean;
+  language?: string;
+}
 
 export interface TaskCard {
   id: string;
@@ -595,9 +620,34 @@ export interface TaskCard {
   iterations: number;
   updated: string;
   note?: string;
+  branch?: string;
+  files?: TaskFileDiff[];
 }
 
 export const TASKS: TaskCard[] = [
+  {
+    id: "T-320",
+    title: "Bump musetalk-worker memory budget",
+    projectId: "cto-agents",
+    projectName: "cto · agents",
+    agentId: "rex",
+    state: "running",
+    harness: "OpenClaw",
+    cli: "codex 1.4",
+    models: [{ model: "claude-opus-4-7", provider: "anthropic" }],
+    tokensIn: 42_100,
+    tokensOut: 9_800,
+    costUsd: 0.64,
+    iterations: 1,
+    updated: "just now",
+    note: "values.yaml: requests.memory 2Gi → 8Gi · limits.memory 4Gi → 8Gi",
+    branch: "fix/coder-kaniko-memory-budget",
+    files: [
+      { path: "charts/musetalk-worker/values.yaml", label: "values.yaml", active: true, language: "yaml" },
+      { path: "charts/musetalk-worker/Dockerfile", label: "Dockerfile", language: "docker" },
+      { path: "charts/musetalk-worker/requirements.txt", label: "requirements.txt", language: "text" },
+    ],
+  },
   {
     id: "T-318",
     title: "Fix flaky settle tests",
@@ -614,6 +664,7 @@ export const TASKS: TaskCard[] = [
     iterations: 2,
     updated: "2m ago",
     note: "poll_until(tx, 5s) + exponential backoff · 12/12 green",
+    branch: "fix/settle-test-flakes",
   },
   {
     id: "T-317",

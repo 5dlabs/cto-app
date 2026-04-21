@@ -1,19 +1,25 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   IconTerminal,
-  IconBracket,
   IconVideo,
   IconMic,
   IconChat,
-  IconSparkles,
   IconFilter,
   IconSearch,
-  IconActivity,
+  IconExternal,
+  IconClose,
+  IconBolt,
+  IconRefresh,
+  IconSend,
+  IconFile,
+  IconGit,
+  IconChevRight,
 } from "./icons";
-import { AGENTS, TASKS, type TaskCard, type TaskState } from "./data";
+import { AGENTS, TASKS, CODER_URL, type TaskCard, type TaskState } from "./data";
 
 type StateFilter = "all" | TaskState;
 type Mode = "video" | "voice" | "text";
+type SessionView = "list" | "session";
 
 const STATE_LABEL: Record<TaskState, string> = {
   queued: "Queued",
@@ -32,10 +38,46 @@ const STATE_CHIP: Record<TaskState, "accent" | "success" | "warn" | "danger" | "
 };
 
 export function TasksView() {
+  const [view, setView] = useState<SessionView>("list");
+  const [selected, setSelected] = useState<string>(
+    TASKS.find((t) => t.state === "running")?.id ?? TASKS[0].id,
+  );
+
+  const task = useMemo(
+    () => TASKS.find((t) => t.id === selected) ?? TASKS[0],
+    [selected],
+  );
+
+  if (view === "session") {
+    return (
+      <SessionStage
+        task={task}
+        onBack={() => setView("list")}
+        onSwitchTask={(id) => setSelected(id)}
+      />
+    );
+  }
+
+  return (
+    <TaskListPane
+      selected={selected}
+      onOpen={(id) => {
+        setSelected(id);
+        setView("session");
+      }}
+    />
+  );
+}
+
+function TaskListPane({
+  selected,
+  onOpen,
+}: {
+  selected: string;
+  onOpen: (id: string) => void;
+}) {
   const [query, setQuery] = useState("");
   const [state, setState] = useState<StateFilter>("all");
-  const [selected, setSelected] = useState<string | null>(TASKS[0]?.id ?? null);
-  const [mode, setMode] = useState<Mode>("video");
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -49,11 +91,6 @@ export function TasksView() {
       );
     });
   }, [query, state]);
-
-  const active = useMemo(
-    () => TASKS.find((t) => t.id === selected) ?? filtered[0] ?? null,
-    [selected, filtered],
-  );
 
   const totals = useMemo(() => {
     const running = TASKS.filter((t) => t.state === "running").length;
@@ -72,14 +109,12 @@ export function TasksView() {
             {TASKS.length} tasks · {totals.running} running · {totals.blocked} blocked · {totals.review} in review
           </div>
           <div className="section__sub">
-            Every task carries its agent, harness, and model pairing. Open a task to drop into the
-            live video / voice / text stage — subtitles and per-task telemetry always on.
+            Click a task to open its code-server session — the task CRD's workspace loads alongside
+            the agent stage.
           </div>
         </div>
         <div className="row">
-          <span className="chip">
-            spend · ${totals.cost.toFixed(2)}
-          </span>
+          <span className="chip">spend · ${totals.cost.toFixed(2)}</span>
           <button type="button" className="ghost-btn">
             <IconFilter size={12} /> Filters
           </button>
@@ -115,242 +150,418 @@ export function TasksView() {
         </div>
       </div>
 
-      <div className="task-stage">
-        <div className="task-panel">
-          <div className="section__head">
-            <div>
-              <div className="section__eyebrow">Task list</div>
-              <div className="section__title">{filtered.length} of {TASKS.length}</div>
-            </div>
-          </div>
-          <div className="mem-list" style={{ gap: 4 }}>
-            {filtered.map((t) => {
-              const agent = AGENTS.find((a) => a.id === t.agentId);
-              const isActive = active?.id === t.id;
-              return (
-                <button
-                  key={t.id}
-                  type="button"
-                  className={`kanban__card${isActive ? " kanban__card--active" : ""}`}
-                  onClick={() => setSelected(t.id)}
-                  style={{ textAlign: "left" }}
+      <div className="mem-list" style={{ gap: 6 }}>
+        {filtered.map((t) => {
+          const agent = AGENTS.find((a) => a.id === t.agentId);
+          const isActive = selected === t.id;
+          return (
+            <button
+              key={t.id}
+              type="button"
+              className={`kanban__card${isActive ? " kanban__card--active" : ""}`}
+              onClick={() => onOpen(t.id)}
+              style={{ textAlign: "left", cursor: "pointer", width: "100%" }}
+            >
+              <div className="row" style={{ justifyContent: "space-between" }}>
+                <span className="mono tiny muted">{t.id}</span>
+                <span className={`chip chip--${STATE_CHIP[t.state]}`}>{STATE_LABEL[t.state]}</span>
+              </div>
+              <div className="kanban__card-title" style={{ marginTop: 4 }}>{t.title}</div>
+              <div className="kanban__card-meta">
+                {t.projectName} · {agent?.name ?? t.agentId} · {t.updated}
+              </div>
+              <div className="row" style={{ gap: 6, marginTop: 8, flexWrap: "wrap" }}>
+                {t.branch ? (
+                  <span className="chip">
+                    <IconGit size={10} /> {t.branch}
+                  </span>
+                ) : null}
+                <span className="chip chip--accent">
+                  <IconTerminal size={10} /> {t.harness}
+                </span>
+                <span
+                  className="mono tiny muted"
+                  style={{ marginLeft: "auto" }}
                 >
-                  <div className="row" style={{ justifyContent: "space-between" }}>
-                    <span className="mono tiny muted">{t.id}</span>
-                    <span className={`chip chip--${STATE_CHIP[t.state]}`}>{STATE_LABEL[t.state]}</span>
-                  </div>
-                  <div className="kanban__card-title" style={{ marginTop: 4 }}>{t.title}</div>
-                  <div className="kanban__card-meta">
-                    {t.projectName} · {agent?.name ?? t.agentId} · {t.updated}
-                  </div>
-                </button>
-              );
-            })}
-            {filtered.length === 0 ? (
-              <div
-                className="tiny muted"
-                style={{
-                  border: "1px dashed var(--border-subtle)",
-                  padding: "18px 12px",
-                  borderRadius: 8,
-                  textAlign: "center",
-                }}
-              >
-                No tasks match this filter.
+                  {t.cli}
+                </span>
               </div>
-            ) : null}
-          </div>
-        </div>
-
-        <div className="task-panel">
-          {active ? (
-            <TaskStage task={active} mode={mode} setMode={setMode} />
-          ) : (
-            <div className="chart-card">
-              <div className="section__eyebrow">No task selected</div>
-              <div className="section__title">Pick a task to open the stage</div>
-              <div className="section__sub">
-                The stage renders avatar, harness, CLI, and model chips in every mode — video,
-                voice, and text.
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function TaskStage({
-  task,
-  mode,
-  setMode,
-}: {
-  task: TaskCard;
-  mode: Mode;
-  setMode: (m: Mode) => void;
-}) {
-  const agent = AGENTS.find((a) => a.id === task.agentId);
-  const hue = agent?.hue ?? 200;
-
-  return (
-    <div className="task-stage" style={{ gridTemplateColumns: "1fr" }}>
-      <div className="task-chrome">
-        <div
-          className="task-avatar-lg"
-          style={{
-            background: `oklch(0.62 0.14 ${hue} / 0.22)`,
-            borderColor: `oklch(0.62 0.14 ${hue} / 0.5)`,
-            color: `oklch(0.86 0.08 ${hue})`,
-          }}
-        >
-          {agent?.name.charAt(0) ?? "?"}
-        </div>
-        <div className="task-meta-col">
-          <div className="task-meta-col__name">
-            {agent?.name ?? task.agentId}{" "}
-            <span className="tiny muted" style={{ marginLeft: 6 }}>
-              {task.id}
-            </span>
-          </div>
-          <div className="task-meta-col__role">
-            {agent?.role ?? ""} · {task.projectName} · {task.title}
-          </div>
-          <div className="task-meta-col__chips">
-            <span className="chip chip--accent">
-              <IconTerminal size={10} /> harness · {task.harness}
-            </span>
-            <span className="chip">
-              <IconBracket size={10} /> ACP CLI · {task.cli}
-            </span>
-            {task.models.map((m) => (
-              <span key={`${m.provider}-${m.model}`} className="modelchip">
-                {m.model} <span className="modelchip__provider">· {m.provider}</span>
-              </span>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      <div
-        className="debate__stage"
-        style={{ minHeight: 240, borderRadius: 10, position: "relative" }}
-      >
-        <div className="debate__grid" />
-        <div className="debate__live">LIVE · {mode}</div>
-        <div
-          className="debate__committee"
-          style={{ gridTemplateColumns: "1fr", gridTemplateRows: "1fr", inset: 30 }}
-        >
+            </button>
+          );
+        })}
+        {filtered.length === 0 ? (
           <div
-            className="debate__tile"
+            className="tiny muted"
             style={{
-              ["--tile-hue" as string]: hue,
-              maxWidth: 160,
-              gridColumn: 1,
-              gridRow: 1,
+              border: "1px dashed var(--border-subtle)",
+              padding: "18px 12px",
+              borderRadius: 8,
+              textAlign: "center",
             }}
           >
-            <div className="debate__speaking-ring" />
-            <div className="debate__tile-initial">{agent?.name.charAt(0) ?? "?"}</div>
-            <div className="debate__tile-label">
-              <span>{agent?.name ?? task.agentId}</span>
-              <span className="debate__tile-speaking">● LIVE</span>
-            </div>
-          </div>
-        </div>
-        {task.note ? (
-          <div className="debate__subs" style={{ bottom: 72 }}>
-            <div
-              className="debate__sub-line"
-              style={{ ["--who-hue" as string]: hue }}
-            >
-              <span className="debate__sub-who">{agent?.name ?? task.agentId}:</span>
-              <span>{task.note}</span>
-            </div>
+            No tasks match this filter.
           </div>
         ) : null}
-        <div className="debate__mode">
-          <button
-            type="button"
-            className={`debate__mode-btn${mode === "video" ? " debate__mode-btn--active" : ""}`}
-            onClick={() => setMode("video")}
-          >
-            <IconVideo size={13} /> Video
-          </button>
-          <button
-            type="button"
-            className={`debate__mode-btn${mode === "voice" ? " debate__mode-btn--active" : ""}`}
-            onClick={() => setMode("voice")}
-          >
-            <IconMic size={13} /> Voice
-          </button>
-          <button
-            type="button"
-            className={`debate__mode-btn${mode === "text" ? " debate__mode-btn--active" : ""}`}
-            onClick={() => setMode("text")}
-          >
-            <IconChat size={13} /> Text
-          </button>
-        </div>
-      </div>
-
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(4, 1fr)",
-          gap: 10,
-        }}
-      >
-        <MetricCard label="Tokens in" value={task.tokensIn.toLocaleString()} />
-        <MetricCard label="Tokens out" value={task.tokensOut.toLocaleString()} />
-        <MetricCard label="Cost" value={`$${task.costUsd.toFixed(2)}`} />
-        <MetricCard
-          label="Iterations"
-          value={`${task.iterations}`}
-          hint="to acceptance"
-        />
-      </div>
-
-      <div className="chart-card">
-        <div className="section__head">
-          <div>
-            <div className="section__eyebrow">
-              <IconActivity size={11} /> Activity
-            </div>
-            <div className="section__title">Per-task transcript</div>
-            <div className="section__sub">
-              Subtitles are on by default across video, voice, and text. The stage keeps the same
-              chrome in every mode so you can switch without losing runtime context.
-            </div>
-          </div>
-          <div className="row">
-            <button type="button" className="ghost-btn">
-              <IconSparkles size={12} /> Summarize
-            </button>
-          </div>
-        </div>
       </div>
     </div>
   );
 }
 
-function MetricCard({
-  label,
-  value,
-  hint,
+function SessionStage({
+  task,
+  onBack,
+  onSwitchTask,
 }: {
-  label: string;
-  value: string;
-  hint?: string;
+  task: TaskCard;
+  onBack: () => void;
+  onSwitchTask: (id: string) => void;
 }) {
+  const agent = AGENTS.find((a) => a.id === task.agentId);
+  const [mode, setMode] = useState<Mode>("video");
+  const [prompt, setPrompt] = useState("");
+  const [tweaksOpen, setTweaksOpen] = useState(true);
+  const [rail, setRail] = useState<"overview" | "files" | "branches">("overview");
+  const hue = agent?.hue ?? 200;
+
+  const coderUrl = useMemo(() => {
+    const base = CODER_URL;
+    if (!task.branch) return base;
+    return `${base}&branch=${encodeURIComponent(task.branch)}`;
+  }, [task.branch]);
+
+  const runningPeers = TASKS.filter(
+    (t) => t.state === "running" && t.id !== task.id,
+  ).slice(0, 4);
+
   return (
-    <div className="chart-card" style={{ padding: 12 }}>
-      <div className="section__eyebrow">{label}</div>
-      <div className="mono" style={{ fontSize: 22, marginTop: 4 }}>
-        {value}
+    <div className="session">
+      <div className="session__chrome">
+        <button
+          type="button"
+          className="ghost-btn"
+          onClick={onBack}
+          aria-label="Back to sessions list"
+        >
+          ← Sessions
+        </button>
+        {task.branch ? (
+          <span className="session__branch">
+            <IconGit size={12} /> {task.branch}
+          </span>
+        ) : null}
+        <span className={`chip chip--${STATE_CHIP[task.state]}`}>
+          {STATE_LABEL[task.state]}
+        </span>
+        <span className="session__spacer" />
+        <span className="session__url mono tiny muted">
+          coder.5dlabs.ai/?folder=/home/coder/workspace/repos/{task.projectId}
+        </span>
+        <button
+          type="button"
+          className="ghost-btn"
+          title="Reload workspace"
+          onClick={() => {
+            const el = document.getElementById("coder-iframe") as HTMLIFrameElement | null;
+            if (el) el.src = el.src;
+          }}
+        >
+          <IconRefresh size={12} />
+        </button>
+        <a
+          className="primary-btn"
+          href={coderUrl}
+          target="_blank"
+          rel="noreferrer"
+        >
+          Open full <IconExternal size={10} />
+        </a>
       </div>
-      {hint ? <div className="tiny muted">{hint}</div> : null}
+
+      <div className="session__body">
+        <aside className="session__agent">
+          <div className="session__agent-head">
+            <div className="session__agent-brand">
+              <span className="session__agent-brand-5d">5D</span>
+              <span className="session__agent-brand-title">
+                5DLABS CTO: CTO AGENTS
+              </span>
+            </div>
+            <div className="session__agent-modes">
+              <button
+                type="button"
+                className={`session__mode-chip${mode === "video" ? " is-active" : ""}`}
+                onClick={() => setMode("video")}
+              >
+                <IconVideo size={10} /> Vid
+              </button>
+              <button
+                type="button"
+                className={`session__mode-chip${mode === "voice" ? " is-active" : ""}`}
+                onClick={() => setMode("voice")}
+              >
+                <IconMic size={10} /> Mic
+              </button>
+              <button
+                type="button"
+                className={`session__mode-chip${mode === "text" ? " is-active" : ""}`}
+                onClick={() => setMode("text")}
+              >
+                <IconChat size={10} /> Txt
+              </button>
+            </div>
+          </div>
+
+          <div className="session__agent-stage">
+            <div className="session__agent-rail">
+              <button
+                type="button"
+                className={`session__rail-btn${rail === "overview" ? " is-active" : ""}`}
+                onClick={() => setRail("overview")}
+                aria-label="Overview"
+                title="Overview"
+              >
+                5D
+              </button>
+              <button
+                type="button"
+                className={`session__rail-btn${rail === "files" ? " is-active" : ""}`}
+                onClick={() => setRail("files")}
+                aria-label="Files"
+                title="Files"
+              >
+                <IconFile size={14} />
+              </button>
+              <button
+                type="button"
+                className={`session__rail-btn${rail === "branches" ? " is-active" : ""}`}
+                onClick={() => setRail("branches")}
+                aria-label="Branches"
+                title="Branches"
+              >
+                <IconGit size={14} />
+              </button>
+            </div>
+
+            <div className="session__agent-stage-main">
+              <div
+                className="session__agent-portrait"
+                style={{ ["--hue" as string]: `${hue}` }}
+              >
+                <div className="session__agent-portrait-ring" />
+                <div className="session__agent-portrait-inner">
+                  {agent?.name.charAt(0) ?? "?"}
+                </div>
+              </div>
+              <div className="session__agent-name">{agent?.name ?? task.agentId}</div>
+              <div className="session__agent-meta tiny muted">
+                {task.cli} · {task.harness} · listening
+              </div>
+
+              {rail === "overview" && runningPeers.length > 0 ? (
+                <div className="session__peers">
+                  <div className="tiny muted">Other active sessions</div>
+                  {runningPeers.map((peer) => {
+                    const a = AGENTS.find((x) => x.id === peer.agentId);
+                    return (
+                      <button
+                        key={peer.id}
+                        type="button"
+                        className="session__peer"
+                        onClick={() => onSwitchTask(peer.id)}
+                      >
+                        <span
+                          className="session__peer-dot"
+                          style={{ background: `oklch(0.65 0.14 ${a?.hue ?? 200})` }}
+                        />
+                        <span className="session__peer-name">{a?.name ?? peer.agentId}</span>
+                        <span className="session__peer-branch mono tiny muted">
+                          {peer.branch ?? peer.projectName}
+                        </span>
+                        <IconChevRight size={10} />
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : null}
+
+              {rail === "files" ? (
+                <div className="session__peers">
+                  <div className="tiny muted">Files in this session</div>
+                  {(task.files ?? []).map((f) => (
+                    <div key={f.path} className="session__peer" style={{ cursor: "default" }}>
+                      <IconFile size={11} />
+                      <span className="session__peer-name">{f.label}</span>
+                      <span className="session__peer-branch mono tiny muted">
+                        {f.language}
+                      </span>
+                    </div>
+                  ))}
+                  {(task.files ?? []).length === 0 ? (
+                    <div className="tiny muted">
+                      File list is sourced from the embedded code-server.
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {rail === "branches" ? (
+                <div className="session__peers">
+                  <div className="tiny muted">Branches on this repo</div>
+                  {[task.branch, "main"].filter(Boolean).map((b) => (
+                    <div key={b as string} className="session__peer" style={{ cursor: "default" }}>
+                      <IconGit size={11} />
+                      <span className="session__peer-name">{b}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          </div>
+
+          <form
+            className="session__prompt"
+            onSubmit={(e) => {
+              e.preventDefault();
+              setPrompt("");
+            }}
+          >
+            <input
+              type="text"
+              placeholder="Describe what to build"
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              className="session__prompt-input"
+            />
+            <button type="submit" className="session__prompt-send" aria-label="Send">
+              <IconSend size={12} />
+            </button>
+          </form>
+          <div className="session__prompt-foot">
+            <span className="chip">
+              <IconBolt size={10} /> Auto
+            </span>
+            <span className="tiny muted">Offline</span>
+          </div>
+        </aside>
+
+        <section className="session__coder">
+          <iframe
+            id="coder-iframe"
+            className="session__coder-iframe"
+            src={coderUrl}
+            title="Coder workspace — task CRD"
+            allow="clipboard-read; clipboard-write; fullscreen"
+          />
+          <div className="session__coder-foot tiny muted">
+            <span className="mono">{task.branch ?? ""}</span>
+            <span>·</span>
+            <span>{task.harness}</span>
+            <span>·</span>
+            <span>{task.cli.split(" ")[0]}</span>
+            <span>·</span>
+            <span>live diff from code-server</span>
+          </div>
+        </section>
+      </div>
+
+      {tweaksOpen ? (
+        <TweaksPanel onClose={() => setTweaksOpen(false)} />
+      ) : (
+        <button
+          type="button"
+          className="session__tweaks-open"
+          onClick={() => setTweaksOpen(true)}
+        >
+          Tweaks
+        </button>
+      )}
+    </div>
+  );
+}
+
+const ACCENTS: { key: string; label: string; hue: number; chroma: number }[] = [
+  { key: "violet", label: "Violet", hue: 282, chroma: 0.165 },
+  { key: "cyan", label: "Cyan", hue: 215, chroma: 0.14 },
+  { key: "amber", label: "Amber", hue: 68, chroma: 0.155 },
+  { key: "jade", label: "Jade", hue: 155, chroma: 0.15 },
+];
+
+type Density = "compact" | "default";
+
+function TweaksPanel({ onClose }: { onClose: () => void }) {
+  const [accent, setAccent] = useState<string>(() => {
+    const shell = document.querySelector(".app-shell") as HTMLElement | null;
+    return shell?.getAttribute("data-motif") ?? "violet";
+  });
+  const [density, setDensity] = useState<Density>("default");
+
+  useEffect(() => {
+    const shell = document.querySelector(".app-shell") as HTMLElement | null;
+    if (!shell) return;
+    shell.setAttribute("data-motif", accent);
+  }, [accent]);
+
+  useEffect(() => {
+    const shell = document.querySelector(".app-shell") as HTMLElement | null;
+    if (!shell) return;
+    shell.setAttribute("data-density", density);
+  }, [density]);
+
+  return (
+    <div className="tweaks">
+      <div className="tweaks__head">
+        <div>
+          <div className="tweaks__title">Tweaks</div>
+          <div className="tweaks__eyebrow">ACCENT · DENSITY</div>
+        </div>
+        <button
+          type="button"
+          className="tweaks__close"
+          onClick={onClose}
+          aria-label="Close tweaks"
+        >
+          <IconClose size={11} />
+        </button>
+      </div>
+
+      <div className="tweaks__section">
+        <div className="tweaks__label">ACCENT COLOUR</div>
+        <div className="tweaks__swatches">
+          {ACCENTS.map((a) => (
+            <button
+              key={a.key}
+              type="button"
+              className={`tweaks__swatch${accent === a.key ? " is-active" : ""}`}
+              onClick={() => setAccent(a.key)}
+            >
+              <span
+                className="tweaks__swatch-dot"
+                style={{
+                  background: `oklch(0.63 ${a.chroma} ${a.hue})`,
+                  boxShadow: `0 0 0 1px oklch(0.63 ${a.chroma} ${a.hue} / 0.4)`,
+                }}
+              />
+              {a.label.toUpperCase()}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="tweaks__section">
+        <div className="tweaks__label">DENSITY</div>
+        <div className="tweaks__density">
+          {(["compact", "default"] as Density[]).map((d) => (
+            <button
+              key={d}
+              type="button"
+              className={`tweaks__density-btn${density === d ? " is-active" : ""}`}
+              onClick={() => setDensity(d)}
+            >
+              {d.toUpperCase()}
+            </button>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
