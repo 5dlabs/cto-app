@@ -432,3 +432,362 @@ export const DEBATE_COMMITTEE: { name: string; role: string; hue: number }[] = [
   { name: "Vega", role: "Risk/Trading", hue: 75 },
   { name: "Nova", role: "Frontend", hue: 230 },
 ];
+
+export type AgentStatus = "online" | "running" | "idle" | "offline";
+export type AgentHarness = "OpenClaw" | "Hermes";
+
+export interface AgentModel {
+  model: string;
+  provider: string;
+}
+
+export interface AgentCard {
+  id: string;
+  name: string;
+  role: string;
+  soul: string;
+  hue: number;
+  status: AgentStatus;
+  harness: AgentHarness;
+  cli: string;
+  models: AgentModel[];
+  skills: string[];
+  tasksActive: number;
+  tasksShipped: number;
+  publishedOnChain?: boolean;
+}
+
+export const AGENTS: AgentCard[] = [
+  {
+    id: "morgan",
+    name: "Morgan",
+    role: "Intake + always-on companion",
+    soul: "Curator of the board — surfaces direction, never overwrites it.",
+    hue: 200,
+    status: "online",
+    harness: "OpenClaw",
+    cli: "claude-code 0.8.3",
+    models: [
+      { model: "claude-opus-4-7", provider: "anthropic" },
+      { model: "gemini-2.5-pro", provider: "google" },
+    ],
+    skills: ["intake.route", "pm.sync", "voice.stream"],
+    tasksActive: 2,
+    tasksShipped: 38,
+    publishedOnChain: true,
+  },
+  {
+    id: "cipher",
+    name: "Cipher",
+    role: "Security lead · vuln triage and remediation",
+    soul: "Paranoid by trade — assume compromise, prove containment.",
+    hue: 22,
+    status: "running",
+    harness: "OpenClaw",
+    cli: "claude-code 0.8.3",
+    models: [{ model: "claude-opus-4-7", provider: "anthropic" }],
+    skills: ["semgrep.scan", "codeql.triage", "snyk.patch", "aikido.route"],
+    tasksActive: 3,
+    tasksShipped: 17,
+    publishedOnChain: true,
+  },
+  {
+    id: "atlas",
+    name: "Atlas",
+    role: "Infra + GPU pool custodian",
+    soul: "Measures twice, scales once — latency is a feature.",
+    hue: 150,
+    status: "online",
+    harness: "Hermes",
+    cli: "opencode 1.2",
+    models: [
+      { model: "claude-sonnet-4-6", provider: "anthropic" },
+      { model: "gpt-5", provider: "openai" },
+    ],
+    skills: ["kubeai.route", "argocd.ship", "observe.wire"],
+    tasksActive: 1,
+    tasksShipped: 24,
+    publishedOnChain: true,
+  },
+  {
+    id: "vega",
+    name: "Vega",
+    role: "Risk + trading overlay",
+    soul: "Vertical slice shipper — would rather demo than speculate.",
+    hue: 75,
+    status: "idle",
+    harness: "OpenClaw",
+    cli: "claude-code 0.8.3",
+    models: [{ model: "claude-opus-4-7", provider: "anthropic" }],
+    skills: ["sigma.risk", "stream.tap", "pnl.rollup"],
+    tasksActive: 1,
+    tasksShipped: 9,
+    publishedOnChain: false,
+  },
+  {
+    id: "nova",
+    name: "Nova",
+    role: "Frontend · Storybook + tweakcn",
+    soul: "Whitespace is design. Restraint is speed.",
+    hue: 230,
+    status: "online",
+    harness: "Hermes",
+    cli: "opencode 1.2",
+    models: [
+      { model: "claude-sonnet-4-6", provider: "anthropic" },
+      { model: "gpt-5", provider: "openai" },
+    ],
+    skills: ["storybook.snap", "tweakcn.theme", "a11y.audit"],
+    tasksActive: 2,
+    tasksShipped: 31,
+    publishedOnChain: true,
+  },
+  {
+    id: "angie",
+    name: "Angie",
+    role: "Agent architect · test + flake hunter",
+    soul: "Never patches around red — routes through it.",
+    hue: 195,
+    status: "running",
+    harness: "OpenClaw",
+    cli: "claude-code 0.8.3",
+    models: [{ model: "claude-opus-4-7", provider: "anthropic" }],
+    skills: ["test.settle", "backoff.poll", "trace.repro"],
+    tasksActive: 1,
+    tasksShipped: 14,
+    publishedOnChain: false,
+  },
+  {
+    id: "blaze",
+    name: "Blaze",
+    role: "Solidity + Rust chain engineer",
+    soul: "On-chain is one-shot — rehearse in sim, ship once.",
+    hue: 18,
+    status: "running",
+    harness: "OpenClaw",
+    cli: "claude-code 0.8.3",
+    models: [
+      { model: "claude-opus-4-7", provider: "anthropic" },
+      { model: "gemini-2.5-pro", provider: "google" },
+    ],
+    skills: ["solidity.audit", "foundry.sim", "anchor.deploy"],
+    tasksActive: 2,
+    tasksShipped: 11,
+    publishedOnChain: true,
+  },
+  {
+    id: "rex",
+    name: "Rex",
+    role: "Infra + chart custodian · CTO agents workspace",
+    soul: "Chart budgets, not vibes — every bump gets a reason.",
+    hue: 32,
+    status: "running",
+    harness: "OpenClaw",
+    cli: "codex 1.4",
+    models: [{ model: "claude-opus-4-7", provider: "anthropic" }],
+    skills: ["helm.edit", "chart.ci", "kaniko.build"],
+    tasksActive: 1,
+    tasksShipped: 6,
+    publishedOnChain: true,
+  },
+];
+
+export const CODER_URL =
+  "https://coder.5dlabs.ai/?folder=/home/coder/workspace/repos";
+
+export type TaskState = "queued" | "running" | "blocked" | "review" | "done";
+
+export interface TaskFileDiff {
+  path: string;
+  label: string;
+  active?: boolean;
+  language?: string;
+}
+
+export interface TaskCard {
+  id: string;
+  title: string;
+  projectId: string;
+  projectName: string;
+  agentId: string;
+  state: TaskState;
+  harness: AgentHarness;
+  cli: string;
+  models: AgentModel[];
+  tokensIn: number;
+  tokensOut: number;
+  costUsd: number;
+  iterations: number;
+  updated: string;
+  note?: string;
+  branch?: string;
+  files?: TaskFileDiff[];
+}
+
+export const TASKS: TaskCard[] = [
+  {
+    id: "T-320",
+    title: "Bump musetalk-worker memory budget",
+    projectId: "cto-agents",
+    projectName: "cto · agents",
+    agentId: "rex",
+    state: "running",
+    harness: "OpenClaw",
+    cli: "codex 1.4",
+    models: [{ model: "claude-opus-4-7", provider: "anthropic" }],
+    tokensIn: 42_100,
+    tokensOut: 9_800,
+    costUsd: 0.64,
+    iterations: 1,
+    updated: "just now",
+    note: "values.yaml: requests.memory 2Gi → 8Gi · limits.memory 4Gi → 8Gi",
+    branch: "fix/coder-kaniko-memory-budget",
+    files: [
+      { path: "charts/musetalk-worker/values.yaml", label: "values.yaml", active: true, language: "yaml" },
+      { path: "charts/musetalk-worker/Dockerfile", label: "Dockerfile", language: "docker" },
+      { path: "charts/musetalk-worker/requirements.txt", label: "requirements.txt", language: "text" },
+    ],
+  },
+  {
+    id: "T-318",
+    title: "Fix flaky settle tests",
+    projectId: "conduit",
+    projectName: "conduit",
+    agentId: "angie",
+    state: "running",
+    harness: "OpenClaw",
+    cli: "claude-code 0.8.3",
+    models: [{ model: "claude-opus-4-7", provider: "anthropic" }],
+    tokensIn: 184_200,
+    tokensOut: 38_900,
+    costUsd: 2.18,
+    iterations: 2,
+    updated: "2m ago",
+    note: "poll_until(tx, 5s) + exponential backoff · 12/12 green",
+    branch: "fix/settle-test-flakes",
+  },
+  {
+    id: "T-317",
+    title: "Update release notes",
+    projectId: "cto-pay",
+    projectName: "cto-pay",
+    agentId: "morgan",
+    state: "queued",
+    harness: "OpenClaw",
+    cli: "claude-code 0.8.3",
+    models: [
+      { model: "claude-opus-4-7", provider: "anthropic" },
+      { model: "gemini-2.5-pro", provider: "google" },
+    ],
+    tokensIn: 0,
+    tokensOut: 0,
+    costUsd: 0,
+    iterations: 0,
+    updated: "queued",
+  },
+  {
+    id: "T-315",
+    title: "Gate on p99 budget",
+    projectId: "conduit",
+    projectName: "conduit",
+    agentId: "atlas",
+    state: "queued",
+    harness: "Hermes",
+    cli: "opencode 1.2",
+    models: [{ model: "claude-sonnet-4-6", provider: "anthropic" }],
+    tokensIn: 0,
+    tokensOut: 0,
+    costUsd: 0,
+    iterations: 0,
+    updated: "queued",
+  },
+  {
+    id: "T-311",
+    title: "Typed-data schema for lease intents",
+    projectId: "conduit",
+    projectName: "conduit",
+    agentId: "blaze",
+    state: "done",
+    harness: "OpenClaw",
+    cli: "claude-code 0.8.3",
+    models: [{ model: "claude-opus-4-7", provider: "anthropic" }],
+    tokensIn: 76_400,
+    tokensOut: 18_200,
+    costUsd: 1.02,
+    iterations: 1,
+    updated: "yesterday",
+    note: "EIP-712 merged · anchor IDL exported",
+  },
+  {
+    id: "T-309",
+    title: "Operator registration flow",
+    projectId: "conduit",
+    projectName: "conduit",
+    agentId: "blaze",
+    state: "running",
+    harness: "OpenClaw",
+    cli: "claude-code 0.8.3",
+    models: [
+      { model: "claude-opus-4-7", provider: "anthropic" },
+      { model: "gemini-2.5-pro", provider: "google" },
+    ],
+    tokensIn: 220_100,
+    tokensOut: 52_400,
+    costUsd: 2.84,
+    iterations: 3,
+    updated: "14m ago",
+  },
+  {
+    id: "T-304",
+    title: "Slashing window spike",
+    projectId: "conduit",
+    projectName: "conduit",
+    agentId: "vega",
+    state: "blocked",
+    harness: "OpenClaw",
+    cli: "claude-code 0.8.3",
+    models: [{ model: "claude-opus-4-7", provider: "anthropic" }],
+    tokensIn: 48_100,
+    tokensOut: 9_600,
+    costUsd: 0.57,
+    iterations: 1,
+    updated: "1h ago",
+    note: "needs Cipher for audit sign-off",
+  },
+  {
+    id: "T-298",
+    title: "Storybook snapshot drift — MorganCard",
+    projectId: "hermes-scaffold",
+    projectName: "hermes scaffold",
+    agentId: "nova",
+    state: "review",
+    harness: "Hermes",
+    cli: "opencode 1.2",
+    models: [
+      { model: "claude-sonnet-4-6", provider: "anthropic" },
+      { model: "gpt-5", provider: "openai" },
+    ],
+    tokensIn: 102_400,
+    tokensOut: 24_100,
+    costUsd: 1.21,
+    iterations: 2,
+    updated: "30m ago",
+    note: "tweakcn A/B diff posted for review",
+  },
+  {
+    id: "T-292",
+    title: "Quarantine Semgrep auth path finding",
+    projectId: "sigma-rms",
+    projectName: "sigma-1 / rms",
+    agentId: "cipher",
+    state: "running",
+    harness: "OpenClaw",
+    cli: "claude-code 0.8.3",
+    models: [{ model: "claude-opus-4-7", provider: "anthropic" }],
+    tokensIn: 88_900,
+    tokensOut: 19_400,
+    costUsd: 1.05,
+    iterations: 1,
+    updated: "7m ago",
+  },
+];

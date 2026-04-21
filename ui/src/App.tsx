@@ -16,6 +16,8 @@ import {
   IconUsers,
   IconPalette,
   IconBracket,
+  IconCpu,
+  IconTerminal,
 } from "./views/icons";
 import { MorganView } from "./views/MorganView";
 import { ProjectsView } from "./views/ProjectsView";
@@ -28,11 +30,15 @@ import { InfrastructureView } from "./views/InfrastructureView";
 import { IntegrationsView } from "./views/IntegrationsView";
 import { SettingsView } from "./views/SettingsView";
 import { NewAgentModal } from "./views/NewAgentModal";
+import { AgentsView } from "./views/AgentsView";
+import { TasksView } from "./views/TasksView";
 
 type NavKey =
   | "morgan"
   | "gitlab"
   | "projects"
+  | "agents"
+  | "tasks"
   | "applications"
   | "memory"
   | "cost"
@@ -52,6 +58,8 @@ const primaryNav: NavItem[] = [
   { key: "morgan", label: "Morgan", icon: IconSparkles },
   { key: "gitlab", label: "GitLab", icon: IconGit },
   { key: "projects", label: "Projects", icon: IconFolder },
+  { key: "agents", label: "Agents", icon: IconCpu },
+  { key: "tasks", label: "Tasks", icon: IconTerminal },
   { key: "applications", label: "Applications", icon: IconApps },
   { key: "memory", label: "Memory", icon: IconDocs },
   { key: "cost", label: "Cost", icon: IconGraph },
@@ -75,6 +83,14 @@ const TITLES: Record<NavKey, { title: string; sub: string }> = {
   projects: {
     title: "Projects",
     sub: "Pending · In Progress · Complete — debate runs by default",
+  },
+  agents: {
+    title: "Agents",
+    sub: "Roster — harness, CLI, and models per agent · manifests optionally on-chain",
+  },
+  tasks: {
+    title: "Tasks",
+    sub: "Open a task to drop into its code-server session — the task CRD's workspace embed",
   },
   applications: {
     title: "Applications",
@@ -175,7 +191,7 @@ export default function App() {
         </nav>
 
         <main className="content">
-          <ContentPane active={active} />
+          <ContentPane active={active} onNewAgent={() => setShowNewAgent(true)} />
         </main>
       </div>
 
@@ -216,7 +232,13 @@ function NavButton({
   );
 }
 
-function ContentPane({ active }: { active: NavKey }) {
+function ContentPane({
+  active,
+  onNewAgent,
+}: {
+  active: NavKey;
+  onNewAgent: () => void;
+}) {
   const head = TITLES[active];
 
   return (
@@ -235,13 +257,19 @@ function ContentPane({ active }: { active: NavKey }) {
       </header>
 
       <section className="pane__body">
-        <ViewRouter active={active} />
+        <ViewRouter active={active} onNewAgent={onNewAgent} />
       </section>
     </div>
   );
 }
 
-function ViewRouter({ active }: { active: NavKey }) {
+function ViewRouter({
+  active,
+  onNewAgent,
+}: {
+  active: NavKey;
+  onNewAgent: () => void;
+}) {
   switch (active) {
     case "morgan":
       return <MorganView />;
@@ -249,6 +277,10 @@ function ViewRouter({ active }: { active: NavKey }) {
       return <GitLabView />;
     case "projects":
       return <ProjectsView />;
+    case "agents":
+      return <AgentsView onNewAgent={onNewAgent} />;
+    case "tasks":
+      return <TasksView />;
     case "applications":
       return <ApplicationsView />;
     case "memory":
