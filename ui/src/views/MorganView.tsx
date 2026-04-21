@@ -78,7 +78,7 @@ export function MorganView() {
                 <div className="section__title">Studio briefing</div>
               </div>
             </div>
-            <div className="mem-list">
+            <div className="mem-list mem-list--logseq">
               <div className="mem-list-item">
                 <span>conduit · lease v2 merged</span>
                 <span className="count">09:04</span>

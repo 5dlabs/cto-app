@@ -1333,3 +1333,27 @@
   color: var(--fg-primary);
 }
 .argo-card__row { display: flex; gap: 6px; flex-wrap: wrap; }
+
+/* ----- Logseq-style blocks (Morgan briefing) ----- */
+.mem-list--logseq {
+  gap: 2px;
+  padding-left: 10px;
+  border-left: 2px solid var(--border-subtle);
+}
+.mem-list--logseq .mem-list-item {
+  position: relative;
+  padding-left: 14px;
+  border-bottom: none;
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+.mem-list--logseq .mem-list-item::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 12px;
+  width: 4px; height: 4px;
+  border-radius: 50%;
+  background: var(--fg-muted);
+  opacity: 0.7;
+}
