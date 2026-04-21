@@ -8,6 +8,7 @@ import {
   IconRefresh,
   IconExternal,
 } from "./icons";
+import { LemonSliceWidget, PRODUCT_MORGAN_AGENT_ID } from "../components/LemonSliceWidget";
 
 type Mode = "video" | "voice" | "text";
 
@@ -15,22 +16,36 @@ export function MorganView() {
   const [mode, setMode] = useState<Mode>("video");
   return (
     <div className="section">
-      <div className="debate" style={{ minHeight: 420 }}>
+      <div className="debate" style={{ minHeight: 520 }}>
         <div className="debate__stage">
           <div className="debate__grid" />
           <div className="debate__live">LIVE · {mode}</div>
-          <div className="debate__committee" style={{ gridTemplateColumns: "1fr", gridTemplateRows: "1fr" }}>
-            <div
-              className="debate__tile debate__tile--moderator"
-              style={{ maxWidth: 220, gridColumn: 1, gridRow: 1 }}
-            >
-              <div className="debate__speaking-ring" />
-              <div className="debate__tile-initial">M</div>
-              <div className="debate__tile-label">
-                <span>Morgan</span>
-                <span className="debate__tile-speaking">● LIVE</span>
+          <div
+            className="debate__committee"
+            style={{
+              gridTemplateColumns: "1fr",
+              gridTemplateRows: "1fr",
+              placeItems: "center",
+              minHeight: 460,
+            }}
+          >
+            {mode === "video" ? (
+              <div style={{ width: "100%", height: "100%", minHeight: 440, display: "flex", justifyContent: "center" }}>
+                <LemonSliceWidget agentId={PRODUCT_MORGAN_AGENT_ID} autoStartConversation={false} />
               </div>
-            </div>
+            ) : (
+              <div
+                className="debate__tile debate__tile--moderator"
+                style={{ maxWidth: 220, gridColumn: 1, gridRow: 1 }}
+              >
+                <div className="debate__speaking-ring" />
+                <div className="debate__tile-initial">M</div>
+                <div className="debate__tile-label">
+                  <span>Morgan</span>
+                  <span className="debate__tile-speaking">● {mode.toUpperCase()}</span>
+                </div>
+              </div>
+            )}
           </div>
           <div className="debate__subs">
             <div className="debate__sub-line" style={{ ["--who-hue" as string]: 200 }}>
