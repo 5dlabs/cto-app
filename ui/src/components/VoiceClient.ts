@@ -53,7 +53,7 @@ const DEFAULT_URL =
   (typeof import.meta !== "undefined" &&
     (import.meta as unknown as { env?: { VITE_VOICE_BRIDGE_WS?: string } }).env
       ?.VITE_VOICE_BRIDGE_WS) ||
-  "ws://localhost:8090/ws";
+  "wss://morgan-voice.5dlabs.ai/ws";
 
 function defaultMime(): string {
   if (typeof MediaRecorder === "undefined") return "audio/webm";
