@@ -592,11 +592,108 @@ export const AGENTS: AgentCard[] = [
   },
 ];
 
-// `ew=false` is code-server's exit-welcome flag; keeps the first-run walkthrough suppressed.
-export const CODER_URL =
-  "https://coder.5dlabs.ai/?folder=/home/coder/workspace/repos&ew=false";
+/** Base origin for the Coder / code-server host. */
+export const CODER_BASE_URL = "https://coder.5dlabs.ai";
+
+/** Parent dir inside the Coder pod where repos are checked out. */
+export const CODER_REPOS_ROOT = "/workspace/repos";
+
+/**
+ * Reads a `repo` query param from the current browser URL so the 5D app can
+ * deep-link embeds to a specific repo, e.g. `?repo=tsk-taskbox-2`.
+ * Returns null when running server-side or when the param is absent/blank.
+ */
+export function getRepoFromLocation(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const v = new URLSearchParams(window.location.search).get("repo");
+    const trimmed = v?.trim();
+    return trimmed ? trimmed : null;
+  } catch {
+    return null;
+  }
+}
+
+export interface CoderUrlOptions {
+  /** Repo slug to open (mapped to `/workspace/repos/<repo>`). */
+  repo?: string | null;
+  /** Optional branch deep link (passed straight through as `&branch=`). */
+  branch?: string | null;
+}
+
+/**
+ * Build the code-server URL for an embed. Uses `?folder=` under
+ * `CODER_REPOS_ROOT` when a repo is provided; falls back to the repos root.
+ *
+ * We intentionally hand-build the query string (rather than using
+ * `URLSearchParams`) so the folder path keeps its raw slashes — code-server's
+ * router and VS Code Web both prefer `?folder=/workspace/...` over the
+ * percent-encoded `?folder=%2Fworkspace%2F...` form, and it matches what
+ * code-server itself writes back into `coder.json` on redirect.
+ *
+ * We also deliberately do NOT pass `ew=`. In code-server's source that query
+ * is read as "workspace was closed, clear last-opened" (see
+ * `src/node/routes/vscode.ts`), not "exit welcome" — passing it taints
+ * `coder.json` and can break plain `/` loads afterwards.
+ */
+export function buildCoderUrl(opts: CoderUrlOptions = {}): string {
+  const folder = opts.repo ? `${CODER_REPOS_ROOT}/${opts.repo}` : CODER_REPOS_ROOT;
+  const parts: string[] = [`folder=${folder}`];
+  if (opts.branch) parts.push(`branch=${encodeURIComponent(opts.branch)}`);
+  return `${CODER_BASE_URL}/?${parts.join("&")}`;
+}
+
+/** Legacy default URL — kept for any call sites still importing it. */
+export const CODER_URL = buildCoderUrl();
 
 export type TaskState = "queued" | "running" | "blocked" | "review" | "done";
+
+/** Projects board column; optional override per task via `TaskCard.boardLane`. */
+export type ProjectBoardLane = "pending" | "ready" | "in_progress" | "done";
+
+export const TASK_STATE_LABEL: Record<TaskState, string> = {
+  queued: "Queued",
+  running: "Running",
+  blocked: "Blocked",
+  review: "Review",
+  done: "Done",
+};
+
+export const TASK_STATE_CHIP: Record<
+  TaskState,
+  "accent" | "success" | "warn" | "danger" | "muted"
+> = {
+  queued: "muted",
+  running: "accent",
+  blocked: "danger",
+  review: "warn",
+  done: "success",
+};
+
+/**
+ * Resolve the repo slug a task's workspace will actually open. Mirrors the
+ * precedence used by `taskCoderUrl`: explicit task/project repo wins, then URL
+ * `?repo=` as a fallback. This prevents stale URL params from overriding the
+ * selected card and producing "workspace does not exist" errors.
+ * Returns `null` when nothing is pinned (the iframe lands on repos root).
+ */
+export function taskActiveRepo(
+  task: Pick<TaskCard, "repo">,
+): string | null {
+  return task.repo ?? getRepoFromLocation() ?? null;
+}
+
+/**
+ * Coder URL for a task embed. Precedence for repo:
+ *   1. `task.repo` when the task is pinned to a repo,
+ *   2. `?repo=<slug>` on the 5D app URL (fallback when task has no repo),
+ *   3. `CODER_REPOS_ROOT` (the default, opens the parent dir).
+ * Branch is always taken from the task.
+ */
+export function taskCoderUrl(task: Pick<TaskCard, "branch" | "repo">): string {
+  const repo = taskActiveRepo(task);
+  return buildCoderUrl({ repo, branch: task.branch ?? null });
+}
 
 export interface TaskFileDiff {
   path: string;
@@ -611,6 +708,8 @@ export interface TaskCard {
   projectId: string;
   projectName: string;
   agentId: string;
+  /** When set, places the row on the Projects board regardless of `state`. */
+  boardLane?: ProjectBoardLane;
   state: TaskState;
   harness: AgentHarness;
   cli: string;
@@ -622,7 +721,24 @@ export interface TaskCard {
   updated: string;
   note?: string;
   branch?: string;
+  /** Repo slug to pin this task's workspace to (maps to `/workspace/repos/<repo>`). */
+  repo?: string;
   files?: TaskFileDiff[];
+}
+
+export function taskBoardLane(task: TaskCard): ProjectBoardLane {
+  if (task.boardLane) return task.boardLane;
+  switch (task.state) {
+    case "done":
+      return "done";
+    case "running":
+    case "blocked":
+    case "review":
+      return "in_progress";
+    case "queued":
+    default:
+      return "pending";
+  }
 }
 
 export const TASKS: TaskCard[] = [
@@ -669,9 +785,9 @@ export const TASKS: TaskCard[] = [
   },
   {
     id: "T-317",
-    title: "Update release notes",
-    projectId: "cto-pay",
-    projectName: "cto-pay",
+    title: "Draft intake notes",
+    projectId: "morgan-md-sandbox",
+    projectName: "morgan-md-sandbox",
     agentId: "morgan",
     state: "queued",
     harness: "OpenClaw",
@@ -685,22 +801,25 @@ export const TASKS: TaskCard[] = [
     costUsd: 0,
     iterations: 0,
     updated: "queued",
+    repo: "morgan-md-sandbox",
   },
   {
     id: "T-315",
-    title: "Gate on p99 budget",
-    projectId: "conduit",
-    projectName: "conduit",
-    agentId: "atlas",
+    title: "Finalize product brief",
+    projectId: "morgan-md-sandbox",
+    projectName: "morgan-md-sandbox",
+    agentId: "morgan",
+    boardLane: "ready",
     state: "queued",
-    harness: "Hermes",
-    cli: "opencode 1.2",
-    models: [{ model: "claude-sonnet-4-6", provider: "anthropic" }],
+    harness: "OpenClaw",
+    cli: "claude-code 0.8.3",
+    models: [{ model: "claude-opus-4-7", provider: "anthropic" }],
     tokensIn: 0,
     tokensOut: 0,
     costUsd: 0,
     iterations: 0,
     updated: "queued",
+    repo: "morgan-md-sandbox",
   },
   {
     id: "T-311",

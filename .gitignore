@@ -31,3 +31,6 @@ Thumbs.db
 .env
 .env.local
 .env.*.local
+
+# Local dev screenshots
+.screenshots-*.png

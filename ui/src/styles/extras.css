@@ -81,6 +81,102 @@
   gap: 14px;
   align-items: flex-start;
 }
+/* Projects board: stages as horizontal bands, tasks as cards in a row */
+.projects-board {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.projects-board__band {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.projects-board__band-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 2px 2px 10px;
+  border-bottom: 1px dashed var(--border-subtle);
+}
+.projects-board__cards {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: stretch;
+}
+.projects-board__card {
+  flex: 1 1 260px;
+  min-width: 220px;
+  max-width: min(100%, 420px);
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-surface-2);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 1.35;
+}
+button.projects-board__card {
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  appearance: none;
+}
+button.projects-board__card:hover {
+  border-color: var(--accent-border);
+  background: var(--bg-surface);
+}
+.projects-detail-body {
+  position: absolute;
+  inset: 0;
+  padding: 56px 20px 24px;
+  overflow-y: auto;
+  background: var(--bg-app);
+}
+.projects-board__card-project {
+  font-weight: 600;
+  color: var(--fg-primary);
+  font-size: 12px;
+}
+.projects-board__card-task {
+  min-height: 2.6em;
+  color: var(--fg-secondary);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.projects-board__card-foot {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: auto;
+  padding-top: 2px;
+}
+.projects-board__card-foot .chip {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.projects-board__card-assign {
+  font-size: 11px;
+  color: var(--fg-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+}
 .kanban__col {
   background: var(--bg-surface);
   border: 1px solid var(--border-subtle);
@@ -255,6 +351,234 @@
 }
 .debate__aside {
   display: flex; flex-direction: column; gap: 12px;
+}
+
+/* ----- Morgan chat panel (Text mode, inside .debate__stage) ----- */
+.morgan-chat-panel {
+  display: flex; flex-direction: column;
+  width: 100%; height: 100%;
+  background: oklch(8% 0.01 258 / 0.55);
+  border: 1px solid oklch(100% 0 0 / 0.06);
+  border-radius: 12px;
+  overflow: hidden;
+  backdrop-filter: blur(6px);
+}
+.morgan-chat-panel__head {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid oklch(100% 0 0 / 0.06);
+  background: oklch(10% 0.01 258 / 0.75);
+  flex-shrink: 0;
+}
+.morgan-chat-panel__avatar {
+  width: 30px; height: 30px; border-radius: 50%;
+  object-fit: cover; object-position: center 22%;
+  border: 1px solid oklch(70% 0.15 282 / 0.45);
+  box-shadow: 0 0 10px oklch(70% 0.15 282 / 0.35);
+  flex-shrink: 0;
+}
+.morgan-chat-panel__head-text {
+  display: flex; flex-direction: column; line-height: 1.25;
+}
+.morgan-chat-panel__name {
+  font-size: 13px; font-weight: 600; color: var(--fg-primary);
+  letter-spacing: -0.1px;
+}
+.morgan-chat-panel__status {
+  font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--fg-muted);
+}
+.morgan-chat-panel .morgan-chat {
+  flex: 1 1 auto; min-height: 0;
+  padding: 14px 16px 18px;
+  background: transparent;
+}
+.morgan-chat__empty {
+  margin: auto;
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  text-align: center; max-width: 320px;
+  color: var(--fg-muted);
+  padding: 28px 18px;
+}
+.morgan-chat__empty-avatar {
+  width: 54px; height: 54px; border-radius: 50%;
+  object-fit: cover; object-position: center 22%;
+  border: 1px solid oklch(70% 0.15 282 / 0.45);
+  box-shadow: 0 0 18px oklch(70% 0.15 282 / 0.35);
+  margin-bottom: 2px;
+}
+.morgan-chat__empty-title {
+  font-size: 13.5px; font-weight: 600; color: var(--fg-primary);
+}
+.morgan-chat__empty-sub {
+  font-size: 12px; line-height: 1.5;
+}
+
+.chat-row {
+  display: flex; align-items: flex-end; gap: 8px;
+  max-width: 100%;
+}
+.chat-row--morgan { justify-content: flex-start; }
+.chat-row--user { justify-content: flex-end; }
+.chat-row__avatar {
+  width: 22px; height: 22px; border-radius: 50%;
+  object-fit: cover; object-position: center 22%;
+  border: 1px solid oklch(70% 0.15 282 / 0.45);
+  flex-shrink: 0;
+  margin-bottom: 2px;
+}
+
+.chat-bubble.is-typing { min-width: 48px; }
+.chat-bubble__dots {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 2px;
+}
+.chat-bubble__dots span {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--fg-muted);
+  animation: chat-typing 1.2s ease-in-out infinite;
+}
+.chat-bubble__dots span:nth-child(2) { animation-delay: 0.18s; }
+.chat-bubble__dots span:nth-child(3) { animation-delay: 0.36s; }
+@keyframes chat-typing {
+  0%, 80%, 100% { transform: translateY(0); opacity: 0.35; }
+  40% { transform: translateY(-3px); opacity: 1; }
+}
+
+.morgan-chat-panel__project {
+  margin-left: 4px;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--fg-muted);
+}
+.morgan-chat-panel__project .mono {
+  color: var(--fg-primary);
+}
+
+/* System-event rows in the chat — subtle divider-like chip so the user can
+   see context changes (project created / switched) without Morgan having to
+   speak them in-band. */
+.chat-row--system {
+  justify-content: center;
+}
+.chat-bubble.system {
+  background: oklch(12% 0.015 258 / 0.65);
+  border: 1px solid oklch(100% 0 0 / 0.08);
+  color: var(--fg-muted);
+  font-size: 11.5px;
+  line-height: 1.45;
+  padding: 6px 12px;
+  border-radius: 999px;
+  max-width: 90%;
+  text-align: center;
+}
+
+/* ----- Project context panel (Morgan right rail) ----- */
+.project-ctx .section__head {
+  align-items: flex-start;
+}
+.project-ctx__meta {
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 10px 0 2px 0;
+  border-top: 1px dashed var(--border-subtle);
+  margin-top: 10px;
+}
+.project-ctx__meta-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  min-height: 20px;
+}
+.project-ctx__list {
+  display: flex; flex-direction: column; gap: 4px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border-subtle);
+  max-height: 260px;
+  overflow-y: auto;
+}
+.project-ctx__item {
+  display: flex; align-items: center; gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--fg-primary);
+  text-align: left;
+  cursor: pointer;
+  transition: background 120ms, border-color 120ms;
+}
+.project-ctx__item:hover {
+  background: oklch(100% 0 0 / 0.04);
+  border-color: var(--border-subtle);
+}
+.project-ctx__item--active {
+  background: oklch(70% 0.15 282 / 0.12);
+  border-color: oklch(70% 0.15 282 / 0.45);
+}
+.project-ctx__item-icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; color: var(--fg-muted);
+}
+.project-ctx__item--active .project-ctx__item-icon { color: oklch(82% 0.1 282); }
+.project-ctx__item-name {
+  flex: 1 1 auto;
+  font-size: 12.5px;
+  letter-spacing: -0.1px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.project-ctx__item-badge {
+  font-size: 9.5px; letter-spacing: 0.08em; text-transform: uppercase;
+  padding: 1px 6px; border-radius: 999px;
+  background: oklch(70% 0.15 140 / 0.18);
+  color: oklch(85% 0.12 140);
+  border: 1px solid oklch(70% 0.15 140 / 0.35);
+}
+.project-ctx__item-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: oklch(82% 0.18 282);
+  box-shadow: 0 0 6px oklch(82% 0.18 282 / 0.6);
+}
+
+/* ----- Modal (new project) ----- */
+.modal-backdrop {
+  position: fixed; inset: 0; z-index: 80;
+  background: oklch(6% 0.01 258 / 0.55);
+  backdrop-filter: blur(3px);
+  display: flex; align-items: center; justify-content: center;
+  padding: 24px;
+}
+.modal {
+  width: min(520px, 100%);
+  background: oklch(10% 0.01 258 / 0.96);
+  border: 1px solid oklch(100% 0 0 / 0.08);
+  border-radius: 14px;
+  box-shadow: 0 24px 60px -20px rgba(0,0,0,0.6);
+  overflow: hidden;
+  display: flex; flex-direction: column;
+}
+.modal__head {
+  padding: 18px 20px 12px;
+  border-bottom: 1px solid oklch(100% 0 0 / 0.06);
+}
+.modal__body {
+  padding: 16px 20px;
+  display: flex; flex-direction: column; gap: 14px;
+}
+.modal__foot {
+  padding: 12px 20px;
+  display: flex; justify-content: flex-end; gap: 8px;
+  border-top: 1px solid oklch(100% 0 0 / 0.06);
+  background: oklch(8% 0.01 258 / 0.6);
+}
+.field {
+  display: flex; flex-direction: column; gap: 6px;
+}
+.field__label {
+  font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--fg-muted);
+}
+.field__hint {
+  font-size: 11.5px; color: var(--fg-muted); line-height: 1.45;
 }
 
 /* ----- Service grid (Infrastructure) ----- */
@@ -488,20 +812,55 @@
 
 /* ----- GitLab full-bleed iframe (replaces the old mock facade) ----- */
 .gitlab-fullbleed {
-  /* eat the .content padding so the iframe sits flush */
-  margin: -20px -24px;
-  height: calc(100vh - var(--app-header-h, 56px));
+  /* In `.pane--fullbleed` the content pane and body have no padding, so the
+     embed can fill its flex parent directly. */
+  flex: 1;
+  width: 100%;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   background: var(--bg-surface);
 }
+/* Bumped specificity (`.pane.pane--fullbleed`) so these rules win against the
+   default `.pane--wide .pane__body { display: block }` further down in this
+   file, regardless of source order. */
+.pane.pane--fullbleed {
+  max-width: none;
+  width: 100%;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+}
+.pane.pane--fullbleed .pane__body {
+  flex: 1;
+  min-height: 0;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  grid-template-columns: none;
+}
+/* In fullbleed mode the surrounding .content padding + auto scroll would
+   reintroduce the "floating inside a window" look that made the embed feel
+   buried. Collapse the content wrapper into a flex column only when a
+   fullbleed pane is inside. */
+.content:has(.pane.pane--fullbleed) {
+  padding: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
 .gitlab-fullbleed__bar {
-  display: flex; align-items: center; gap: 8px;
-  padding: 8px 14px;
+  display: flex; align-items: center; gap: 6px;
+  padding: 3px 10px;
+  min-height: 26px;
   background: oklch(12% 0.03 280);
   border-bottom: 1px solid var(--border-subtle);
   color: var(--fg-muted);
-  font-size: 11.5px;
+  font-size: 11px;
+  line-height: 1;
   flex-shrink: 0;
 }
 .gitlab-fullbleed__host {
@@ -511,21 +870,32 @@
 .gitlab-fullbleed__path {
   color: var(--fg-muted);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 10.5px;
+  max-width: 240px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.gitlab-fullbleed__nav {
+  display: inline-flex; align-items: center; gap: 4px;
+  margin-left: 4px;
 }
 .gitlab-fullbleed__spacer { flex: 1; }
 .gitlab-fullbleed__divider {
-  width: 1px; height: 18px;
+  width: 1px; height: 14px;
   background: var(--border-subtle);
-  margin: 0 4px;
+  margin: 0 2px;
 }
 .gitlab-fullbleed__chip {
-  padding: 3px 10px;
+  padding: 2px 8px;
+  height: 20px;
+  display: inline-flex; align-items: center;
   background: transparent;
   color: var(--fg-secondary);
   border: 1px solid var(--border-subtle);
   border-radius: 999px;
-  font-size: 11px;
+  font-size: 10.5px;
+  line-height: 1;
   cursor: pointer;
   transition: background 120ms, color 120ms, border-color 120ms;
 }
@@ -540,12 +910,13 @@
 }
 .gitlab-fullbleed__icon {
   display: inline-flex; align-items: center; justify-content: center;
-  width: 24px; height: 24px;
+  width: 20px; height: 20px;
   background: transparent;
   color: var(--fg-secondary);
   border: 1px solid var(--border-subtle);
-  border-radius: 6px;
+  border-radius: 5px;
   cursor: pointer;
+  text-decoration: none;
 }
 .gitlab-fullbleed__icon:hover {
   background: var(--bg-hover);
@@ -1153,6 +1524,55 @@
   color: var(--fg-primary);
 }
 
+.session-full__diag {
+  position: fixed;
+  left: 12px;
+  right: 12px;
+  top: 54px;
+  z-index: 35;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border-subtle);
+  background: oklch(14.5% 0.008 258 / 0.72);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+.session-full__diag-chip {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 10px;
+  height: 20px;
+}
+.session-full__diag-chip--checking {
+  border-color: var(--accent-border);
+  color: var(--accent-11);
+}
+.session-full__diag-chip--ok {
+  border-color: oklch(72% 0.15 155 / 0.5);
+  color: var(--state-success);
+}
+.session-full__diag-chip--missing {
+  border-color: oklch(65% 0.22 22 / 0.5);
+  color: var(--state-danger);
+}
+.session-full__diag-chip--error {
+  border-color: oklch(65% 0.22 22 / 0.5);
+  color: var(--state-danger);
+}
+.session-full__diag-chip--idle {
+  color: var(--fg-muted);
+}
+.session-full__diag-note {
+  font-size: 11px;
+  color: var(--fg-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .tweaks {
   position: fixed;
   right: 24px;
@@ -1233,6 +1653,7 @@
 [data-density="compact"] .section { gap: 8px; margin-bottom: 14px; }
 [data-density="compact"] .pane__header { padding-bottom: 10px; }
 [data-density="compact"] .kanban__card { padding: 10px 12px; }
+[data-density="compact"] .projects-board__card { padding: 8px 10px; }
 [data-density="compact"] .chart-card { padding: 10px 12px; }
 
 /* Session tweaks layout override — take over the pane */

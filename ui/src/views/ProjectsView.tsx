@@ -1,622 +1,291 @@
 import { useMemo, useState } from "react";
 import {
-  IconVideo,
-  IconMic,
-  IconChat,
-  IconBracket,
-  IconTerminal,
-  IconPalette,
-  IconExternal,
-  IconSparkles,
-} from "./icons";
-import {
-  PROJECTS,
-  DEBATE_SCRIPT,
-  DEBATE_COMMITTEE,
-  type Project,
-  type ProjectStatus,
+  AGENTS,
+  TASKS,
+  TASK_STATE_CHIP,
+  TASK_STATE_LABEL,
+  taskBoardLane,
+  taskCoderUrl,
+  type ProjectBoardLane,
+  type TaskCard,
 } from "./data";
+import { CoderWorkspacePane } from "./CoderWorkspacePane";
+import { IconExternal, IconGit } from "./icons";
+import { useProjects } from "../state/projectContext";
+import type { ProjectDescriptor } from "../api/projectApi";
 
-type Mode = "video" | "voice" | "text";
-type ProjectTab = "design" | "storybook" | "tasks";
-
-const STATUSES: { key: ProjectStatus; label: string; hint: string }[] = [
-  { key: "pending", label: "Pending", hint: "dropped — awaiting intake" },
-  { key: "in_progress", label: "In Progress", hint: "committee cleared · agents building" },
-  { key: "complete", label: "Complete", hint: "shipped · summaries below" },
+const LANES: { key: ProjectBoardLane; label: string; hint: string }[] = [
+  { key: "pending", label: "Pending", hint: "Not started yet" },
+  { key: "ready", label: "Ready", hint: "Cleared to pick up" },
+  { key: "in_progress", label: "In progress", hint: "Active work" },
+  { key: "done", label: "Done", hint: "Complete" },
 ];
 
+type Selection = { task: TaskCard; lane: ProjectBoardLane };
+
+/**
+ * For every project in the live list that isn't already represented by a
+ * task, synthesize a lightweight "pending" row so newly-created projects
+ * appear on the board immediately. When the PRD hasn't been drafted yet the
+ * implied next action is "Draft PRD", otherwise "Review PRD".
+ */
+function syntheticTaskForProject(p: ProjectDescriptor): TaskCard {
+  return {
+    id: `P-${p.name}`,
+    title: p.hasPrd ? "Review PRD" : "Draft PRD",
+    projectId: p.name,
+    projectName: p.name,
+    agentId: "morgan",
+    boardLane: "pending",
+    state: "queued",
+    harness: "OpenClaw",
+    cli: "claude-code",
+    models: [{ model: "claude-opus-4-7", provider: "anthropic" }],
+    tokensIn: 0,
+    tokensOut: 0,
+    costUsd: 0,
+    iterations: 0,
+    updated: p.updatedAt ?? "new",
+    repo: p.name,
+    note: p.hasPrd
+      ? "prd.md exists — confirm and kick off intake pipeline."
+      : "Have a conversation with Morgan, then say \u201cbegin intake\u201d.",
+  };
+}
+
 export function ProjectsView() {
-  const [selected, setSelected] = useState<string | null>(null);
-  const project = useMemo(
-    () => PROJECTS.find((p) => p.id === selected) ?? null,
-    [selected],
-  );
+  const [selected, setSelected] = useState<Selection | null>(null);
+  const { projects } = useProjects();
+
+  const byLane = useMemo(() => {
+    const map: Record<ProjectBoardLane, TaskCard[]> = {
+      pending: [],
+      ready: [],
+      in_progress: [],
+      done: [],
+    };
+    for (const t of TASKS) {
+      map[taskBoardLane(t)].push(t);
+    }
+    // Surface live projects that don't yet have a task pointing at them.
+    const representedProjects = new Set(
+      TASKS.filter((t) => t.repo).map((t) => t.repo as string),
+    );
+    for (const p of projects) {
+      if (representedProjects.has(p.name)) continue;
+      map.pending.push(syntheticTaskForProject(p));
+    }
+    for (const lane of Object.keys(map) as ProjectBoardLane[]) {
+      map[lane].sort(
+        (a, b) =>
+          a.projectName.localeCompare(b.projectName) || a.title.localeCompare(b.title),
+      );
+    }
+    return map;
+  }, [projects]);
+
+  if (selected) {
+    const { task, lane } = selected;
+    if (lane === "pending" || lane === "ready") {
+      return (
+        <CoderWorkspacePane
+          task={task}
+          onBack={() => setSelected(null)}
+          backLabel="← Projects"
+          iframeTitle="Coder workspace — Morgan"
+        />
+      );
+    }
+    if (lane === "in_progress") {
+      return (
+        <ProjectsNonCoderStage
+          task={task}
+          onBack={() => setSelected(null)}
+          eyebrow="In progress"
+          title="Active task"
+          sub="Live harness session, logs, and agent stage — workspace embed is for pending / ready."
+        />
+      );
+    }
+    return (
+      <ProjectsNonCoderStage
+        task={task}
+        onBack={() => setSelected(null)}
+        eyebrow="Done"
+        title="Shipped task"
+        sub="Summary and acceptance — this lane does not open the Coder workspace."
+      />
+    );
+  }
 
   return (
     <div className="section">
-      <div className="kanban">
-        {STATUSES.map((col) => (
-          <KanbanColumn
-            key={col.key}
-            label={col.label}
-            hint={col.hint}
-            items={PROJECTS.filter((p) => p.status === col.key)}
-            selected={selected}
-            onPick={setSelected}
-          />
-        ))}
-      </div>
-
-      {project ? (
-        <ProjectDetail project={project} />
-      ) : (
-        <Debate />
-      )}
-    </div>
-  );
-}
-
-function KanbanColumn({
-  label,
-  hint,
-  items,
-  selected,
-  onPick,
-}: {
-  label: string;
-  hint: string;
-  items: Project[];
-  selected: string | null;
-  onPick: (id: string | null) => void;
-}) {
-  return (
-    <div className="kanban__col">
-      <div className="kanban__col-head">
-        <div>
-          <div className="kanban__col-title">{label}</div>
-          <div className="tiny muted" style={{ marginTop: 2 }}>
-            {hint}
-          </div>
-        </div>
-        <span className="kanban__col-count">{items.length}</span>
-      </div>
-      {items.map((p) => (
-        <button
-          type="button"
-          key={p.id}
-          className={`kanban__card${selected === p.id ? " kanban__card--active" : ""}`}
-          onClick={() => onPick(selected === p.id ? null : p.id)}
-        >
-          <div className="kanban__card-title">{p.name}</div>
-          <div className="kanban__card-meta">{p.summary}</div>
-          {p.repo ? (
-            <div className="kanban__card-row">
-              <span className="chip">
-                <IconExternal size={10} /> {p.repo}
-              </span>
-            </div>
-          ) : null}
-        </button>
-      ))}
-      {items.length === 0 ? (
-        <div
-          className="tiny muted"
-          style={{
-            border: "1px dashed var(--border-subtle)",
-            padding: "18px 12px",
-            borderRadius: 8,
-            textAlign: "center",
-          }}
-        >
-          Nothing here.
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function ProjectDetail({ project }: { project: Project }) {
-  const [tab, setTab] = useState<ProjectTab>("design");
-  return (
-    <div className="project-detail">
-      <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-end" }}>
-        <div>
-          <div className="section__eyebrow">Project</div>
-          <div className="section__title" style={{ fontSize: 18 }}>
-            {project.name}
-          </div>
-          <div className="section__sub">{project.summary}</div>
-        </div>
-        <div className="row">
-          <span className={`chip chip--${statusChip(project.status)}`}>{statusLabel(project.status)}</span>
-          {project.repo ? (
-            <span className="chip">
-              <IconExternal size={10} /> {project.repo}
-            </span>
-          ) : null}
-        </div>
-      </div>
-
-      {project.status === "complete" ? (
-        <CompleteSummary project={project} />
-      ) : (
-        <>
-          <div className="tabs">
-            <button
-              type="button"
-              className={`tab${tab === "design" ? " tab--active" : ""}`}
-              onClick={() => setTab("design")}
-            >
-              <IconPalette size={12} /> Design
-            </button>
-            <button
-              type="button"
-              className={`tab${tab === "storybook" ? " tab--active" : ""}`}
-              onClick={() => setTab("storybook")}
-            >
-              <IconBracket size={12} /> Storybook
-              <span className="tab__count">tweakcn A/B</span>
-            </button>
-            <button
-              type="button"
-              className={`tab${tab === "tasks" ? " tab--active" : ""}`}
-              onClick={() => setTab("tasks")}
-            >
-              <IconTerminal size={12} /> Tasks
-            </button>
-          </div>
-
-          {tab === "design" ? <DesignThread project={project} /> : null}
-          {tab === "storybook" ? <StorybookPane project={project} /> : null}
-          {tab === "tasks" ? <TasksPane project={project} /> : null}
-        </>
-      )}
-    </div>
-  );
-}
-
-function statusLabel(s: ProjectStatus) {
-  return s === "in_progress" ? "In Progress" : s === "complete" ? "Complete" : "Pending";
-}
-function statusChip(s: ProjectStatus): "accent" | "success" | "warn" {
-  return s === "complete" ? "success" : s === "in_progress" ? "accent" : "warn";
-}
-
-function DesignThread({ project }: { project: Project }) {
-  return (
-    <div className="chart-card" style={{ gap: 14 }}>
       <div className="section__head">
         <div>
-          <div className="section__eyebrow">Design thread</div>
-          <div className="section__title">Candidates selected from intake</div>
+          <div className="section__eyebrow">Projects</div>
+          <div className="section__title">Work by stage</div>
           <div className="section__sub">
-            {project.name} — three directions the committee surfaced. Pick one or branch a hybrid.
+            Pending and Ready open Morgan&apos;s Coder workspace (embedded). Other stages show a
+            different detail view.
           </div>
         </div>
-        <div className="row">
-          <button type="button" className="ghost-btn">
-            <IconSparkles size={12} /> Branch hybrid
-          </button>
-        </div>
       </div>
-      <div className="svc-grid">
-        {["Spatial", "Editorial", "Terminal"].map((name, i) => (
-          <div className="svc-card" key={name}>
-            <div className="svc-card__head">
-              <div className="svc-card__icon">
-                <IconPalette size={14} />
-              </div>
+
+      <div className="projects-board">
+        {LANES.map((col) => (
+          <section className="projects-board__band" key={col.key} aria-label={col.label}>
+            <div className="projects-board__band-head">
               <div>
-                <div className="svc-card__tag">{name.toUpperCase()}</div>
-                <div className="svc-card__title">Candidate {i + 1}</div>
+                <div className="kanban__col-title">{col.label}</div>
+                <div className="tiny muted" style={{ marginTop: 4 }}>
+                  {col.hint}
+                </div>
               </div>
+              <span className="kanban__col-count">{byLane[col.key].length}</span>
             </div>
-            <p className="svc-card__body">
-              {name === "Spatial"
-                ? "Depth, layered surfaces, accent glow — feels live, trading-desk adjacent."
-                : name === "Editorial"
-                ? "Print-quality grid, generous whitespace, type-first — great for PRD review."
-                : "Monospace, Logseq-flavored blocks — optimizes for keyboard speed and density."}
-            </p>
-            <div className="svc-card__stack">
-              <span className="mono">
-                {i === 0
-                  ? "shadcn · tokens from 5D · storybook ✓"
-                  : i === 1
-                  ? "shadcn · tweakcn preset A · storybook ✓"
-                  : "shadcn · tweakcn preset B · storybook ✓"}
-              </span>
-            </div>
-          </div>
+
+            {byLane[col.key].length > 0 ? (
+              <div className="projects-board__cards">
+                {byLane[col.key].map((task) => (
+                  <ProjectBoardCard
+                    key={task.id}
+                    task={task}
+                    onSelect={() => setSelected({ task, lane: col.key })}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div
+                className="tiny muted"
+                style={{
+                  border: "1px dashed var(--border-subtle)",
+                  padding: "18px 12px",
+                  borderRadius: 8,
+                  textAlign: "center",
+                }}
+              >
+                Nothing here.
+              </div>
+            )}
+          </section>
         ))}
       </div>
     </div>
   );
 }
 
-function StorybookPane({ project }: { project: Project }) {
+function ProjectBoardCard({
+  task,
+  onSelect,
+}: {
+  task: TaskCard;
+  onSelect: () => void;
+}) {
+  const agent = AGENTS.find((a) => a.id === task.agentId);
+  const assigned = agent?.name ?? task.agentId;
+  const statusLabel = TASK_STATE_LABEL[task.state];
+  const chip = TASK_STATE_CHIP[task.state];
+
   return (
-    <div className="chart-card">
-      <div className="section__head">
-        <div>
-          <div className="section__eyebrow">Component library</div>
-          <div className="section__title">Storybook — {project.name}</div>
-          <div className="section__sub">
-            One Storybook per project. Running side-by-side with a tweakcn A/B theme for comparison.
-            Exposed as an MCP resource so agents can reference components directly.
-          </div>
-        </div>
-        <div className="row">
-          <button type="button" className="ghost-btn">
-            <IconExternal size={12} /> Open in browser
-          </button>
-          <button type="button" className="ghost-btn">
-            <IconBracket size={12} /> MCP endpoint
-          </button>
-        </div>
+    <button type="button" className="projects-board__card" onClick={onSelect}>
+      <div className="projects-board__card-project">{task.projectName}</div>
+      <div className="projects-board__card-task" title={task.title}>
+        {task.title}
       </div>
-      <div
-        className="gitlab-embed__stage"
-        style={{ border: "1px solid var(--border-subtle)", borderRadius: 10, overflow: "hidden" }}
-      >
-        <div className="gitlab-embed__nav">
-          <div className="gitlab-embed__nav-header">Stories</div>
-          {[
-            "Primitives / Button",
-            "Primitives / Input",
-            "Primitives / Kbd",
-            "Chrome / Sidebar",
-            "Chrome / Titlebar",
-            "Views / MorganCard",
-            "Views / ServiceCard",
-            "Views / DebateTile",
-          ].map((s, i) => (
-            <div
-              key={s}
-              className={`gitlab-embed__nav-item${i === 5 ? " gitlab-embed__nav-item--active" : ""}`}
-            >
-              <IconBracket size={13} /> {s}
-            </div>
-          ))}
-        </div>
-        <div className="gitlab-embed__main">
-          <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
-            <div>
-              <div className="section__eyebrow">Views / MorganCard</div>
-              <div className="section__title">MorganCard — default</div>
-            </div>
-            <div className="row">
-              <span className="chip">storybook</span>
-              <span className="chip chip--accent">tweakcn</span>
-            </div>
-          </div>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1fr 1fr",
-              gap: 14,
-              marginTop: 6,
-            }}
-          >
-            {(["storybook", "tweakcn"] as const).map((variant) => (
-              <div
-                key={variant}
-                style={{
-                  background: "var(--bg-surface)",
-                  border: "1px solid var(--border-subtle)",
-                  borderRadius: 10,
-                  padding: 18,
-                  display: "grid",
-                  placeItems: "center",
-                  minHeight: 180,
-                }}
-              >
-                <div className="morgan-card is-active" style={{ margin: 0, width: 232 }}>
-                  <div className="morgan-row">
-                    <div className="morgan-avatar">M</div>
-                    <div className="morgan-meta">
-                      <div className="morgan-name">Morgan</div>
-                      <div className="morgan-role">{variant === "storybook" ? "v0 tokens" : "tweakcn preset A"}</div>
-                    </div>
-                  </div>
-                  <div className="morgan-cta">
-                    <span className="morgan-pill">
-                      <IconVideo size={12} /> Video
-                    </span>
-                    <span className="morgan-pill">
-                      <IconMic size={12} /> Voice
-                    </span>
-                    <span className="morgan-pill">
-                      <IconChat size={12} /> Chat
-                    </span>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
+      <div className="projects-board__card-foot">
+        <span className={`chip chip--${chip}`}>{statusLabel}</span>
+        <span className="projects-board__card-assign" title={assigned}>
+          {assigned}
+        </span>
       </div>
-    </div>
+    </button>
   );
 }
 
-function TasksPane({ project }: { project: Project }) {
-  const [mode, setMode] = useState<Mode>("video");
-  return (
-    <div className="task-stage">
-      <div className="task-panel">
-        <div className="task-chrome">
-          <div className="task-avatar-lg">A</div>
-          <div className="task-meta-col">
-            <div className="task-meta-col__name">Angie</div>
-            <div className="task-meta-col__role">
-              agent architect · {project.name} · fix flaky settle test
-            </div>
-            <div className="task-meta-col__chips">
-              <span className="chip chip--accent">
-                <IconTerminal size={10} /> harness · OpenClaw
-              </span>
-              <span className="chip">
-                <IconBracket size={10} /> ACP CLI · claude-code 0.8.3
-              </span>
-              <span className="modelchip">
-                claude-opus-4-7 <span className="modelchip__provider">· anthropic</span>
-              </span>
-              <span className="modelchip">
-                gemini-2.5-pro <span className="modelchip__provider">· google</span>
-              </span>
-            </div>
-          </div>
-        </div>
+function ProjectsNonCoderStage({
+  task,
+  onBack,
+  eyebrow,
+  title,
+  sub,
+}: {
+  task: TaskCard;
+  onBack: () => void;
+  eyebrow: string;
+  title: string;
+  sub: string;
+}) {
+  const agent = AGENTS.find((a) => a.id === task.agentId);
+  const assigned = agent?.name ?? task.agentId;
+  const coderUrl = taskCoderUrl(task);
 
-        <div
-          className="debate__stage"
-          style={{ minHeight: 240, borderRadius: 10, position: "relative" }}
+  return (
+    <div className="session-full">
+      <div className="session-full__overlay">
+        <button type="button" className="session-full__back" onClick={onBack} aria-label="Back">
+          ← Projects
+        </button>
+        <span className="mono tiny muted">{task.id}</span>
+        <span className={`chip chip--${TASK_STATE_CHIP[task.state]}`}>
+          {TASK_STATE_LABEL[task.state]}
+        </span>
+        <span className="session-full__spacer" />
+        {task.branch ? (
+          <span className="session-full__branch">
+            <IconGit size={12} /> {task.branch}
+          </span>
+        ) : null}
+        <a
+          className="session-full__icon-btn"
+          href={coderUrl}
+          target="_blank"
+          rel="noreferrer"
+          title="Open Coder in new tab"
         >
-          <div className="debate__grid" />
-          <div className="debate__live">LIVE · {mode}</div>
-          <div
-            className="debate__committee"
-            style={{ gridTemplateColumns: "1fr", gridTemplateRows: "1fr", inset: 30 }}
-          >
-            <div
-              className="debate__tile"
-              style={{
-                ["--tile-hue" as string]: 200,
-                maxWidth: 160,
-                gridColumn: 1,
-                gridRow: 1,
-              }}
-            >
-              <div className="debate__speaking-ring" />
-              <div className="debate__tile-initial">A</div>
-              <div className="debate__tile-label">
-                <span>Angie</span>
-                <span className="debate__tile-speaking">● LIVE</span>
-              </div>
+          <IconExternal size={12} />
+        </a>
+      </div>
+
+      <div className="projects-detail-body">
+        <div className="chart-card" style={{ maxWidth: 560, margin: "0 auto" }}>
+          <div className="section__head">
+            <div>
+              <div className="section__eyebrow">{eyebrow}</div>
+              <div className="section__title">{title}</div>
+              <div className="section__sub">{sub}</div>
             </div>
           </div>
-          <div className="debate__subs" style={{ bottom: 72 }}>
-            <div className="debate__sub-line" style={{ ["--who-hue" as string]: 200 }}>
-              <span className="debate__sub-who">Angie:</span>
-              <span>
-                Replaced poll() with poll_until(tx, 5s) + exponential backoff. Suite is green, 12
-                of 12 passed.
+          <div className="mem-list" style={{ gap: 10 }}>
+            <div className="mem-list-item">
+              <span>Project</span>
+              <span className="count">{task.projectName}</span>
+            </div>
+            <div className="mem-list-item">
+              <span>Task</span>
+              <span className="count" style={{ textAlign: "right", maxWidth: "65%" }}>
+                {task.title}
               </span>
             </div>
-          </div>
-          <div className="debate__mode">
-            <button
-              type="button"
-              className={`debate__mode-btn${mode === "video" ? " debate__mode-btn--active" : ""}`}
-              onClick={() => setMode("video")}
-            >
-              <IconVideo size={13} /> Video
-            </button>
-            <button
-              type="button"
-              className={`debate__mode-btn${mode === "voice" ? " debate__mode-btn--active" : ""}`}
-              onClick={() => setMode("voice")}
-            >
-              <IconMic size={13} /> Voice
-            </button>
-            <button
-              type="button"
-              className={`debate__mode-btn${mode === "text" ? " debate__mode-btn--active" : ""}`}
-              onClick={() => setMode("text")}
-            >
-              <IconChat size={13} /> Text
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <div className="task-panel">
-        <div className="section__head">
-          <div>
-            <div className="section__eyebrow">Task tree</div>
-            <div className="section__title">3 epics · 9 tasks</div>
-          </div>
-        </div>
-        <div className="mem-list" style={{ gap: 2 }}>
-          {[
-            ["Fix flaky settle tests", "Angie · running"],
-            ["Update release notes", "Morgan · queued"],
-            ["Gate on p99 budget", "Atlas · queued"],
-            ["Typed-data schema", "Blaze · done"],
-            ["Operator registration", "Blaze · running"],
-            ["Slashing window spike", "Vega · blocked"],
-          ].map(([title, meta]) => (
-            <div className="mem-list-item" key={title}>
-              <span>{title}</span>
-              <span className="count">{meta}</span>
+            <div className="mem-list-item">
+              <span>Assigned</span>
+              <span className="count">{assigned}</span>
             </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function CompleteSummary({ project }: { project: Project }) {
-  return (
-    <div className="summary-card">
-      <h3>What shipped</h3>
-      <p>
-        {project.name} is done. Below is the plain-language summary of the work — no per-task links
-        needed.
-      </p>
-      <ul>
-        <li>
-          Foundations — Tauri shell, React UI, Radix-12 token ramp, sidebar IA landed on the
-          primary navigation we agreed on.
-        </li>
-        <li>
-          Observability — 5D OBSERVE wiring with Prometheus + Grafana + Loki + Jaeger dashboards
-          pre-provisioned for every 5D service.
-        </li>
-        <li>
-          Storybook + tweakcn preset A running side-by-side so every primitive has an A/B theme
-          version.
-        </li>
-        <li>Acceptance criteria hit — 12/12 integration + visual snapshots.</li>
-      </ul>
-    </div>
-  );
-}
-
-function Debate() {
-  const [mode, setMode] = useState<Mode>("video");
-  const [cursor, setCursor] = useState(0);
-  const active = DEBATE_SCRIPT[cursor % DEBATE_SCRIPT.length];
-
-  return (
-    <div className="debate">
-      <div className="debate__stage">
-        <div className="debate__grid" />
-        <div className="debate__live">LIVE · {mode}</div>
-        <div className="debate__committee">
-          <div
-            className="debate__tile debate__tile--moderator"
-            style={{ ["--tile-hue" as string]: 282 }}
-          >
-            {active.who === "Optimus Pestimus" ? (
-              <div className="debate__speaking-ring" />
+            <div className="mem-list-item">
+              <span>Harness</span>
+              <span className="count">{task.harness}</span>
+            </div>
+            <div className="mem-list-item">
+              <span>Updated</span>
+              <span className="count">{task.updated}</span>
+            </div>
+            {task.note ? (
+              <div className="tiny muted" style={{ lineHeight: 1.5, paddingTop: 4 }}>
+                {task.note}
+              </div>
             ) : null}
-            <div className="debate__tile-initial">OP</div>
-            <div className="debate__tile-label">
-              <span>Optimus Pestimus</span>
-              <span className={active.who === "Optimus Pestimus" ? "debate__tile-speaking" : ""}>
-                {active.who === "Optimus Pestimus" ? "● speaking" : "mod"}
-              </span>
-            </div>
           </div>
-          {DEBATE_COMMITTEE.map((d, i) => {
-            const speaking = active.who === d.name;
-            return (
-              <div
-                key={d.name}
-                className="debate__tile"
-                style={{
-                  ["--tile-hue" as string]: d.hue,
-                  gridColumn: (i % 3) + 1,
-                  gridRow: 2,
-                }}
-              >
-                {speaking ? <div className="debate__speaking-ring" /> : null}
-                <div className="debate__tile-initial">{d.name.charAt(0)}</div>
-                <div className="debate__tile-label">
-                  <span>
-                    {d.name} <span className="muted">· {d.role}</span>
-                  </span>
-                  <span className={speaking ? "debate__tile-speaking" : ""}>
-                    {speaking ? "● speaking" : ""}
-                  </span>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-
-        <div className="debate__subs">
-          {DEBATE_SCRIPT.slice(Math.max(0, cursor - 2), cursor + 1).map((line, i) => (
-            <div
-              className="debate__sub-line"
-              style={{ ["--who-hue" as string]: line.hue, opacity: 1 - (cursor - (cursor - 2 + i)) * 0.35 }}
-              key={`${line.who}-${i}-${cursor}`}
-            >
-              <span className="debate__sub-who">{line.who}:</span>
-              <span>{line.text}</span>
-            </div>
-          ))}
-        </div>
-
-        <div className="debate__mode">
-          <button
-            type="button"
-            className={`debate__mode-btn${mode === "video" ? " debate__mode-btn--active" : ""}`}
-            onClick={() => setMode("video")}
-          >
-            <IconVideo size={13} /> Video
-          </button>
-          <button
-            type="button"
-            className={`debate__mode-btn${mode === "voice" ? " debate__mode-btn--active" : ""}`}
-            onClick={() => setMode("voice")}
-          >
-            <IconMic size={13} /> Voice
-          </button>
-          <button
-            type="button"
-            className={`debate__mode-btn${mode === "text" ? " debate__mode-btn--active" : ""}`}
-            onClick={() => setMode("text")}
-          >
-            <IconChat size={13} /> Text
-          </button>
-          <span style={{ flex: 1 }} />
-          <button
-            type="button"
-            className="debate__mode-btn"
-            onClick={() => setCursor((c) => c + 1)}
-            title="Advance script"
-          >
-            Next speaker
-          </button>
         </div>
       </div>
-
-      <aside className="debate__aside">
-        <div className="chart-card">
-          <div className="section__head">
-            <div>
-              <div className="section__eyebrow">Intake</div>
-              <div className="section__title">Default state</div>
-            </div>
-          </div>
-          <p className="section__sub" style={{ margin: 0 }}>
-            Select a project from the board above to open its Design thread, Storybook, or Tasks.
-            While nothing is selected, Optimus Pestimus moderates a live debate with the committee
-            — audio and subtitles always on.
-          </p>
-        </div>
-        <div className="chart-card">
-          <div className="section__head">
-            <div>
-              <div className="section__eyebrow">Committee</div>
-              <div className="section__title">Who's on the panel</div>
-            </div>
-          </div>
-          <div className="mem-list">
-            {DEBATE_COMMITTEE.map((d) => (
-              <div className="mem-list-item" key={d.name}>
-                <span>{d.name}</span>
-                <span className="count">{d.role}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </aside>
     </div>
   );
 }

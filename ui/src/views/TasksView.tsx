@@ -3,31 +3,21 @@ import {
   IconTerminal,
   IconFilter,
   IconSearch,
-  IconExternal,
   IconClose,
-  IconRefresh,
   IconGit,
 } from "./icons";
-import { AGENTS, TASKS, CODER_URL, type TaskCard, type TaskState } from "./data";
+import {
+  AGENTS,
+  TASKS,
+  TASK_STATE_CHIP,
+  TASK_STATE_LABEL,
+  type TaskCard,
+  type TaskState,
+} from "./data";
+import { CoderWorkspacePane } from "./CoderWorkspacePane";
 
 type StateFilter = "all" | TaskState;
 type SessionView = "list" | "session";
-
-const STATE_LABEL: Record<TaskState, string> = {
-  queued: "Queued",
-  running: "Running",
-  blocked: "Blocked",
-  review: "Review",
-  done: "Done",
-};
-
-const STATE_CHIP: Record<TaskState, "accent" | "success" | "warn" | "danger" | "muted"> = {
-  queued: "muted",
-  running: "accent",
-  blocked: "danger",
-  review: "warn",
-  done: "success",
-};
 
 export function TasksView() {
   const [view, setView] = useState<SessionView>("list");
@@ -133,7 +123,7 @@ function TaskListPane({
               className={`tab${state === s ? " tab--active" : ""}`}
               onClick={() => setState(s)}
             >
-              {s === "all" ? "All" : STATE_LABEL[s as TaskState]}
+              {s === "all" ? "All" : TASK_STATE_LABEL[s as TaskState]}
               <span className="tab__count">
                 {s === "all" ? TASKS.length : TASKS.filter((t) => t.state === s).length}
               </span>
@@ -156,7 +146,9 @@ function TaskListPane({
             >
               <div className="row" style={{ justifyContent: "space-between" }}>
                 <span className="mono tiny muted">{t.id}</span>
-                <span className={`chip chip--${STATE_CHIP[t.state]}`}>{STATE_LABEL[t.state]}</span>
+                <span className={`chip chip--${TASK_STATE_CHIP[t.state]}`}>
+                  {TASK_STATE_LABEL[t.state]}
+                </span>
               </div>
               <div className="kanban__card-title" style={{ marginTop: 4 }}>{t.title}</div>
               <div className="kanban__card-meta">
@@ -211,62 +203,13 @@ function SessionStage({
   void onSwitchTask;
   const [tweaksOpen, setTweaksOpen] = useState(false);
 
-  const coderUrl = useMemo(() => {
-    const base = CODER_URL;
-    if (!task.branch) return base;
-    return `${base}&branch=${encodeURIComponent(task.branch)}`;
-  }, [task.branch]);
-
   return (
-    <div className="session-full">
-      <iframe
-        id="coder-iframe"
-        className="session-full__iframe"
-        src={coderUrl}
-        title="Coder workspace — task CRD"
-        allow="clipboard-read; clipboard-write; fullscreen"
-      />
-
-      <div className="session-full__overlay">
-        <button
-          type="button"
-          className="session-full__back"
-          onClick={onBack}
-          aria-label="Back to sessions list"
-        >
-          ← Sessions
-        </button>
-        {task.branch ? (
-          <span className="session-full__branch">
-            <IconGit size={12} /> {task.branch}
-          </span>
-        ) : null}
-        <span className={`chip chip--${STATE_CHIP[task.state]}`}>
-          {STATE_LABEL[task.state]}
-        </span>
-        <span className="session-full__spacer" />
-        <button
-          type="button"
-          className="session-full__icon-btn"
-          title="Reload workspace"
-          onClick={() => {
-            const el = document.getElementById("coder-iframe") as HTMLIFrameElement | null;
-            if (el) el.src = el.src;
-          }}
-        >
-          <IconRefresh size={12} />
-        </button>
-        <a
-          className="session-full__icon-btn"
-          href={coderUrl}
-          target="_blank"
-          rel="noreferrer"
-          title="Open in new tab"
-        >
-          <IconExternal size={12} />
-        </a>
-      </div>
-
+    <CoderWorkspacePane
+      task={task}
+      onBack={onBack}
+      backLabel="← Sessions"
+      iframeTitle="Coder workspace — task CRD"
+    >
       {tweaksOpen ? (
         <TweaksPanel onClose={() => setTweaksOpen(false)} />
       ) : (
@@ -278,7 +221,7 @@ function SessionStage({
           Tweaks
         </button>
       )}
-    </div>
+    </CoderWorkspacePane>
   );
 }
 

@@ -15,6 +15,7 @@ export const INVESTOR_MORGAN_AGENT_ID = "agent_0b8ca791bd37c632";
 const LEMON_SLICE_SCRIPT =
   "https://unpkg.com/@lemonsliceai/lemon-slice-widget@1.0.27/dist/index.js";
 const LEMON_SLICE_SCRIPT_ID = "lemon-slice-widget-loader";
+const WIDGET_HOST_TAG = "lemon-slice-widget";
 
 interface LemonSliceWidgetElement extends HTMLElement {
   mute?: () => Promise<void>;
@@ -31,6 +32,9 @@ interface LemonSliceWidgetProps {
   className?: string;
   autoStartConversation?: boolean;
 }
+
+let sharedWidgetEl: LemonSliceWidgetElement | null = null;
+let sharedWidgetKey: string | null = null;
 
 function ensureScript() {
   if (typeof document === "undefined") return;
@@ -57,19 +61,31 @@ export function LemonSliceWidget({
     const containerEl = containerRef.current;
     if (!containerEl) return;
 
-    const el = document.createElement("lemon-slice-widget") as LemonSliceWidgetElement;
-    el.setAttribute("agent-id", agentId);
-    el.setAttribute("initial-state", initialState);
-    if (initialState === "active") {
-      el.setAttribute("controlled-widget-state", "active");
+    const widgetKey = `${agentId}::${initialState}::${inline ? "inline" : "floating"}`;
+    if (!sharedWidgetEl || sharedWidgetKey !== widgetKey) {
+      const next = document.createElement(WIDGET_HOST_TAG) as LemonSliceWidgetElement;
+      next.setAttribute("agent-id", agentId);
+      next.setAttribute("initial-state", initialState);
+      if (initialState === "active") {
+        next.setAttribute("controlled-widget-state", "active");
+      }
+      if (inline) next.setAttribute("inline", "true");
+      next.style.display = "block";
+      next.style.margin = "0 auto";
+      sharedWidgetEl = next;
+      sharedWidgetKey = widgetKey;
     }
-    if (inline) el.setAttribute("inline", "true");
-    el.style.display = "block";
-    el.style.margin = "0 auto";
+    const el = sharedWidgetEl;
+    if (!el) return;
 
     // Morgan is a 9:14 portrait; widget center-crops so always pass matching aspect.
     const AVATAR_ASPECT = 14 / 9;
 
+    // Keep only one widget instance globally. In React StrictMode, effects
+    // mount/unmount twice in dev — creating a second instance triggers
+    // "Duplicate DailyIframe instances are not allowed" in the widget runtime.
+    const previousHost = el.parentElement;
+    if (previousHost && previousHost !== containerEl) previousHost.removeChild(el);
     containerEl.innerHTML = "";
     containerEl.appendChild(el);
 
@@ -109,25 +125,12 @@ export function LemonSliceWidget({
       }
     };
 
-    const tryUnmute = () => {
-      try {
-        if (typeof el.unmute === "function" && el.canUnmute?.() && el.isMuted?.()) {
-          void el.unmute();
-        }
-      } catch {
-        // ignore
-      }
-    };
-
     const timers: number[] = [];
     if (typeof window !== "undefined" && window.customElements) {
       void window.customElements.whenDefined("lemon-slice-widget").then(() => {
-        void startConversation();
-        timers.push(window.setTimeout(() => void startConversation(), 500));
-        timers.push(window.setTimeout(() => void startConversation(), 1500));
-        timers.push(window.setTimeout(() => void startConversation(), 3000));
-        timers.push(window.setTimeout(tryUnmute, 300));
-        timers.push(window.setTimeout(tryUnmute, 1200));
+        // Intentionally do not auto-call media actions here. Browsers reject
+        // media playback before user interaction, causing noisy NotAllowedError
+        // logs. We start only on first pointer interaction below.
       });
     }
 

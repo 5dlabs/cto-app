@@ -32,6 +32,7 @@ import { SettingsView } from "./views/SettingsView";
 import { NewAgentModal } from "./views/NewAgentModal";
 import { AgentsView } from "./views/AgentsView";
 import { TasksView } from "./views/TasksView";
+import { ProjectProvider } from "./state/projectContext";
 
 type NavKey =
   | "morgan"
@@ -127,6 +128,7 @@ export default function App() {
   const [showNewAgent, setShowNewAgent] = useState(false);
 
   return (
+    <ProjectProvider>
     <div className="app-shell" data-motif="cyan" data-claw="angle" data-chrome="plain">
       <header className="titlebar">
         <div className="titlebar__brand">
@@ -206,6 +208,7 @@ export default function App() {
 
       <NewAgentModal open={showNewAgent} onClose={() => setShowNewAgent(false)} />
     </div>
+    </ProjectProvider>
   );
 }
 
@@ -232,6 +235,12 @@ function NavButton({
   );
 }
 
+// Views that want to fill the entire content pane (no eyebrow / title / sub
+// header above them). The embedded GitLab iframe is the obvious one — the
+// giant pane header stacked on top of GitLab's own top bar wastes a lot of
+// vertical space and made the embed feel buried.
+const FULL_BLEED_VIEWS: ReadonlySet<NavKey> = new Set(["gitlab"]);
+
 function ContentPane({
   active,
   onNewAgent,
@@ -240,21 +249,24 @@ function ContentPane({
   onNewAgent: () => void;
 }) {
   const head = TITLES[active];
+  const fullBleed = FULL_BLEED_VIEWS.has(active);
 
   return (
-    <div className="pane pane--wide">
-      <header className="pane__header">
-        <div>
-          <div className="pane__eyebrow">5D Platform</div>
-          <h1 className="pane__title">{head.title}</h1>
-          <p className="pane__sub">{head.sub}</p>
-        </div>
-        <div className="pane__actions">
-          <button className="ghost-btn" type="button">
-            <IconUsers size={12} /> Team
-          </button>
-        </div>
-      </header>
+    <div className={`pane pane--wide${fullBleed ? " pane--fullbleed" : ""}`}>
+      {!fullBleed && (
+        <header className="pane__header">
+          <div>
+            <div className="pane__eyebrow">5D Platform</div>
+            <h1 className="pane__title">{head.title}</h1>
+            <p className="pane__sub">{head.sub}</p>
+          </div>
+          <div className="pane__actions">
+            <button className="ghost-btn" type="button">
+              <IconUsers size={12} /> Team
+            </button>
+          </div>
+        </header>
+      )}
 
       <section className="pane__body">
         <ViewRouter active={active} onNewAgent={onNewAgent} />
