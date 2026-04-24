@@ -73,15 +73,7 @@ jobs:
         run: |
           helm push "${PACKAGE}" "oci://${GITLAB_REGISTRY}/${{ vars.GITLAB_HELM_PATH }}"
 
-      - name: Ensure GHCR package is public
-        if: github.ref == 'refs/heads/main'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          # Package name is the chart name; visibility flip is a one-time op
-          # but running it repeatedly is idempotent.
-          gh api \
-            --method PATCH \
-            -H "Accept: application/vnd.github+json" \
-            "/orgs/${{ github.repository_owner }}/packages/container/helm-charts%2Fcto" \
-            -f visibility=public || true
+      # NOTE: GHCR package visibility cannot be changed by the default
+      # GITHUB_TOKEN (requires admin:packages scope on an org-owned package).
+      # Flip once via https://github.com/orgs/5dlabs/packages/container/helm-charts%2Fcto/settings
+      # or via a PAT with admin:packages.
