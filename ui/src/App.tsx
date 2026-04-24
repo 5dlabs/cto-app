@@ -274,9 +274,36 @@ function ViewRouter({
   active: NavKey;
   onNewAgent: () => void;
 }) {
+  // Morgan is special: we always render it, just hide it when another view
+  // is active. That way an in-flight voice/text reply (including LemonSlice
+  // video + audio playback) keeps streaming when the user flips over to
+  // /projects or /tasks and back. Unmounting would tear down the
+  // VoiceClient WebRTC peer, the message list, the analyser graph — every
+  // bit of state the user legitimately expects to survive a nav.
+  //
+  // We accept the small idle CPU cost of an offscreen MorganAvatar RAF loop
+  // in exchange for the UX win. If that ever shows up in a profile we can
+  // pass a `visible` prop and gate the RAF on it.
+  return (
+    <>
+      <div hidden={active !== "morgan"} style={{ height: "100%" }}>
+        <MorganView />
+      </div>
+      {active !== "morgan" ? (
+        <OtherViews active={active} onNewAgent={onNewAgent} />
+      ) : null}
+    </>
+  );
+}
+
+function OtherViews({
+  active,
+  onNewAgent,
+}: {
+  active: NavKey;
+  onNewAgent: () => void;
+}) {
   switch (active) {
-    case "morgan":
-      return <MorganView />;
     case "gitlab":
       return <GitLabView />;
     case "projects":

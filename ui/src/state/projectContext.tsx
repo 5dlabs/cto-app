@@ -100,6 +100,11 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   const [refreshing, setRefreshing] = useState(false);
 
   const abortRef = useRef<AbortController | null>(null);
+  // Guard so the one-shot "hydrate active project from pod" effect doesn't
+  // re-run whenever activeProject changes (e.g. when reconciliation below
+  // clears a stale name — otherwise we'd immediately restore it from the
+  // pod and loop forever).
+  const hydratedRef = useRef(false);
 
   const refresh = useCallback(async () => {
     abortRef.current?.abort();
@@ -132,10 +137,30 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     return () => abortRef.current?.abort();
   }, [refresh]);
 
-  // Hydrate active project from the pod once, if the user hasn't chosen one
-  // locally yet. Pod-side wins when we have no local preference.
+  // Background poll so Morgan-authored PRDs surface without the user hitting
+  // Refresh. 20s is a good compromise between "fresh enough that a PRD write
+  // flows to the board in one Morgan reply cycle" and "doesn't hammer the
+  // GitHub API" — the sidecar already caches listProjects() for 10 minutes,
+  // so most of these are no-ops server-side. Runs regardless of which view
+  // is active because we can't cheaply detect "Morgan is on screen" here.
   useEffect(() => {
-    if (activeProject) return;
+    const id = window.setInterval(() => {
+      void refresh();
+    }, 20_000);
+    return () => window.clearInterval(id);
+  }, [refresh]);
+
+  // Hydrate active project from the pod ONCE on first mount when the user
+  // hasn't picked one locally. The hydratedRef guard is load-bearing —
+  // otherwise this re-fires every time reconciliation (below) clears a
+  // stale name and the pod's stale value gets re-hydrated in a loop.
+  useEffect(() => {
+    if (hydratedRef.current) return;
+    if (activeProject) {
+      hydratedRef.current = true;
+      return;
+    }
+    hydratedRef.current = true;
     let cancelled = false;
     void (async () => {
       try {
@@ -153,6 +178,26 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       cancelled = true;
     };
   }, [activeProject]);
+
+  // Reconcile a stale activeProject against the live list. When the user's
+  // localStorage points at a project the sidecar no longer knows about
+  // (renamed, archived, wrong org, …), the ProjectContextPanel header used
+  // to show a ghost entry and the create-flow defaulted to a name that
+  // didn't exist. Clear it so the UI falls back to "No project active" and
+  // the user picks again.
+  //
+  // Guarded on source==="live" so we don't nuke the selection every time
+  // the sidecar flaps offline and we temporarily see the empty stub list.
+  useEffect(() => {
+    if (source !== "live") return;
+    if (!activeProject) return;
+    const stillExists = projects.some((p) => p.name === activeProject);
+    if (stillExists) return;
+    setActiveProject(null);
+    writeStoredActive(null);
+    // Best-effort tell the pod too, so the next code-server launch starts clean.
+    void projectApi.setActive(null).catch(() => {});
+  }, [source, activeProject, projects]);
 
   const setActive = useCallback(async (name: string | null) => {
     setActiveProject(name);
