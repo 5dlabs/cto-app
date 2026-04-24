@@ -23,7 +23,7 @@ spec:
     # Public OCI chart published by .github/workflows/publish-chart.yml
     repoURL: ghcr.io/5dlabs/helm-charts
     chart: cto
-    targetRevision: 0.1.0
+    targetRevision: 0.1.3
     helm:
       releaseName: cto
       # Values are supplied by the desktop bootstrap at install time via a

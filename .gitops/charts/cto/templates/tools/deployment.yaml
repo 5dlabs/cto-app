@@ -27,8 +27,10 @@ spec:
       serviceAccountName: {{ include "cto.tools.serviceAccountName" . }}
       securityContext:
         fsGroup: 1001
+        {{- if .Values.tools.dockerInDocker.enabled }}
         # GID 2375 is the docker group used by docker:dind for the socket
         supplementalGroups: [2375]
+        {{- end }}
       initContainers:
         - name: setup-directories
           image: alpine:latest
@@ -77,8 +79,10 @@ spec:
               value: "/config"
             - name: HOME
               value: "/home/app"
+            {{- if .Values.tools.dockerInDocker.enabled }}
             - name: DOCKER_HOST
               value: "unix:///var/run/docker.sock"
+            {{- end }}
           envFrom:
             # Provider API keys shared with tools (e.g. CONTEXT7, BRAVE, MINIMAX, PERPLEXITY).
             - secretRef:
@@ -123,8 +127,10 @@ spec:
               mountPath: /data
             - name: home-app
               mountPath: /home/app
+            {{- if .Values.tools.dockerInDocker.enabled }}
             - name: docker-sock-dir
               mountPath: /var/run
+            {{- end }}
             - name: tmp
               mountPath: /tmp
         {{- if .Values.tools.dockerInDocker.enabled }}
@@ -164,8 +170,10 @@ spec:
           {{- end }}
         - name: home-app
           emptyDir: {}
+        {{- if .Values.tools.dockerInDocker.enabled }}
         - name: docker-sock-dir
           emptyDir: {}
+        {{- end }}
         {{- if .Values.tools.dockerInDocker.enabled }}
         - name: docker-data
           emptyDir: {}
