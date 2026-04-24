@@ -38,6 +38,18 @@ npm install --workspaces --include-workspace-root
 npm run tauri:dev
 ```
 
+## Local Stack Bootstrap
+
+On first desktop boot the app runs a local stack bootstrap behind an
+`Installing dependencies` screen. The bootstrap detects the host OS and a
+Docker-compatible runtime, starts Docker/OrbStack/Colima when available, and on
+macOS installs Colima through Homebrew when no runtime is present.
+
+The bootstrap then installs or resolves `kind`, `kubectl`, `helm`, and the Argo
+CD CLI, creates a `cto-app` Kind cluster, configures ingress-nginx, installs the
+Argo CD controller into the `argocd` namespace, and registers the 5D Labs
+`mcp-tools` Argo CD Application into the local cluster.
+
 ## Build
 
 ```bash

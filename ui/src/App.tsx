@@ -32,6 +32,7 @@ import { NewAgentModal } from "./views/NewAgentModal";
 import { AgentsView } from "./views/AgentsView";
 import { TasksView } from "./views/TasksView";
 import { ProjectProvider } from "./state/projectContext";
+import { LocalStackBootstrap } from "./components/LocalStackBootstrap";
 
 type NavKey =
   | "morgan"
@@ -127,80 +128,82 @@ export default function App() {
   const [showNewAgent, setShowNewAgent] = useState(false);
 
   return (
-    <ProjectProvider>
-    <div className="app-shell" data-motif="cyan" data-claw="angle" data-chrome="plain">
-      <header className="titlebar">
-        <div className="titlebar__brand">
-          <IconHome size={14} />
-          <span>5D Platform</span>
-        </div>
-        <div className="titlebar__search">
-          <IconSearch size={12} />
-          <span>Search agents, sessions, docs…</span>
-          <kbd>
-            <IconCommand size={10} /> K
-          </kbd>
-        </div>
-        <div className="titlebar__actions">
-          <button className="ghost-btn" type="button" aria-label="Notifications">
-            <IconBell size={14} />
-          </button>
-        </div>
-      </header>
+    <LocalStackBootstrap>
+      <ProjectProvider>
+        <div className="app-shell" data-motif="cyan" data-claw="angle" data-chrome="plain">
+          <header className="titlebar">
+            <div className="titlebar__brand">
+              <IconHome size={14} />
+              <span>5D Platform</span>
+            </div>
+            <div className="titlebar__search">
+              <IconSearch size={12} />
+              <span>Search agents, sessions, docs…</span>
+              <kbd>
+                <IconCommand size={10} /> K
+              </kbd>
+            </div>
+            <div className="titlebar__actions">
+              <button className="ghost-btn" type="button" aria-label="Notifications">
+                <IconBell size={14} />
+              </button>
+            </div>
+          </header>
 
-      <div className="shell-body">
-        <nav className="sidebar" aria-label="Primary">
-          <div className="sidebar__group">
-            {primaryNav.map((item) => (
-              <NavButton
-                key={item.key}
-                item={item}
-                active={active === item.key}
-                onClick={() => setActive(item.key)}
-              />
-            ))}
+          <div className="shell-body">
+            <nav className="sidebar" aria-label="Primary">
+              <div className="sidebar__group">
+                {primaryNav.map((item) => (
+                  <NavButton
+                    key={item.key}
+                    item={item}
+                    active={active === item.key}
+                    onClick={() => setActive(item.key)}
+                  />
+                ))}
+              </div>
+
+              <div className="sidebar__group">
+                <div className="sidebar__label">Platform</div>
+                {platformNav.map((item) => (
+                  <NavButton
+                    key={item.key}
+                    item={item}
+                    active={active === item.key}
+                    onClick={() => setActive(item.key)}
+                  />
+                ))}
+              </div>
+
+              <div className="sidebar__spacer" />
+
+              <div className="sidebar__group">
+                <NavButton
+                  item={{ key: "settings", label: "Settings", icon: IconSettings }}
+                  active={active === "settings"}
+                  onClick={() => setActive("settings")}
+                />
+              </div>
+            </nav>
+
+            <main className="content">
+              <ContentPane active={active} onNewAgent={() => setShowNewAgent(true)} />
+            </main>
           </div>
 
-          <div className="sidebar__group">
-            <div className="sidebar__label">Platform</div>
-            {platformNav.map((item) => (
-              <NavButton
-                key={item.key}
-                item={item}
-                active={active === item.key}
-                onClick={() => setActive(item.key)}
-              />
-            ))}
-          </div>
+          <footer className="statusbar">
+            <span className="statusbar__dot" aria-hidden />
+            <span>Connected · gitlab.5dlabs.ai</span>
+            <span className="statusbar__sep">·</span>
+            <span>32 projects mirrored</span>
+            <span className="statusbar__spacer" />
+            <span>v0.1.0 · dev</span>
+          </footer>
 
-          <div className="sidebar__spacer" />
-
-          <div className="sidebar__group">
-            <NavButton
-              item={{ key: "settings", label: "Settings", icon: IconSettings }}
-              active={active === "settings"}
-              onClick={() => setActive("settings")}
-            />
-          </div>
-        </nav>
-
-        <main className="content">
-          <ContentPane active={active} onNewAgent={() => setShowNewAgent(true)} />
-        </main>
-      </div>
-
-      <footer className="statusbar">
-        <span className="statusbar__dot" aria-hidden />
-        <span>Connected · gitlab.5dlabs.ai</span>
-        <span className="statusbar__sep">·</span>
-        <span>32 projects mirrored</span>
-        <span className="statusbar__spacer" />
-        <span>v0.1.0 · dev</span>
-      </footer>
-
-      <NewAgentModal open={showNewAgent} onClose={() => setShowNewAgent(false)} />
-    </div>
-    </ProjectProvider>
+          <NewAgentModal open={showNewAgent} onClose={() => setShowNewAgent(false)} />
+        </div>
+      </ProjectProvider>
+    </LocalStackBootstrap>
   );
 }
 
