@@ -559,6 +559,35 @@ data:
           "search": { "enabled": {{ if hasKey $webSearch "enabled" }}{{ $webSearch.enabled }}{{ else }}true{{ end }} },
           "fetch": { "enabled": {{ if hasKey $webFetch "enabled" }}{{ $webFetch.enabled }}{{ else }}true{{ end }} }
         }
+        {{- if .Values.tools.acp.enabled }}
+        {{- $acp := .Values.tools.acp }}
+        {{- $acpDispatch := $acp.dispatch | default dict }}
+        {{- $acpStream := $acp.stream | default dict }}
+        {{- $acpRuntime := $acp.runtime | default dict }},
+        "acp": {
+          "enabled": true,
+          "backend": {{ $acp.backend | default "acpx" | quote }},
+          "defaultAgent": {{ $acp.defaultAgent | default "codex" | quote }},
+          "allowedAgents": {{ $acp.allowedAgents | default list | toJson }},
+          "maxConcurrentSessions": {{ $acp.maxConcurrentSessions | default 4 }},
+          "dispatch": {
+            "enabled": {{ if hasKey $acpDispatch "enabled" }}{{ $acpDispatch.enabled }}{{ else }}true{{ end }}
+          },
+          "stream": {
+            "coalesceIdleMs": {{ $acpStream.coalesceIdleMs | default 300 }},
+            "maxChunkChars": {{ $acpStream.maxChunkChars | default 1200 }}
+          },
+          "runtime": {
+            "ttlMinutes": {{ $acpRuntime.ttlMinutes | default 120 }}
+          }
+          {{- if $acp.wsUrl }},
+          "wsUrl": {{ $acp.wsUrl | quote }}
+          {{- end }}
+          {{- if $acp.tokenFile }},
+          "tokenFile": {{ $acp.tokenFile | quote }}
+          {{- end }}
+        }
+        {{- end }}
       },
       {{- if .Values.logging }}
       "logging": {

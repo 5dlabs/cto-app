@@ -84,6 +84,31 @@ jobs:
             fi
           done
 
+      - name: Render regression assertions
+        run: |
+          set -euo pipefail
+
+          helm template check .gitops/charts/cto \
+            --set tools.dockerInDocker.enabled=false \
+            > /tmp/cto-nodind.yaml
+          if grep -E 'DOCKER_HOST|docker-sock-dir|supplementalGroups|docker-daemon' /tmp/cto-nodind.yaml; then
+            echo "Docker runtime wiring rendered with tools.dockerInDocker.enabled=false" >&2
+            exit 1
+          fi
+          grep -q 'TOOLS_SERVER_URL: "http://cto-tools.cto-system.svc.cluster.local:8080/mcp"' /tmp/cto-nodind.yaml
+
+          helm template check .gitops/charts/cto \
+            --set tools.dockerInDocker.enabled=true \
+            > /tmp/cto-dind.yaml
+          grep -q 'DOCKER_HOST' /tmp/cto-dind.yaml
+          grep -q 'docker-daemon' /tmp/cto-dind.yaml
+
+          helm template check .gitops/charts/agent \
+            -f .gitops/charts/agent/ci/values-morgan.yaml \
+            > /tmp/agent-morgan.yaml
+          grep -q '"acp": {' /tmp/agent-morgan.yaml
+          grep -q '"backend": "acpx"' /tmp/agent-morgan.yaml
+
   schema-validation:
     name: Kubernetes Schema Validation
     runs-on: ubuntu-latest

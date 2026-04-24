@@ -11,3 +11,6 @@ data:
   SERVER_PORT: {{ .Values.controller.service.port | quote }}
   RUST_LOG: "info,controller=debug"
   TEMPLATES_VERSION: {{ .Values.controller.templateVersion | quote }}
+  {{- if .Values.tools.enabled }}
+  TOOLS_SERVER_URL: {{ printf "http://%s.%s.svc.cluster.local:%v/mcp" (include "cto.tools.fullname" .) (include "cto.namespace" .) .Values.tools.service.port | quote }}
+  {{- end }}
