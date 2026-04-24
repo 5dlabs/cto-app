@@ -1,0 +1,175 @@
+{{- if .Values.tools.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "cto.tools.fullname" . }}
+  namespace: {{ include "cto.namespace" . }}
+  labels:
+    {{- include "cto.tools.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  {{- if .Values.tools.workspace.enabled }}
+  # Use Recreate strategy for RWO volumes to avoid Multi-Attach errors
+  strategy:
+    type: Recreate
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "cto.tools.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "cto.tools.selectorLabels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/tools/configmap.yaml") . | sha256sum }}
+    spec:
+      {{- include "cto.imagePullSecrets" . | nindent 6 }}
+      serviceAccountName: {{ include "cto.tools.serviceAccountName" . }}
+      securityContext:
+        fsGroup: 1001
+        # GID 2375 is the docker group used by docker:dind for the socket
+        supplementalGroups: [2375]
+      initContainers:
+        - name: setup-directories
+          image: alpine:latest
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              mkdir -p /home/app/.npm/_logs
+              chown -R 1001:1001 /home/app
+              chmod 755 /home/app/.npm
+              mkdir -p /data/workspace
+              chown -R 1001:1001 /data
+              {{- if .Values.tools.dockerInDocker.enabled }}
+              mkdir -p /docker-data
+              {{- end }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: home-app
+              mountPath: /home/app
+            {{- if .Values.tools.dockerInDocker.enabled }}
+            - name: docker-data
+              mountPath: /docker-data
+            {{- end }}
+      containers:
+        - name: tools
+          image: "{{ .Values.tools.image.repository }}:{{ .Values.tools.image.tag }}"
+          imagePullPolicy: {{ .Values.tools.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1001
+            runAsGroup: 1001
+          ports:
+            - name: http
+              containerPort: {{ .Values.tools.service.port }}
+              protocol: TCP
+          env:
+            - name: PORT
+              value: {{ .Values.tools.service.port | quote }}
+            - name: RUST_LOG
+              value: "info,tools=debug"
+            - name: SYSTEM_CONFIG_PATH
+              value: "/config"
+            - name: HOME
+              value: "/home/app"
+            - name: DOCKER_HOST
+              value: "unix:///var/run/docker.sock"
+          envFrom:
+            # Provider API keys shared with tools (e.g. CONTEXT7, BRAVE, MINIMAX, PERPLEXITY).
+            - secretRef:
+                name: cto-agent-keys
+                optional: true
+            {{- $root := . }}
+            {{- range $name, $cfg := .Values.tools.servers }}
+            {{- if and $cfg.enabled $cfg.secret }}
+            - secretRef:
+                name: {{ include "cto.tools.serverSecretName" (dict "root" $root "name" $name) }}
+                optional: true
+            {{- end }}
+            {{- end }}
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 300
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          volumeMounts:
+            - name: config
+              mountPath: /config
+              readOnly: true
+            - name: data
+              mountPath: /data
+            - name: home-app
+              mountPath: /home/app
+            - name: docker-sock-dir
+              mountPath: /var/run
+            - name: tmp
+              mountPath: /tmp
+        {{- if .Values.tools.dockerInDocker.enabled }}
+        # Docker-in-Docker sidecar for Docker-based MCP servers.
+        - name: docker-daemon
+          image: docker:dind
+          securityContext:
+            privileged: true
+          env:
+            - name: DOCKER_TLS_CERTDIR
+              value: ""
+          volumeMounts:
+            - name: docker-sock-dir
+              mountPath: /var/run
+            - name: docker-data
+              mountPath: /var/lib/docker
+            - name: data
+              mountPath: /data
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+        {{- end }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "cto.tools.fullname" . }}-config
+        - name: data
+          {{- if .Values.tools.workspace.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "cto.tools.fullname" . }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        - name: home-app
+          emptyDir: {}
+        - name: docker-sock-dir
+          emptyDir: {}
+        {{- if .Values.tools.dockerInDocker.enabled }}
+        - name: docker-data
+          emptyDir: {}
+        {{- end }}
+        - name: tmp
+          emptyDir: {}
+{{- end }}

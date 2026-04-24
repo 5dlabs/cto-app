@@ -29,8 +29,21 @@ const CLUSTER_NAME: &str = "cto-app";
 const KIND_CONTEXT: &str = "kind-cto-app";
 const INGRESS_NGINX_KIND_URL: &str =
     "https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.14.3/deploy/static/provider/kind/deploy.yaml";
-const ARGOCD_INSTALL_URL: &str =
-    "https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml";
+
+// Upstream Argo CD Helm chart + our values overlay.  We prefer the chart
+// over raw `install.yaml` so we can pin the server to HTTP-only, disable
+// dex/notifications/redis-ha, and wire the NGINX ingress in one shot.
+const ARGOCD_HELM_REPO_NAME: &str = "argo";
+const ARGOCD_HELM_REPO_URL: &str = "https://argoproj.github.io/argo-helm";
+const ARGOCD_HELM_CHART: &str = "argo/argo-cd";
+const ARGOCD_HELM_RELEASE: &str = "argocd";
+const ARGOCD_NAMESPACE: &str = "argocd";
+const ARGOCD_VALUES: &str = include_str!("../../.gitops/charts/argocd/values.yaml");
+
+// CTO platform Argo Application — the only app we ship for the pre-release.
+// Published by .github/workflows/publish-chart.yml to ghcr.io.
+const CTO_APP_MANIFEST: &str = include_str!("../../.gitops/apps/cto.yaml");
+
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -85,25 +98,25 @@ pub async fn bootstrap_local_stack(window: Window) -> BootstrapResult<BootstrapR
     )?;
 
     emit(&window, "gitops", "Starting GitOps controller...", 68);
-    ensure_namespace("argocd")?;
-    apply_remote_manifest_server_side_in_namespace(ARGOCD_INSTALL_URL, "argocd").await?;
+    ensure_namespace(ARGOCD_NAMESPACE)?;
+    install_argocd().await?;
     wait_for_crd("applications.argoproj.io", "120s")?;
     wait_for_crd("appprojects.argoproj.io", "120s")?;
-    wait_for_rollout("argocd", "deployment/argocd-server", "300s")?;
-    wait_for_rollout("argocd", "deployment/argocd-repo-server", "300s")?;
+    wait_for_rollout(ARGOCD_NAMESPACE, "deployment/argocd-server", "300s")?;
+    wait_for_rollout(ARGOCD_NAMESPACE, "deployment/argocd-repo-server", "300s")?;
     wait_for_rollout(
-        "argocd",
+        ARGOCD_NAMESPACE,
         "deployment/argocd-applicationset-controller",
         "300s",
     )?;
     wait_for_rollout(
-        "argocd",
+        ARGOCD_NAMESPACE,
         "statefulset/argocd-application-controller",
         "300s",
     )?;
 
     emit(&window, "tools", "Registering platform tools...", 86);
-    apply_manifest(PLATFORM_TOOLS_MANIFEST)?;
+    apply_manifest(CTO_APP_MANIFEST)?;
 
     emit(&window, "ready", "Launching Codex App...", 100);
 
@@ -519,24 +532,6 @@ async fn apply_remote_manifest_server_side(url: &str) -> BootstrapResult<()> {
     )
 }
 
-async fn apply_remote_manifest_server_side_in_namespace(
-    url: &str,
-    namespace: &str,
-) -> BootstrapResult<()> {
-    apply_manifest_with_args(
-        &download_manifest(url).await?,
-        &[
-            "apply",
-            "--server-side",
-            "--force-conflicts",
-            "-n",
-            namespace,
-            "-f",
-            "-",
-        ],
-    )
-}
-
 async fn download_manifest(url: &str) -> BootstrapResult<String> {
     let response = reqwest::get(url)
         .await
@@ -677,6 +672,92 @@ fn kind_command() -> Command {
         command.env("KIND_EXPERIMENTAL_PROVIDER", "podman");
     }
     command
+}
+
+fn helm_command() -> Command {
+    let mut command = tool_command("helm");
+    command.args(["--kube-context", KIND_CONTEXT]);
+    command
+}
+
+async fn install_argocd() -> BootstrapResult<()> {
+    // Register the argo-helm repo (idempotent) and refresh its index.
+    {
+        let mut cmd = helm_command();
+        cmd.args([
+            "repo",
+            "add",
+            ARGOCD_HELM_REPO_NAME,
+            ARGOCD_HELM_REPO_URL,
+            "--force-update",
+        ]);
+        run_expecting_success(cmd, "helm repo add argo")?;
+    }
+    {
+        let mut cmd = helm_command();
+        cmd.args(["repo", "update", ARGOCD_HELM_REPO_NAME]);
+        run_expecting_success(cmd, "helm repo update argo")?;
+    }
+
+    // Stream our overlay in via stdin rather than writing a temp file — keeps
+    // install reproducible and avoids leaking files on failure paths.
+    let mut cmd = helm_command();
+    cmd.args([
+        "upgrade",
+        "--install",
+        ARGOCD_HELM_RELEASE,
+        ARGOCD_HELM_CHART,
+        "--namespace",
+        ARGOCD_NAMESPACE,
+        "--create-namespace",
+        "--wait",
+        "--timeout",
+        "10m",
+        "-f",
+        "-",
+    ]);
+
+    let mut child = cmd
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("helm upgrade failed to spawn: {}", error))?;
+
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin
+            .write_all(ARGOCD_VALUES.as_bytes())
+            .map_err(|error| format!("helm upgrade stdin write failed: {}", error))?;
+    }
+
+    let output = child
+        .wait_with_output()
+        .map_err(|error| format!("helm upgrade wait failed: {}", error))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "helm upgrade --install argocd failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    Ok(())
+}
+
+fn run_expecting_success(mut command: Command, action: &str) -> BootstrapResult<()> {
+    let output = command
+        .output()
+        .map_err(|error| format!("{} failed to run: {}", action, error))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "{} failed: {}",
+            action,
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    Ok(())
 }
 
 fn docker_ready() -> bool {
@@ -826,44 +907,3 @@ fn ensure_runtime_tool_paths_on_process() {
         std::env::set_var("PATH", path);
     }
 }
-
-const PLATFORM_TOOLS_MANIFEST: &str = r#"
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: cto-system
----
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
-  name: mcp-tools
-  namespace: argocd
-  finalizers:
-    - resources-finalizer.argocd.argoproj.io/background
-spec:
-  project: default
-  source:
-    repoURL: registry.5dlabs.ai/5dlabs/helm-charts
-    targetRevision: "0.1.0"
-    chart: mcp-tools
-    helm:
-      values: |
-        tools:
-          github:
-            enabled: true
-          linear:
-            enabled: true
-          filesystem:
-            enabled: true
-          kubernetes:
-            enabled: true
-  destination:
-    server: https://kubernetes.default.svc
-    namespace: cto-system
-  syncPolicy:
-    automated:
-      prune: true
-      selfHeal: true
-    syncOptions:
-      - CreateNamespace=true
-"#;

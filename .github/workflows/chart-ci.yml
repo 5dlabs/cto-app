@@ -1,0 +1,179 @@
+name: chart-ci
+
+# Chart + GitOps validation for the `.gitops/` tree.  Ported from
+# 5dlabs/cto infra-ci.yaml (helm-validation + yaml-lint + schema-validation)
+# and trimmed to what's in scope for the desktop repo.
+
+on:
+  pull_request:
+    paths:
+      - ".gitops/**"
+      - ".github/workflows/chart-ci.yml"
+      - ".yamllint.yaml"
+  push:
+    branches: [main]
+    paths:
+      - ".gitops/**"
+      - ".github/workflows/chart-ci.yml"
+      - ".yamllint.yaml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  KUBECONFORM_VERSION: v0.6.4
+
+jobs:
+  yaml-lint:
+    name: YAML Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install yamllint
+        run: pip install --disable-pip-version-check yamllint
+
+      - name: Lint .gitops
+        run: yamllint -c .yamllint.yaml .gitops
+
+  helm-lint:
+    name: Helm Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.2
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Add upstream Helm repos
+        run: |
+          helm repo add argo https://argoproj.github.io/argo-helm
+          helm repo update
+
+      - name: Lint local charts
+        run: |
+          for chart in .gitops/charts/*/; do
+            if [ -f "$chart/Chart.yaml" ]; then
+              echo "::group::helm lint $chart"
+              helm lint "$chart"
+              echo "::endgroup::"
+            else
+              echo "skip (no Chart.yaml): $chart"
+            fi
+          done
+
+      - name: Render chart templates
+        run: |
+          # Smoke-test that templates render cleanly under default values.
+          for chart in .gitops/charts/*/; do
+            if [ -f "$chart/Chart.yaml" ]; then
+              echo "::group::helm template $chart"
+              helm template check "$chart" > /dev/null
+              echo "::endgroup::"
+            fi
+          done
+
+  schema-validation:
+    name: Kubernetes Schema Validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.2
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install yq
+        run: |
+          sudo curl -fsSL \
+            https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 \
+            -o /usr/local/bin/yq
+          sudo chmod +x /usr/local/bin/yq
+
+      - name: Install kubeconform
+        run: |
+          curl -fsSL \
+            "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" \
+            -o kc.tgz
+          tar -xzf kc.tgz
+          sudo mv kubeconform /usr/local/bin/kubeconform
+
+      - name: Validate Argo Application manifests
+        run: |
+          EXIT_CODE=0
+          shopt -s nullglob
+          for file in .gitops/apps/*.yaml; do
+            echo "Checking: $file"
+            KIND=$(yq eval '.kind' "$file")
+            if [ "$KIND" != "Application" ]; then
+              echo "  ❌ Not an Argo Application (kind=$KIND)"
+              EXIT_CODE=1
+              continue
+            fi
+            API_VERSION=$(yq eval '.apiVersion' "$file")
+            if [ "$API_VERSION" != "argoproj.io/v1alpha1" ]; then
+              echo "  ❌ Unexpected apiVersion: $API_VERSION"
+              EXIT_CODE=1
+            fi
+            for path in metadata.name metadata.namespace spec.destination.namespace spec.source; do
+              VAL=$(yq eval ".${path}" "$file")
+              if [ "$VAL" = "null" ]; then
+                echo "  ❌ Missing .${path}"
+                EXIT_CODE=1
+              fi
+            done
+          done
+          exit $EXIT_CODE
+
+      - name: Validate rendered chart manifests against K8s schema
+        run: |
+          EXIT_CODE=0
+          for chart in .gitops/charts/*/; do
+            if [ ! -f "$chart/Chart.yaml" ]; then continue; fi
+            # chart-testing convention: render once per ci/values-*.yaml
+            # overlay if any exist; otherwise fall back to defaults.
+            value_files=()
+            if [ -d "$chart/ci" ]; then
+              while IFS= read -r f; do
+                value_files+=("$f")
+              done < <(find "$chart/ci" -name 'values-*.yaml' -maxdepth 1)
+            fi
+            if [ "${#value_files[@]}" -eq 0 ]; then
+              value_files=("")
+            fi
+            for values in "${value_files[@]}"; do
+              if [ -n "$values" ]; then
+                echo "::group::kubeconform $chart (values=$values)"
+                helm template check "$chart" --skip-tests -f "$values" \
+                  | kubeconform \
+                      -strict \
+                      -ignore-missing-schemas \
+                      -schema-location default \
+                      -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+                      - || EXIT_CODE=1
+              else
+                echo "::group::kubeconform $chart (default values)"
+                helm template check "$chart" --skip-tests \
+                  | kubeconform \
+                      -strict \
+                      -ignore-missing-schemas \
+                      -schema-location default \
+                      -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+                      - || EXIT_CODE=1
+              fi
+              echo "::endgroup::"
+            done
+          done
+          exit $EXIT_CODE
