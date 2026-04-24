@@ -50,6 +50,16 @@
   border-color: oklch(65% 0.22 22 / 0.4);
   color: var(--state-danger);
 }
+.chip--info {
+  background: oklch(72% 0.12 230 / 0.12);
+  border-color: oklch(72% 0.12 230 / 0.4);
+  color: var(--state-info);
+}
+.chip--teal {
+  background: oklch(72% 0.12 190 / 0.12);
+  border-color: oklch(72% 0.12 190 / 0.4);
+  color: oklch(72% 0.12 190);
+}
 
 /* ----- Tabs ----- */
 .tabs {
@@ -147,6 +157,10 @@ button.projects-board__card:hover {
   font-weight: 600;
   color: var(--fg-primary);
   font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 .projects-board__card-task {
   min-height: 2.6em;

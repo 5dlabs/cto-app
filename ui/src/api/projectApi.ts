@@ -25,6 +25,17 @@
  */
 export type PrdStatus = "drafting" | "ready";
 
+/**
+ * Lifecycle phase reported by the sidecar from `.plan/status.txt`.
+ * Vocabulary: `new → intake → ready → implementing → complete`. The UI
+ * renders this as a colored chip on the project card; when the field is
+ * absent (older sidecars) the chip is hidden and nothing else changes.
+ */
+export interface ProjectStatus {
+  phase: string;
+  updated: string | null;
+}
+
 export interface ProjectDescriptor {
   name: string;
   /** Absolute path on the Morgan PVC, e.g. `/workspace/repos/foo`. */
@@ -52,6 +63,12 @@ export interface ProjectDescriptor {
    * `/verify` before opening code-server when `remote-only`.
    */
   locality?: "cloned" | "remote-only";
+  /**
+   * Lifecycle phase sourced from `.plan/status.txt` on the sidecar.
+   * Optional — older sidecars won't populate it and the UI hides the
+   * phase chip in that case.
+   */
+  status?: ProjectStatus | null;
 }
 
 export interface ActiveProject {

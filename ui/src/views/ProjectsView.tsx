@@ -12,7 +12,8 @@ import {
 import { CoderWorkspacePane } from "./CoderWorkspacePane";
 import { IconExternal, IconGit } from "./icons";
 import { useProjects } from "../state/projectContext";
-import type { ProjectDescriptor } from "../api/projectApi";
+import type { ProjectDescriptor, ProjectStatus } from "../api/projectApi";
+import { PhaseChip } from "../components/projects/PhaseChip";
 
 const LANES: { key: ProjectBoardLane; label: string; hint: string }[] = [
   { key: "pending", label: "Pending", hint: "Not started yet" },
@@ -68,6 +69,12 @@ function syntheticTaskForProject(p: ProjectDescriptor): TaskCard {
 export function ProjectsView() {
   const [selected, setSelected] = useState<Selection | null>(null);
   const { projects } = useProjects();
+
+  const statusByProject = useMemo(() => {
+    const map = new Map<string, ProjectStatus | null>();
+    for (const p of projects) map.set(p.name, p.status ?? null);
+    return map;
+  }, [projects]);
 
   const byLane = useMemo(() => {
     const map: Record<ProjectBoardLane, TaskCard[]> = {
@@ -162,6 +169,9 @@ export function ProjectsView() {
                   <ProjectBoardCard
                     key={task.id}
                     task={task}
+                    status={
+                      statusByProject.get(task.repo ?? task.projectId) ?? null
+                    }
                     onSelect={() => setSelected({ task, lane: col.key })}
                   />
                 ))}
@@ -188,9 +198,11 @@ export function ProjectsView() {
 
 function ProjectBoardCard({
   task,
+  status,
   onSelect,
 }: {
   task: TaskCard;
+  status: ProjectStatus | null;
   onSelect: () => void;
 }) {
   const agent = AGENTS.find((a) => a.id === task.agentId);
@@ -200,7 +212,10 @@ function ProjectBoardCard({
 
   return (
     <button type="button" className="projects-board__card" onClick={onSelect}>
-      <div className="projects-board__card-project">{task.projectName}</div>
+      <div className="projects-board__card-project">
+        <span>{task.projectName}</span>
+        <PhaseChip status={status} />
+      </div>
       <div className="projects-board__card-task" title={task.title}>
         {task.title}
       </div>
