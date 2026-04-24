@@ -135,6 +135,13 @@ export function CoderWorkspacePane({
         <span className={`chip chip--${TASK_STATE_CHIP[task.state]}`}>
           {TASK_STATE_LABEL[task.state]}
         </span>
+        <span
+          className={`chip session-full__diag-chip session-full__diag-chip--${probe.state}`}
+          aria-live="polite"
+          title={probe.note}
+        >
+          workspace {probe.state}
+        </span>
         <span className="session-full__spacer" />
         <button
           type="button"
@@ -156,13 +163,6 @@ export function CoderWorkspacePane({
         >
           <IconExternal size={12} />
         </a>
-      </div>
-
-      <div className="session-full__diag" aria-live="polite">
-        <span className={`chip session-full__diag-chip session-full__diag-chip--${probe.state}`}>
-          workspace {probe.state}
-        </span>
-        <span className="session-full__diag-note">{probe.note}</span>
       </div>
 
       {children}
