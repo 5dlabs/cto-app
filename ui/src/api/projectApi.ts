@@ -19,7 +19,7 @@ export interface ProjectDescriptor {
   name: string;
   /** Absolute path on the Morgan PVC, e.g. `/workspace/repos/foo`. */
   path: string;
-  /** True when `.PRD/PRD.md` exists (on GitHub default branch for remote-only listings, or on disk for cloned). */
+  /** True when `.prd/PRD.md` exists (on GitHub default branch for remote-only listings, or on disk for cloned). */
   hasPrd: boolean;
   /** Git remote URL, if one is configured. */
   remoteUrl: string | null;
