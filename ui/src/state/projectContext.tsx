@@ -63,6 +63,11 @@ export interface ProjectContextValue {
   refresh(): Promise<void>;
   /** Create a new project (via the API). Returns the descriptor on success. */
   createProject(name: string): Promise<ProjectDescriptor>;
+  /**
+   * Ensure the project is cloned onto the Morgan PVC. Idempotent. Required
+   * before routing into the code-server workspace for a remote-only entry.
+   */
+  verifyProject(name: string): Promise<ProjectDescriptor>;
   /** Switch the active project locally and (best-effort) sync to the pod. */
   setActive(name: string | null): Promise<void>;
 }
@@ -70,17 +75,7 @@ export interface ProjectContextValue {
 const ProjectContext = createContext<ProjectContextValue | null>(null);
 
 /** Lightweight seed so the UI stays usable offline. */
-const STUB_PROJECTS: ProjectDescriptor[] = [
-  {
-    name: "morgan-md-sandbox",
-    path: "/workspace/repos/morgan-md-sandbox",
-    hasPrd: false,
-    remoteUrl: "https://github.com/5dlabs/morgan-md-sandbox",
-    updatedAt: null,
-    branch: "main",
-    lastCommit: null,
-  },
-];
+const STUB_PROJECTS: ProjectDescriptor[] = [];
 
 function normalize(list: ProjectDescriptor[]): ProjectDescriptor[] {
   return [...list].sort((a, b) => a.name.localeCompare(b.name));
@@ -103,7 +98,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     abortRef.current = ctrl;
     setRefreshing(true);
     try {
-      const live = await projectApi.list(ctrl.signal);
+      const live = await projectApi.refresh(ctrl.signal);
       setProjects(normalize(live));
       setSource("live");
       setError(null);
@@ -154,12 +149,26 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     setActiveProject(name);
     writeStoredActive(name);
     // Best-effort sync: we don't fail the UI if the pod isn't reachable.
+    // The backend auto-clones if the repo is remote-only.
     try {
       await projectApi.setActive(name);
     } catch {
       /* offline — local state is the source of truth here */
     }
   }, []);
+
+  const verifyProjectCb = useCallback(
+    async (name: string): Promise<ProjectDescriptor> => {
+      const descriptor = await projectApi.verify(name);
+      setProjects((prev) => {
+        const next = prev.filter((p) => p.name !== descriptor.name);
+        next.push(descriptor);
+        return normalize(next);
+      });
+      return descriptor;
+    },
+    [],
+  );
 
   const createProject = useCallback(
     async (rawName: string): Promise<ProjectDescriptor> => {
@@ -197,6 +206,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       refreshing,
       refresh,
       createProject,
+      verifyProject: verifyProjectCb,
       setActive,
     }),
     [
@@ -208,6 +218,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       refreshing,
       refresh,
       createProject,
+      verifyProjectCb,
       setActive,
     ],
   );

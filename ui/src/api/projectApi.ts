@@ -19,7 +19,7 @@ export interface ProjectDescriptor {
   name: string;
   /** Absolute path on the Morgan PVC, e.g. `/workspace/repos/foo`. */
   path: string;
-  /** True when a `prd.md` exists at the repo root. */
+  /** True when `.PRD/PRD.md` exists (on GitHub default branch for remote-only listings, or on disk for cloned). */
   hasPrd: boolean;
   /** Git remote URL, if one is configured. */
   remoteUrl: string | null;
@@ -29,6 +29,12 @@ export interface ProjectDescriptor {
   branch: string | null;
   /** Short commit subject of HEAD, if any. */
   lastCommit: string | null;
+  /**
+   * `"cloned"` — repo is present on the Morgan PVC, `"remote-only"` — known
+   * to GitHub but not yet materialized locally. Tile click should call
+   * `/verify` before opening code-server when `remote-only`.
+   */
+  locality?: "cloned" | "remote-only";
 }
 
 export interface ActiveProject {
@@ -188,6 +194,17 @@ export const projectApi = {
 
   list(signal?: AbortSignal): Promise<ProjectDescriptor[]> {
     return request<ProjectDescriptor[]>("/projects", { signal });
+  },
+
+  refresh(signal?: AbortSignal): Promise<ProjectDescriptor[]> {
+    return request<ProjectDescriptor[]>("/projects?refresh=1", { signal });
+  },
+
+  verify(name: string, signal?: AbortSignal): Promise<ProjectDescriptor> {
+    return request<ProjectDescriptor>(
+      `/projects/${encodeURIComponent(name)}/verify`,
+      { method: "POST", signal },
+    );
   },
 
   get(name: string, signal?: AbortSignal): Promise<ProjectDescriptor> {

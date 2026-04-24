@@ -69,12 +69,15 @@ export function CoderWorkspacePane({
       note: `Verifying /workspace/repos/${activeRepo} on project-api...`,
     });
     void projectApi
-      .get(activeRepo)
+      .verify(activeRepo)
       .then((desc) => {
         if (cancelled) return;
         setProbe({
           state: "ok",
-          note: `Workspace exists: ${desc.path}`,
+          note:
+            desc.locality === "cloned"
+              ? `Workspace ready: ${desc.path}`
+              : `Workspace prepared: ${desc.path}`,
         });
       })
       .catch((err: unknown) => {
@@ -84,7 +87,7 @@ export function CoderWorkspacePane({
           setProbe({
             state: "missing",
             note:
-              `Missing /workspace/repos/${activeRepo}; ` +
+              `No GitHub repo for "${activeRepo}"; ` +
               "auto-fallback to repos root applied.",
           });
           return;
@@ -94,7 +97,7 @@ export function CoderWorkspacePane({
           note:
             err instanceof Error
               ? err.message
-              : "Unable to verify workspace path (project-api error).",
+              : "Unable to prepare workspace (project-api error).",
         });
       });
     return () => {
