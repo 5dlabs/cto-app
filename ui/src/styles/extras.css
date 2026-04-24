@@ -1484,6 +1484,9 @@ button.projects-board__card:hover {
   border-radius: 8px;
   z-index: 35;
   pointer-events: auto;
+  flex-wrap: nowrap;
+  overflow: hidden;
+  min-width: 0;
 }
 .session-full__back {
   padding: 4px 10px;
@@ -1493,6 +1496,7 @@ button.projects-board__card:hover {
   border-radius: 6px;
   font-size: 11px;
   cursor: pointer;
+  flex-shrink: 0;
 }
 .session-full__back:hover {
   background: var(--bg-hover);
@@ -1509,6 +1513,12 @@ button.projects-board__card:hover {
   color: var(--fg-secondary);
   font-family: var(--font-mono);
   font-size: 11.5px;
+  min-width: 0;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex-shrink: 1;
 }
 .session-full__spacer { flex: 1; }
 .session-full__icon-btn {
