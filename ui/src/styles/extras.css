@@ -1458,22 +1458,26 @@ button.projects-board__card:hover {
 }
 .session-full__iframe {
   position: absolute;
-  inset: 0;
+  top: 52px;
+  left: 0;
+  right: 0;
+  bottom: 0;
   width: 100%;
-  height: 100%;
+  height: calc(100% - 52px);
   border: 0;
   background: #101015;
 }
 .session-full__overlay {
   position: fixed;
-  top: 12px;
+  top: 8px;
   left: 12px;
   right: 12px;
+  height: 36px;
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 10px;
-  background: oklch(14.5% 0.008 258 / 0.72);
+  padding: 0 10px;
+  background: oklch(14.5% 0.008 258 / 0.82);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
   border: 1px solid var(--border-subtle);
@@ -1510,41 +1514,27 @@ button.projects-board__card:hover {
 .session-full__icon-btn {
   display: grid;
   place-items: center;
-  width: 26px;
-  height: 26px;
+  width: 24px;
+  height: 24px;
   background: transparent;
   border: 1px solid var(--border-subtle);
   color: var(--fg-muted);
   border-radius: 6px;
   cursor: pointer;
   text-decoration: none;
+  flex-shrink: 0;
 }
 .session-full__icon-btn:hover {
   background: var(--bg-hover);
   color: var(--fg-primary);
 }
 
-.session-full__diag {
-  position: fixed;
-  left: 12px;
-  right: 12px;
-  top: 54px;
-  z-index: 35;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
-  border-radius: 8px;
-  border: 1px solid var(--border-subtle);
-  background: oklch(14.5% 0.008 258 / 0.72);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-}
 .session-full__diag-chip {
   text-transform: uppercase;
   letter-spacing: 0.08em;
   font-size: 10px;
   height: 20px;
+  flex-shrink: 0;
 }
 .session-full__diag-chip--checking {
   border-color: var(--accent-border);
@@ -1564,13 +1554,6 @@ button.projects-board__card:hover {
 }
 .session-full__diag-chip--idle {
   color: var(--fg-muted);
-}
-.session-full__diag-note {
-  font-size: 11px;
-  color: var(--fg-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .tweaks {
