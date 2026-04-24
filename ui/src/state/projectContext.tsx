@@ -132,23 +132,37 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  // Cheap poll variant: hits the cached endpoint, never force-refreshes.
+  // Used by the background 20s tick; the manual refresh button still calls
+  // refresh() above, which bypasses the cache.
+  const pollCached = useCallback(async () => {
+    try {
+      const live = await projectApi.list();
+      setProjects(normalize(live));
+      setSource("live");
+      setError(null);
+    } catch {
+      /* swallow — the next refresh() will surface real errors */
+    }
+  }, []);
+
   useEffect(() => {
     void refresh();
     return () => abortRef.current?.abort();
   }, [refresh]);
 
   // Background poll so Morgan-authored PRDs surface without the user hitting
-  // Refresh. 20s is a good compromise between "fresh enough that a PRD write
-  // flows to the board in one Morgan reply cycle" and "doesn't hammer the
-  // GitHub API" — the sidecar already caches listProjects() for 10 minutes,
-  // so most of these are no-ops server-side. Runs regardless of which view
-  // is active because we can't cheaply detect "Morgan is on screen" here.
+  // Refresh. IMPORTANT: this uses the CACHED list endpoint (no force=1). The
+  // sidecar caches /projects for 10 minutes and fans out to ~80 GitHub API
+  // calls on every miss — polling with force=1 burns the PAT's rate limit
+  // in minutes. `invalidateListCache()` fires on create/writePrd server-side,
+  // so a Morgan-authored PRD surfaces on the next poll tick anyway.
   useEffect(() => {
     const id = window.setInterval(() => {
-      void refresh();
+      void pollCached();
     }, 20_000);
     return () => window.clearInterval(id);
-  }, [refresh]);
+  }, [pollCached]);
 
   // Hydrate active project from the pod ONCE on first mount when the user
   // hasn't picked one locally. The hydratedRef guard is load-bearing —
@@ -186,11 +200,15 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   // didn't exist. Clear it so the UI falls back to "No project active" and
   // the user picks again.
   //
-  // Guarded on source==="live" so we don't nuke the selection every time
-  // the sidecar flaps offline and we temporarily see the empty stub list.
+  // Guards:
+  // - source==="live" so we don't nuke the selection on a transient stub list.
+  // - projects.length > 0 so we don't nuke it when GitHub probes failed
+  //   silently (rate limit, outage) and the sidecar returned an empty array.
+  //   You can only trust "X is gone" when you can see OTHER projects.
   useEffect(() => {
     if (source !== "live") return;
     if (!activeProject) return;
+    if (projects.length === 0) return;
     const stillExists = projects.some((p) => p.name === activeProject);
     if (stillExists) return;
     setActiveProject(null);
