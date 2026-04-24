@@ -142,14 +142,38 @@ jobs:
           EXIT_CODE=0
           for chart in .gitops/charts/*/; do
             if [ ! -f "$chart/Chart.yaml" ]; then continue; fi
-            # Render once; skip CRDs (kubeconform needs real schemas for them
-            # and we're fine relying on helm lint for that).
-            helm template check "$chart" --skip-tests \
-              | kubeconform \
-                  -strict \
-                  -ignore-missing-schemas \
-                  -schema-location default \
-                  -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
-                  - || EXIT_CODE=1
+            # chart-testing convention: render once per ci/values-*.yaml
+            # overlay if any exist; otherwise fall back to defaults.
+            value_files=()
+            if [ -d "$chart/ci" ]; then
+              while IFS= read -r f; do
+                value_files+=("$f")
+              done < <(find "$chart/ci" -name 'values-*.yaml' -maxdepth 1)
+            fi
+            if [ "${#value_files[@]}" -eq 0 ]; then
+              value_files=("")
+            fi
+            for values in "${value_files[@]}"; do
+              if [ -n "$values" ]; then
+                echo "::group::kubeconform $chart (values=$values)"
+                helm template check "$chart" --skip-tests -f "$values" \
+                  | kubeconform \
+                      -strict \
+                      -ignore-missing-schemas \
+                      -schema-location default \
+                      -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+                      - || EXIT_CODE=1
+              else
+                echo "::group::kubeconform $chart (default values)"
+                helm template check "$chart" --skip-tests \
+                  | kubeconform \
+                      -strict \
+                      -ignore-missing-schemas \
+                      -schema-location default \
+                      -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+                      - || EXIT_CODE=1
+              fi
+              echo "::endgroup::"
+            done
           done
           exit $EXIT_CODE
