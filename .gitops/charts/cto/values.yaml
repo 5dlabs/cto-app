@@ -27,8 +27,8 @@ agentKeys:
 
 controller:
   image:
-    repository: ghcr.io/5dlabs/cto-controller
-    tag: "0.1.0"
+    repository: ghcr.io/5dlabs/controller
+    tag: "latest"
     pullPolicy: IfNotPresent
   replicas: 1
   resources:
@@ -50,8 +50,8 @@ controller:
 tools:
   enabled: true
   image:
-    repository: ghcr.io/5dlabs/cto-tools
-    tag: "0.1.0"
+    repository: ghcr.io/5dlabs/tools
+    tag: "latest"
     pullPolicy: IfNotPresent
   service:
     type: ClusterIP
