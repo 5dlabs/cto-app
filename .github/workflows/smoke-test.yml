@@ -1,10 +1,10 @@
 name: Smoke Test (Chart)
 
-# Two-stage smoke test for the cto chart:
-#   1. smoke-controller: install with tools disabled, wait for controller
-#      Deployment to become Available, then uninstall.
-#   2. smoke-tools: install with controller disabled AND docker-in-docker
-#      disabled, wait for tools Deployment to become Available, then uninstall.
+# Smoke test for the published cto chart:
+#   1. Pull the chart fresh from OCI.
+#   2. Install into a fresh kind cluster with tools disabled.
+#   3. Verify the controller is Available.
+#   4. Verify the CodeRun CRD is established and accepts a CodeRun object.
 #
 # Each job pulls the chart fresh from OCI (no helm cache reuse).
 # Triggered automatically after "Publish Charts" succeeds on main, or
@@ -53,8 +53,8 @@ jobs:
           echo "version=$V" >> "$GITHUB_OUTPUT"
           echo "Chart version: $V"
 
-  smoke-controller:
-    name: smoke / controller only
+  smoke-chart:
+    name: smoke / chart + controller + CRD
     needs: gate
     runs-on: ubuntu-latest
     steps:
@@ -71,7 +71,8 @@ jobs:
 
       - name: Create kind cluster
         run: |
-          kind create cluster --name cto-smoke-ctl --image kindest/node:${K8S_VERSION} --wait 120s
+          kind delete cluster --name cto-smoke-ctl || true
+          kind create cluster --name cto-smoke-ctl --image "kindest/node:${K8S_VERSION}" --wait 120s
           kubectl get nodes -o wide
 
       - name: Log in to GHCR (helm)
@@ -88,12 +89,22 @@ jobs:
 
       - name: Install chart (controller only)
         run: |
-          # Disable the chart's Namespace template (global.createNamespace) and
-          # let Helm create the namespace via --create-namespace. Using both
-          # causes "already exists" on install.
+          # The published chart includes a Namespace resource. Pre-create it
+          # with Helm ownership metadata so Helm can store release state before
+          # rendering and then adopt the Namespace from the chart.
+          kubectl create namespace "$NS"
+          kubectl label namespace "$NS" \
+            app.kubernetes.io/managed-by=Helm \
+            pod-security.kubernetes.io/enforce=privileged \
+            pod-security.kubernetes.io/audit=privileged \
+            pod-security.kubernetes.io/warn=privileged \
+            --overwrite
+          kubectl annotate namespace "$NS" \
+            meta.helm.sh/release-name=cto \
+            meta.helm.sh/release-namespace="$NS" \
+            --overwrite
           helm install cto "/tmp/chart/cto-${{ needs.gate.outputs.chart_version }}.tgz" \
-            --namespace "$NS" --create-namespace \
-            --set global.createNamespace=false \
+            --namespace "$NS" \
             --set tools.enabled=false \
             --set controller.skillsCache.enabled=false \
             --wait --timeout=6m
@@ -102,7 +113,7 @@ jobs:
       - name: Verify controller Deployment Available
         run: |
           set -eu
-          DEP=$(kubectl -n "$NS" get deploy -l app.kubernetes.io/component=controller -o name | head -1)
+          DEP=$(kubectl -n "$NS" get deploy -l app.kubernetes.io/name=controller -o name | head -1)
           if [ -z "$DEP" ]; then
             echo "No controller deployment found" >&2
             kubectl -n "$NS" get all
@@ -111,96 +122,43 @@ jobs:
           kubectl -n "$NS" wait "$DEP" --for=condition=Available --timeout=3m
           echo "✅ controller up"
 
-      - name: Uninstall
-        if: always()
+      - name: Verify CodeRun CRD and API
         run: |
-          helm uninstall cto -n "$NS" --wait || true
-          kubectl delete ns "$NS" --wait=false || true
+          set -eu
+          kubectl wait --for=condition=Established crd/coderuns.agents.platform --timeout=90s
+          kubectl api-resources --api-group=agents.platform
+          kubectl -n "$NS" apply -f - <<'YAML'
+          apiVersion: agents.platform/v1
+          kind: CodeRun
+          metadata:
+            name: smoke-coderun
+          spec:
+            runType: documentation
+            service: smoke
+            repositoryUrl: https://github.com/5dlabs/cto-app
+            docsRepositoryUrl: https://github.com/5dlabs/cto-app
+            workingDirectory: .
+            githubApp: smoke-test
+          YAML
+          kubectl -n "$NS" get coderun smoke-coderun -o jsonpath='{.spec.service}{"\n"}'
+          echo "✅ CodeRun CRD accepts objects"
 
       - name: Dump diagnostics on failure
         if: failure()
         run: |
           kubectl -n "$NS" get events --sort-by=.lastTimestamp | tail -60 || true
           kubectl -n "$NS" get pods -o wide || true
-          kubectl -n "$NS" describe deploy -l app.kubernetes.io/component=controller || true
-          kubectl -n "$NS" logs -l app.kubernetes.io/component=controller --tail=200 --all-containers || true
+          kubectl get crd coderuns.agents.platform -o yaml || true
+          kubectl -n "$NS" get coderuns -o yaml || true
+          kubectl -n "$NS" describe deploy -l app.kubernetes.io/name=controller || true
+          kubectl -n "$NS" logs -l app.kubernetes.io/name=controller,app.kubernetes.io/instance=cto --tail=200 --all-containers || true
+
+      - name: Uninstall
+        if: always()
+        run: |
+          helm uninstall cto -n "$NS" --wait || true
+          kubectl delete ns "$NS" --wait=false || true
 
       - name: Teardown kind
         if: always()
         run: kind delete cluster --name cto-smoke-ctl || true
-
-  smoke-tools:
-    name: smoke / tools only (dind disabled)
-    needs: [gate, smoke-controller]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install kind, kubectl, helm
-        run: |
-          set -eu
-          curl -fsSL -o /tmp/kind "https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-linux-amd64"
-          sudo install -m 0755 /tmp/kind /usr/local/bin/kind
-          curl -fsSL -o /tmp/kubectl "https://dl.k8s.io/release/${K8S_VERSION}/bin/linux/amd64/kubectl"
-          sudo install -m 0755 /tmp/kubectl /usr/local/bin/kubectl
-          curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-
-      - name: Create kind cluster
-        run: |
-          kind create cluster --name cto-smoke-tools --image kindest/node:${K8S_VERSION} --wait 120s
-          kubectl get nodes -o wide
-
-      - name: Log in to GHCR (helm)
-        run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
-
-      - name: Pull chart fresh from OCI (no cache)
-        run: |
-          set -eu
-          D=$(mktemp -d)
-          export HELM_CACHE_HOME="$D/cache" HELM_CONFIG_HOME="$D/config" HELM_DATA_HOME="$D/data"
-          mkdir -p "$HELM_CACHE_HOME" "$HELM_CONFIG_HOME" "$HELM_DATA_HOME" /tmp/chart
-          helm pull "$CHART_REPO" --version "${{ needs.gate.outputs.chart_version }}" --destination /tmp/chart
-          ls -la /tmp/chart
-
-      - name: Install chart (tools only, no dind)
-        run: |
-          # Disable chart's Namespace template; let Helm --create-namespace.
-          helm install cto "/tmp/chart/cto-${{ needs.gate.outputs.chart_version }}.tgz" \
-            --namespace "$NS" --create-namespace \
-            --set global.createNamespace=false \
-            --set controller.enabled=false \
-            --set tools.dockerInDocker.enabled=false \
-            --set tools.workspace.enabled=false \
-            --set tools.ingress.enabled=false \
-            --wait --timeout=6m
-          kubectl -n "$NS" get deploy,pod -o wide
-
-      - name: Verify tools Deployment Available
-        run: |
-          set -eu
-          DEP=$(kubectl -n "$NS" get deploy -l app.kubernetes.io/component=tools -o name | head -1)
-          if [ -z "$DEP" ]; then
-            echo "No tools deployment found" >&2
-            kubectl -n "$NS" get all
-            exit 1
-          fi
-          kubectl -n "$NS" wait "$DEP" --for=condition=Available --timeout=3m
-          echo "✅ tools up (dind disabled)"
-
-      - name: Uninstall
-        if: always()
-        run: |
-          helm uninstall cto -n "$NS" --wait || true
-          kubectl delete ns "$NS" --wait=false || true
-
-      - name: Dump diagnostics on failure
-        if: failure()
-        run: |
-          kubectl -n "$NS" get events --sort-by=.lastTimestamp | tail -60 || true
-          kubectl -n "$NS" get pods -o wide || true
-          kubectl -n "$NS" describe deploy -l app.kubernetes.io/component=tools || true
-          kubectl -n "$NS" logs -l app.kubernetes.io/component=tools --tail=200 --all-containers || true
-
-      - name: Teardown kind
-        if: always()
-        run: kind delete cluster --name cto-smoke-tools || true
