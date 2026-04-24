@@ -26,6 +26,7 @@ agentKeys:
   MINIMAX_GROUP_ID: ""
 
 controller:
+  enabled: true
   image:
     repository: ghcr.io/5dlabs/controller
     tag: "latest"
@@ -49,6 +50,11 @@ controller:
 
 tools:
   enabled: true
+  # Docker-in-Docker sidecar for Docker-based MCP servers. Disable in
+  # environments where privileged containers aren't allowed (e.g., CI smoke
+  # tests running inside kind-in-docker).
+  dockerInDocker:
+    enabled: true
   image:
     repository: ghcr.io/5dlabs/tools
     tag: "latest"

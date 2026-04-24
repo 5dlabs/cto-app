@@ -40,14 +40,18 @@ spec:
               chmod 755 /home/app/.npm
               mkdir -p /data/workspace
               chown -R 1001:1001 /data
+              {{- if .Values.tools.dockerInDocker.enabled }}
               mkdir -p /docker-data
+              {{- end }}
           volumeMounts:
             - name: data
               mountPath: /data
             - name: home-app
               mountPath: /home/app
+            {{- if .Values.tools.dockerInDocker.enabled }}
             - name: docker-data
               mountPath: /docker-data
+            {{- end }}
       containers:
         - name: tools
           image: "{{ .Values.tools.image.repository }}:{{ .Values.tools.image.tag }}"
@@ -123,6 +127,7 @@ spec:
               mountPath: /var/run
             - name: tmp
               mountPath: /tmp
+        {{- if .Values.tools.dockerInDocker.enabled }}
         # Docker-in-Docker sidecar for Docker-based MCP servers.
         - name: docker-daemon
           image: docker:dind
@@ -145,6 +150,7 @@ spec:
             limits:
               cpu: 500m
               memory: 512Mi
+        {{- end }}
       volumes:
         - name: config
           configMap:
@@ -160,8 +166,10 @@ spec:
           emptyDir: {}
         - name: docker-sock-dir
           emptyDir: {}
+        {{- if .Values.tools.dockerInDocker.enabled }}
         - name: docker-data
           emptyDir: {}
+        {{- end }}
         - name: tmp
           emptyDir: {}
 {{- end }}

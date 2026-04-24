@@ -1,0 +1,201 @@
+name: Smoke Test (Chart)
+
+# Two-stage smoke test for the cto chart:
+#   1. smoke-controller: install with tools disabled, wait for controller
+#      Deployment to become Available, then uninstall.
+#   2. smoke-tools: install with controller disabled AND docker-in-docker
+#      disabled, wait for tools Deployment to become Available, then uninstall.
+#
+# Each job pulls the chart fresh from OCI (no helm cache reuse).
+# Triggered automatically after "Publish Charts" succeeds on main, or
+# manually via workflow_dispatch.
+
+on:
+  workflow_run:
+    workflows: ["Publish Charts"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      chart_version:
+        description: 'Chart version to pull from OCI (default: read from Chart.yaml)'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: smoke-test-chart
+  cancel-in-progress: false
+
+env:
+  CHART_REPO: oci://ghcr.io/5dlabs/helm-charts/cto
+  NS: cto-system
+  KIND_VERSION: v0.23.0
+  K8S_VERSION: v1.30.0
+
+jobs:
+  # Skip if triggered by a failed publish run
+  gate:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    outputs:
+      chart_version: ${{ steps.resolve.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: resolve
+        run: |
+          V="${{ github.event.inputs.chart_version }}"
+          if [ -z "$V" ]; then
+            V=$(awk '/^version:/ {print $2; exit}' .gitops/charts/cto/Chart.yaml)
+          fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "Chart version: $V"
+
+  smoke-controller:
+    name: smoke / controller only
+    needs: gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install kind, kubectl, helm
+        run: |
+          set -eu
+          curl -fsSL -o /tmp/kind "https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-linux-amd64"
+          sudo install -m 0755 /tmp/kind /usr/local/bin/kind
+          curl -fsSL -o /tmp/kubectl "https://dl.k8s.io/release/${K8S_VERSION}/bin/linux/amd64/kubectl"
+          sudo install -m 0755 /tmp/kubectl /usr/local/bin/kubectl
+          curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+      - name: Create kind cluster
+        run: |
+          kind create cluster --name cto-smoke-ctl --image kindest/node:${K8S_VERSION} --wait 120s
+          kubectl get nodes -o wide
+
+      - name: Log in to GHCR (helm)
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Pull chart fresh from OCI (no cache)
+        run: |
+          set -eu
+          D=$(mktemp -d)
+          export HELM_CACHE_HOME="$D/cache" HELM_CONFIG_HOME="$D/config" HELM_DATA_HOME="$D/data"
+          mkdir -p "$HELM_CACHE_HOME" "$HELM_CONFIG_HOME" "$HELM_DATA_HOME" /tmp/chart
+          helm pull "$CHART_REPO" --version "${{ needs.gate.outputs.chart_version }}" --destination /tmp/chart
+          ls -la /tmp/chart
+
+      - name: Install chart (controller only)
+        run: |
+          helm install cto "/tmp/chart/cto-${{ needs.gate.outputs.chart_version }}.tgz" \
+            --namespace "$NS" --create-namespace \
+            --set tools.enabled=false \
+            --set controller.skillsCache.enabled=false \
+            --wait --timeout=6m
+          kubectl -n "$NS" get deploy,pod -o wide
+
+      - name: Verify controller Deployment Available
+        run: |
+          set -eu
+          DEP=$(kubectl -n "$NS" get deploy -l app.kubernetes.io/component=controller -o name | head -1)
+          if [ -z "$DEP" ]; then
+            echo "No controller deployment found" >&2
+            kubectl -n "$NS" get all
+            exit 1
+          fi
+          kubectl -n "$NS" wait "$DEP" --for=condition=Available --timeout=3m
+          echo "✅ controller up"
+
+      - name: Uninstall
+        if: always()
+        run: |
+          helm uninstall cto -n "$NS" --wait || true
+          kubectl delete ns "$NS" --wait=false || true
+
+      - name: Dump diagnostics on failure
+        if: failure()
+        run: |
+          kubectl -n "$NS" get events --sort-by=.lastTimestamp | tail -60 || true
+          kubectl -n "$NS" get pods -o wide || true
+          kubectl -n "$NS" describe deploy -l app.kubernetes.io/component=controller || true
+          kubectl -n "$NS" logs -l app.kubernetes.io/component=controller --tail=200 --all-containers || true
+
+      - name: Teardown kind
+        if: always()
+        run: kind delete cluster --name cto-smoke-ctl || true
+
+  smoke-tools:
+    name: smoke / tools only (dind disabled)
+    needs: [gate, smoke-controller]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install kind, kubectl, helm
+        run: |
+          set -eu
+          curl -fsSL -o /tmp/kind "https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-linux-amd64"
+          sudo install -m 0755 /tmp/kind /usr/local/bin/kind
+          curl -fsSL -o /tmp/kubectl "https://dl.k8s.io/release/${K8S_VERSION}/bin/linux/amd64/kubectl"
+          sudo install -m 0755 /tmp/kubectl /usr/local/bin/kubectl
+          curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+      - name: Create kind cluster
+        run: |
+          kind create cluster --name cto-smoke-tools --image kindest/node:${K8S_VERSION} --wait 120s
+          kubectl get nodes -o wide
+
+      - name: Log in to GHCR (helm)
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Pull chart fresh from OCI (no cache)
+        run: |
+          set -eu
+          D=$(mktemp -d)
+          export HELM_CACHE_HOME="$D/cache" HELM_CONFIG_HOME="$D/config" HELM_DATA_HOME="$D/data"
+          mkdir -p "$HELM_CACHE_HOME" "$HELM_CONFIG_HOME" "$HELM_DATA_HOME" /tmp/chart
+          helm pull "$CHART_REPO" --version "${{ needs.gate.outputs.chart_version }}" --destination /tmp/chart
+          ls -la /tmp/chart
+
+      - name: Install chart (tools only, no dind)
+        run: |
+          helm install cto "/tmp/chart/cto-${{ needs.gate.outputs.chart_version }}.tgz" \
+            --namespace "$NS" --create-namespace \
+            --set controller.enabled=false \
+            --set tools.dockerInDocker.enabled=false \
+            --set tools.workspace.enabled=false \
+            --set tools.ingress.enabled=false \
+            --wait --timeout=6m
+          kubectl -n "$NS" get deploy,pod -o wide
+
+      - name: Verify tools Deployment Available
+        run: |
+          set -eu
+          DEP=$(kubectl -n "$NS" get deploy -l app.kubernetes.io/component=tools -o name | head -1)
+          if [ -z "$DEP" ]; then
+            echo "No tools deployment found" >&2
+            kubectl -n "$NS" get all
+            exit 1
+          fi
+          kubectl -n "$NS" wait "$DEP" --for=condition=Available --timeout=3m
+          echo "✅ tools up (dind disabled)"
+
+      - name: Uninstall
+        if: always()
+        run: |
+          helm uninstall cto -n "$NS" --wait || true
+          kubectl delete ns "$NS" --wait=false || true
+
+      - name: Dump diagnostics on failure
+        if: failure()
+        run: |
+          kubectl -n "$NS" get events --sort-by=.lastTimestamp | tail -60 || true
+          kubectl -n "$NS" get pods -o wide || true
+          kubectl -n "$NS" describe deploy -l app.kubernetes.io/component=tools || true
+          kubectl -n "$NS" logs -l app.kubernetes.io/component=tools --tail=200 --all-containers || true
+
+      - name: Teardown kind
+        if: always()
+        run: kind delete cluster --name cto-smoke-tools || true

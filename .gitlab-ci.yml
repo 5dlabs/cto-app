@@ -9,6 +9,7 @@
 stages:
   - lint
   - publish
+  - smoke
 
 variables:
   HELM_VERSION: v3.16.2
@@ -129,3 +130,117 @@ chart:publish:
     paths:
       - dist/*.tgz
     expire_in: 1 week
+
+# Post-publish smoke tests. Two progressive jobs that each install the
+# freshly published chart from OCI into a kind cluster, verify a single
+# component comes up, and tear down. Mirrors .github/workflows/smoke-test.yml.
+#
+# Requires a GitLab runner with docker-in-docker (privileged) to host kind.
+# Kept `when: manual` until an appropriate runner is wired up.
+
+.smoke-common: &smoke-common
+  stage: smoke
+  image: docker:27
+  services:
+    - name: docker:27-dind
+      alias: docker
+  variables:
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_TLS_CERTDIR: ""
+    KIND_VERSION: v0.23.0
+    K8S_VERSION: v1.30.0
+    NS: cto-system
+    CHART_REPO: oci://registry.gitlab.com/5dlabs/cto-app/helm-charts/cto
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      changes: [".gitops/charts/**/*"]
+      when: manual
+      allow_failure: true
+    - if: '$CI_COMMIT_TAG =~ /^chart-v/'
+      when: manual
+      allow_failure: true
+  before_script:
+    - apk add --no-cache bash curl ca-certificates
+    - curl -fsSL -o /usr/local/bin/kind "https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-linux-amd64"
+    - chmod +x /usr/local/bin/kind
+    - curl -fsSL -o /usr/local/bin/kubectl "https://dl.k8s.io/release/${K8S_VERSION}/bin/linux/amd64/kubectl"
+    - chmod +x /usr/local/bin/kubectl
+    - curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+chart:smoke-controller:
+  <<: *smoke-common
+  needs: [chart:publish]
+  script:
+    - |
+      set -eu
+      V=$(awk '/^version:/ {print $2; exit}' .gitops/charts/cto/Chart.yaml)
+      echo "Chart version: $V"
+      CLUSTER=cto-smoke-ctl
+      kind create cluster --name "$CLUSTER" --image "kindest/node:${K8S_VERSION}" --wait 120s
+      kubectl get nodes -o wide
+
+      D=$(mktemp -d)
+      export HELM_CACHE_HOME="$D/cache" HELM_CONFIG_HOME="$D/config" HELM_DATA_HOME="$D/data"
+      mkdir -p "$HELM_CACHE_HOME" "$HELM_CONFIG_HOME" "$HELM_DATA_HOME" /tmp/chart
+      echo "${CI_REGISTRY_PASSWORD}" | helm registry login "${CI_REGISTRY}" --username "${CI_REGISTRY_USER}" --password-stdin
+      helm pull "$CHART_REPO" --version "$V" --destination /tmp/chart
+
+      helm install cto "/tmp/chart/cto-$V.tgz" \
+        --namespace "$NS" --create-namespace \
+        --set tools.enabled=false \
+        --set controller.skillsCache.enabled=false \
+        --wait --timeout=6m
+
+      DEP=$(kubectl -n "$NS" get deploy -l app.kubernetes.io/component=controller -o name | head -1)
+      if [ -z "$DEP" ]; then
+        kubectl -n "$NS" get all
+        echo "No controller deployment found" >&2; exit 1
+      fi
+      kubectl -n "$NS" wait "$DEP" --for=condition=Available --timeout=3m
+      echo "✅ controller up"
+  after_script:
+    - |
+      kubectl -n "$NS" get events --sort-by=.lastTimestamp | tail -40 || true
+      kubectl -n "$NS" logs -l app.kubernetes.io/component=controller --tail=200 || true
+    - helm uninstall cto -n "$NS" --wait || true
+    - kind delete cluster --name cto-smoke-ctl || true
+
+chart:smoke-tools:
+  <<: *smoke-common
+  needs: [chart:smoke-controller]
+  script:
+    - |
+      set -eu
+      V=$(awk '/^version:/ {print $2; exit}' .gitops/charts/cto/Chart.yaml)
+      echo "Chart version: $V"
+      CLUSTER=cto-smoke-tools
+      kind create cluster --name "$CLUSTER" --image "kindest/node:${K8S_VERSION}" --wait 120s
+      kubectl get nodes -o wide
+
+      D=$(mktemp -d)
+      export HELM_CACHE_HOME="$D/cache" HELM_CONFIG_HOME="$D/config" HELM_DATA_HOME="$D/data"
+      mkdir -p "$HELM_CACHE_HOME" "$HELM_CONFIG_HOME" "$HELM_DATA_HOME" /tmp/chart
+      echo "${CI_REGISTRY_PASSWORD}" | helm registry login "${CI_REGISTRY}" --username "${CI_REGISTRY_USER}" --password-stdin
+      helm pull "$CHART_REPO" --version "$V" --destination /tmp/chart
+
+      helm install cto "/tmp/chart/cto-$V.tgz" \
+        --namespace "$NS" --create-namespace \
+        --set controller.enabled=false \
+        --set tools.dockerInDocker.enabled=false \
+        --set tools.workspace.enabled=false \
+        --set tools.ingress.enabled=false \
+        --wait --timeout=6m
+
+      DEP=$(kubectl -n "$NS" get deploy -l app.kubernetes.io/component=tools -o name | head -1)
+      if [ -z "$DEP" ]; then
+        kubectl -n "$NS" get all
+        echo "No tools deployment found" >&2; exit 1
+      fi
+      kubectl -n "$NS" wait "$DEP" --for=condition=Available --timeout=3m
+      echo "✅ tools up (dind disabled)"
+  after_script:
+    - |
+      kubectl -n "$NS" get events --sort-by=.lastTimestamp | tail -40 || true
+      kubectl -n "$NS" logs -l app.kubernetes.io/component=tools --tail=200 --all-containers || true
+    - helm uninstall cto -n "$NS" --wait || true
+    - kind delete cluster --name cto-smoke-tools || true
