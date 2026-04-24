@@ -3,9 +3,27 @@ use std::ffi::OsString;
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Command, Output, Stdio};
+use std::sync::OnceLock;
 use std::thread;
 use std::time::{Duration, Instant};
 use tauri::{Emitter, Window};
+
+static ACTIVE_RUNTIME: OnceLock<RuntimeKind> = OnceLock::new();
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum RuntimeKind {
+    Colima,
+    Podman,
+}
+
+impl RuntimeKind {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Colima => "Colima",
+            Self::Podman => "Podman",
+        }
+    }
+}
 
 const CLUSTER_NAME: &str = "cto-app";
 const KIND_CONTEXT: &str = "kind-cto-app";
@@ -48,7 +66,9 @@ pub async fn bootstrap_local_stack(window: Window) -> BootstrapResult<BootstrapR
     emit(&window, "runtime", "Detecting container runtime...", 5);
     ensure_runtime_tool_paths_on_process();
 
-    let runtime = ensure_container_runtime(&window).await?;
+    let runtime_kind = ensure_container_runtime(&window).await?;
+    let _ = ACTIVE_RUNTIME.set(runtime_kind);
+    let runtime = runtime_kind.label().to_string();
 
     emit(&window, "dependencies", "Installing dependencies...", 16);
     ensure_host_tools(&window).await?;
@@ -57,7 +77,7 @@ pub async fn bootstrap_local_stack(window: Window) -> BootstrapResult<BootstrapR
     ensure_kind_cluster()?;
 
     emit(&window, "ingress", "Configuring ingress...", 52);
-    apply_remote_manifest(INGRESS_NGINX_KIND_URL).await?;
+    apply_remote_manifest_server_side(INGRESS_NGINX_KIND_URL).await?;
     wait_for_rollout(
         "ingress-nginx",
         "deployment/ingress-nginx-controller",
@@ -66,7 +86,7 @@ pub async fn bootstrap_local_stack(window: Window) -> BootstrapResult<BootstrapR
 
     emit(&window, "gitops", "Starting GitOps controller...", 68);
     ensure_namespace("argocd")?;
-    apply_remote_manifest_in_namespace(ARGOCD_INSTALL_URL, "argocd").await?;
+    apply_remote_manifest_server_side_in_namespace(ARGOCD_INSTALL_URL, "argocd").await?;
     wait_for_crd("applications.argoproj.io", "120s")?;
     wait_for_crd("appprojects.argoproj.io", "120s")?;
     wait_for_rollout("argocd", "deployment/argocd-server", "300s")?;
@@ -101,13 +121,21 @@ pub fn bootstrap_probe() -> BootstrapReport {
     BootstrapReport {
         os: std::env::consts::OS.to_string(),
         arch: std::env::consts::ARCH.to_string(),
-        runtime: if docker_available() {
-            "Docker-compatible runtime".to_string()
-        } else {
-            "Unavailable".to_string()
-        },
+        runtime: detect_runtime_kind()
+            .map(|k| k.label().to_string())
+            .unwrap_or_else(|| "Unavailable".to_string()),
         cluster: CLUSTER_NAME.to_string(),
         tools: current_tool_statuses(),
+    }
+}
+
+fn detect_runtime_kind() -> Option<RuntimeKind> {
+    if podman_ready() {
+        Some(RuntimeKind::Podman)
+    } else if docker_ready() {
+        Some(RuntimeKind::Colima)
+    } else {
+        None
     }
 }
 
@@ -123,7 +151,11 @@ fn emit(window: &Window, stage: &str, message: &str, progress: u8) {
 }
 
 fn current_tool_statuses() -> Vec<ToolStatus> {
-    ["docker", "kind", "kubectl", "helm", "argocd"]
+    let runtime_tool = match active_runtime() {
+        Some(RuntimeKind::Podman) => "podman",
+        _ => "docker",
+    };
+    [runtime_tool, "kind", "kubectl", "helm", "argocd"]
         .iter()
         .map(|name| {
             let path = find_tool_binary(name);
@@ -136,81 +168,15 @@ fn current_tool_statuses() -> Vec<ToolStatus> {
         .collect()
 }
 
-async fn ensure_container_runtime(window: &Window) -> BootstrapResult<String> {
-    if docker_available() {
-        return Ok("Docker-compatible runtime".to_string());
-    }
+fn active_runtime() -> Option<RuntimeKind> {
+    ACTIVE_RUNTIME.get().copied().or_else(detect_runtime_kind)
+}
 
+async fn ensure_container_runtime(window: &Window) -> BootstrapResult<RuntimeKind> {
     match std::env::consts::OS {
-        "macos" => {
-            let preferred = if supports_apple_virtualization() {
-                vec![
-                    RuntimeCandidate::OrbStack,
-                    RuntimeCandidate::DockerDesktop,
-                    RuntimeCandidate::Colima,
-                ]
-            } else {
-                vec![RuntimeCandidate::DockerDesktop, RuntimeCandidate::Colima]
-            };
-            let installed: Vec<_> = preferred
-                .iter()
-                .copied()
-                .filter(|candidate| macos_runtime_installed(*candidate))
-                .collect();
-            let install_candidates = vec![RuntimeCandidate::Colima];
-
-            let mut errors = Vec::new();
-            for candidate in installed {
-                emit(
-                    window,
-                    "runtime",
-                    &format!("Starting {}...", candidate.label()),
-                    8,
-                );
-
-                match ensure_macos_runtime(candidate, false) {
-                    Ok(()) => {
-                        if wait_for_docker_ready(Duration::from_secs(180)) {
-                            return Ok(candidate.label().to_string());
-                        }
-                        errors.push(format!("{} did not expose Docker in time", candidate.label()));
-                    }
-                    Err(error) => errors.push(format!("{}: {}", candidate.label(), error)),
-                }
-            }
-
-            for candidate in install_candidates {
-                emit(
-                    window,
-                    "runtime",
-                    &format!("Installing {}...", candidate.label()),
-                    8,
-                );
-
-                match ensure_macos_runtime(candidate, true) {
-                    Ok(()) => {
-                        if wait_for_docker_ready(Duration::from_secs(180)) {
-                            return Ok(candidate.label().to_string());
-                        }
-                        errors.push(format!("{} did not expose Docker in time", candidate.label()));
-                    }
-                    Err(error) => errors.push(format!("{}: {}", candidate.label(), error)),
-                }
-            }
-
-            Err(format!(
-                "No Docker-compatible runtime became available. {}",
-                errors.join("; ")
-            ))
-        }
-        "linux" => Err(
-            "Docker is not running. Install and start Docker Engine or another Docker-compatible runtime, then retry."
-                .to_string(),
-        ),
-        "windows" => Err(
-            "Docker is not running. Install and start Docker Desktop with WSL 2 support, then retry."
-                .to_string(),
-        ),
+        "macos" => ensure_macos_colima(window),
+        "linux" => ensure_linux_podman(window),
+        "windows" => ensure_windows_podman(window),
         other => Err(format!(
             "Unsupported OS for automatic runtime setup: {}",
             other
@@ -218,123 +184,97 @@ async fn ensure_container_runtime(window: &Window) -> BootstrapResult<String> {
     }
 }
 
-#[derive(Copy, Clone)]
-enum RuntimeCandidate {
-    OrbStack,
-    DockerDesktop,
-    Colima,
-}
-
-impl RuntimeCandidate {
-    fn label(self) -> &'static str {
-        match self {
-            Self::OrbStack => "OrbStack",
-            Self::DockerDesktop => "Docker Desktop",
-            Self::Colima => "Colima",
-        }
-    }
-}
-
-fn supports_apple_virtualization() -> bool {
-    if std::env::consts::OS != "macos" {
-        return false;
+fn ensure_macos_colima(window: &Window) -> BootstrapResult<RuntimeKind> {
+    if docker_ready() {
+        return Ok(RuntimeKind::Colima);
     }
 
-    let output = Command::new("sw_vers").args(["-productVersion"]).output();
-
-    let Ok(output) = output else {
-        return true;
-    };
-
-    let version = String::from_utf8_lossy(&output.stdout);
-    let mut parts = version.trim().split('.');
-    parts
-        .next()
-        .and_then(|major| major.parse::<u32>().ok())
-        .map(|major| major >= 13)
-        .unwrap_or(true)
-}
-
-fn macos_runtime_installed(candidate: RuntimeCandidate) -> bool {
-    match candidate {
-        RuntimeCandidate::OrbStack => {
-            find_tool_binary("orb").is_some()
-                || PathBuf::from("/Applications/OrbStack.app").exists()
+    if find_tool_binary("colima").is_none() || find_tool_binary("docker").is_none() {
+        if !is_homebrew_available() {
+            return Err(
+                "Homebrew is required to install Colima. Install from https://brew.sh, then retry."
+                    .to_string(),
+            );
         }
-        RuntimeCandidate::DockerDesktop => PathBuf::from("/Applications/Docker.app").exists(),
-        RuntimeCandidate::Colima => find_tool_binary("colima").is_some(),
+        emit(window, "runtime", "Installing Colima...", 8);
+        brew_install(&["install", "colima", "docker"])?;
+        ensure_runtime_tool_paths_on_process();
     }
-}
 
-fn ensure_macos_runtime(candidate: RuntimeCandidate, install_missing: bool) -> BootstrapResult<()> {
-    match candidate {
-        RuntimeCandidate::OrbStack => {
-            if find_tool_binary("orb").is_none() {
-                if !install_missing {
-                    return Err("OrbStack CLI is not installed".to_string());
-                }
-                brew_install(&["install", "--cask", "orbstack"])?;
-            }
-            open_app("OrbStack")
-        }
-        RuntimeCandidate::DockerDesktop => {
-            if !PathBuf::from("/Applications/Docker.app").exists() {
-                if !install_missing {
-                    return Err("Docker Desktop is not installed".to_string());
-                }
-                brew_install(&["install", "--cask", "docker"])?;
-            }
-            open_app("Docker")
-        }
-        RuntimeCandidate::Colima => {
-            if find_tool_binary("colima").is_none() {
-                if !install_missing {
-                    return Err("Colima is not installed".to_string());
-                }
-                brew_install(&["install", "colima", "docker"])?;
-            }
-            let mut command = tool_command("colima");
-            command.args(["start", "--cpu", "4", "--memory", "8"]);
-            run_command(command, "colima start").map(|_| ())
-        }
-    }
-}
+    emit(window, "runtime", "Starting Colima...", 10);
+    let mut command = tool_command("colima");
+    command.args(["start", "--cpu", "4", "--memory", "8"]);
+    run_command(command, "colima start").map(|_| ())?;
 
-fn open_app(name: &str) -> BootstrapResult<()> {
-    let output = Command::new("open")
-        .args(["-a", name])
-        .output()
-        .map_err(|error| format!("Failed to open {}: {}", name, error))?;
-
-    if output.status.success() {
-        Ok(())
+    if wait_for_runtime_ready(RuntimeKind::Colima, Duration::from_secs(180)) {
+        Ok(RuntimeKind::Colima)
     } else {
-        Err(format!(
-            "open -a {} failed: {}",
-            name,
-            String::from_utf8_lossy(&output.stderr).trim()
-        ))
+        Err("Colima started but Docker did not become available in time.".to_string())
     }
 }
 
-fn docker_available() -> bool {
-    let mut command = docker_command();
-    command.arg("info");
-    command
-        .output()
-        .map(|output| output.status.success())
-        .unwrap_or(false)
+fn ensure_linux_podman(window: &Window) -> BootstrapResult<RuntimeKind> {
+    if find_tool_binary("podman").is_none() {
+        return Err(
+            "Podman is required on Linux. Install via your package manager (e.g. \
+             `sudo dnf install podman`, `sudo apt install podman`, or `sudo pacman -S podman`), \
+             then retry."
+                .to_string(),
+        );
+    }
+
+    emit(window, "runtime", "Checking Podman...", 10);
+    if !podman_ready() {
+        return Err(
+            "Podman is installed but `podman info` failed. Ensure your user session is configured \
+             (e.g. `podman system migrate`) and that cgroup v2 is enabled, then retry."
+                .to_string(),
+        );
+    }
+
+    Ok(RuntimeKind::Podman)
 }
 
-fn wait_for_docker_ready(timeout: Duration) -> bool {
-    let deadline = Instant::now() + timeout;
-    while Instant::now() < deadline {
-        if docker_available() {
-            return true;
-        }
-        thread::sleep(Duration::from_secs(2));
+fn ensure_windows_podman(window: &Window) -> BootstrapResult<RuntimeKind> {
+    if find_tool_binary("podman").is_none() {
+        return Err(
+            "Podman is required on Windows. Install Podman Desktop from \
+             https://podman-desktop.io/downloads, then retry."
+                .to_string(),
+        );
     }
-    false
+
+    emit(window, "runtime", "Preparing Podman machine...", 8);
+    if !podman_machine_exists()? {
+        let mut init = tool_command("podman");
+        init.args(["machine", "init", "--rootful", "--now"]);
+        run_command(init, "podman machine init").map(|_| ())?;
+    } else {
+        ensure_podman_machine_rootful()?;
+        let mut start = tool_command("podman");
+        start.args(["machine", "start"]);
+        // Ignore "already running" errors.
+        let _ = start.output();
+    }
+
+    if wait_for_runtime_ready(RuntimeKind::Podman, Duration::from_secs(180)) {
+        Ok(RuntimeKind::Podman)
+    } else {
+        Err("Podman machine started but `podman info` did not become available in time.".to_string())
+    }
+}
+
+fn podman_machine_exists() -> BootstrapResult<bool> {
+    let output = run_tool("podman", &["machine", "list", "--format", "{{.Name}}"])?;
+    Ok(!String::from_utf8_lossy(&output.stdout).trim().is_empty())
+}
+
+fn ensure_podman_machine_rootful() -> BootstrapResult<()> {
+    let mut cmd = tool_command("podman");
+    cmd.args(["machine", "set", "--rootful"]);
+    // Best-effort: machine must be stopped for `set` to take effect; ignore failures.
+    let _ = cmd.output();
+    Ok(())
 }
 
 async fn ensure_host_tools(window: &Window) -> BootstrapResult<()> {
@@ -525,7 +465,7 @@ nodes:
 "#
     .to_string();
 
-    let mut child = tool_command("kind")
+    let mut child = kind_command()
         .args(["create", "cluster", "--name", CLUSTER_NAME, "--config", "-"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -555,7 +495,9 @@ nodes:
 }
 
 fn kind_cluster_exists() -> BootstrapResult<bool> {
-    let output = run_tool("kind", &["get", "clusters"])?;
+    let mut command = kind_command();
+    command.args(["get", "clusters"]);
+    let output = run_command(command, "kind get clusters")?;
     if !output.status.success() {
         return Ok(false);
     }
@@ -564,27 +506,38 @@ fn kind_cluster_exists() -> BootstrapResult<bool> {
     Ok(stdout.lines().any(|line| line.trim() == CLUSTER_NAME))
 }
 
-async fn apply_remote_manifest(url: &str) -> BootstrapResult<()> {
-    let response = reqwest::get(url)
-        .await
-        .map_err(|error| format!("Failed to download manifest {}: {}", url, error))?;
-
-    if !response.status().is_success() {
-        return Err(format!(
-            "Failed to download manifest {}: HTTP {}",
-            url,
-            response.status()
-        ));
-    }
-
-    let manifest = response
-        .text()
-        .await
-        .map_err(|error| format!("Failed reading manifest {}: {}", url, error))?;
-    apply_manifest(&manifest)
+async fn apply_remote_manifest_server_side(url: &str) -> BootstrapResult<()> {
+    apply_manifest_with_args(
+        &download_manifest(url).await?,
+        &[
+            "apply",
+            "--server-side",
+            "--force-conflicts",
+            "-f",
+            "-",
+        ],
+    )
 }
 
-async fn apply_remote_manifest_in_namespace(url: &str, namespace: &str) -> BootstrapResult<()> {
+async fn apply_remote_manifest_server_side_in_namespace(
+    url: &str,
+    namespace: &str,
+) -> BootstrapResult<()> {
+    apply_manifest_with_args(
+        &download_manifest(url).await?,
+        &[
+            "apply",
+            "--server-side",
+            "--force-conflicts",
+            "-n",
+            namespace,
+            "-f",
+            "-",
+        ],
+    )
+}
+
+async fn download_manifest(url: &str) -> BootstrapResult<String> {
     let response = reqwest::get(url)
         .await
         .map_err(|error| format!("Failed to download manifest {}: {}", url, error))?;
@@ -597,19 +550,14 @@ async fn apply_remote_manifest_in_namespace(url: &str, namespace: &str) -> Boots
         ));
     }
 
-    let manifest = response
+    response
         .text()
         .await
-        .map_err(|error| format!("Failed reading manifest {}: {}", url, error))?;
-    apply_manifest_in_namespace(&manifest, namespace)
+        .map_err(|error| format!("Failed reading manifest {}: {}", url, error))
 }
 
 fn apply_manifest(manifest: &str) -> BootstrapResult<()> {
     apply_manifest_with_args(manifest, &["apply", "-f", "-"])
-}
-
-fn apply_manifest_in_namespace(manifest: &str, namespace: &str) -> BootstrapResult<()> {
-    apply_manifest_with_args(manifest, &["apply", "-n", namespace, "-f", "-"])
 }
 
 fn apply_manifest_with_args(manifest: &str, args: &[&str]) -> BootstrapResult<()> {
@@ -720,13 +668,51 @@ fn kubectl_command() -> Command {
 }
 
 fn docker_command() -> Command {
-    if let Some(path) = find_tool_binary("docker") {
-        let mut command = Command::new(path);
-        prepend_runtime_tool_paths(&mut command);
-        command
-    } else {
-        tool_command("docker")
+    tool_command("docker")
+}
+
+fn kind_command() -> Command {
+    let mut command = tool_command("kind");
+    if matches!(active_runtime(), Some(RuntimeKind::Podman)) {
+        command.env("KIND_EXPERIMENTAL_PROVIDER", "podman");
     }
+    command
+}
+
+fn docker_ready() -> bool {
+    let mut command = docker_command();
+    command.arg("info");
+    command
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false)
+}
+
+fn podman_ready() -> bool {
+    let mut command = tool_command("podman");
+    command.arg("info");
+    command
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false)
+}
+
+fn runtime_ready(kind: RuntimeKind) -> bool {
+    match kind {
+        RuntimeKind::Colima => docker_ready(),
+        RuntimeKind::Podman => podman_ready(),
+    }
+}
+
+fn wait_for_runtime_ready(kind: RuntimeKind, timeout: Duration) -> bool {
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        if runtime_ready(kind) {
+            return true;
+        }
+        thread::sleep(Duration::from_secs(2));
+    }
+    false
 }
 
 fn tool_command(name: &str) -> Command {
@@ -774,7 +760,6 @@ fn common_tool_dirs() -> Vec<PathBuf> {
         PathBuf::from("/usr/bin"),
         PathBuf::from("/bin"),
         PathBuf::from("/Applications/Docker.app/Contents/Resources/bin"),
-        PathBuf::from("/Applications/OrbStack.app/Contents/MacOS"),
     ];
 
     if let Some(local_bin) = local_bin_dir() {
