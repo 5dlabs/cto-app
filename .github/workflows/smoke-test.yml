@@ -88,11 +88,12 @@ jobs:
 
       - name: Install chart (controller only)
         run: |
-          # Chart ships its own Namespace (global.createNamespace=true by
-          # default), so do NOT pass --create-namespace or Helm will create
-          # it pre-render and collide with the templated Namespace.
+          # Disable the chart's Namespace template (global.createNamespace) and
+          # let Helm create the namespace via --create-namespace. Using both
+          # causes "already exists" on install.
           helm install cto "/tmp/chart/cto-${{ needs.gate.outputs.chart_version }}.tgz" \
-            --namespace "$NS" \
+            --namespace "$NS" --create-namespace \
+            --set global.createNamespace=false \
             --set tools.enabled=false \
             --set controller.skillsCache.enabled=false \
             --wait --timeout=6m
@@ -163,9 +164,10 @@ jobs:
 
       - name: Install chart (tools only, no dind)
         run: |
-          # Chart ships its own Namespace; don't pass --create-namespace.
+          # Disable chart's Namespace template; let Helm --create-namespace.
           helm install cto "/tmp/chart/cto-${{ needs.gate.outputs.chart_version }}.tgz" \
-            --namespace "$NS" \
+            --namespace "$NS" --create-namespace \
+            --set global.createNamespace=false \
             --set controller.enabled=false \
             --set tools.dockerInDocker.enabled=false \
             --set tools.workspace.enabled=false \
