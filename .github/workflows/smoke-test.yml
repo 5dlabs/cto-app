@@ -14,7 +14,6 @@ on:
   workflow_run:
     workflows: ["publish-chart"]
     types: [completed]
-    branches: [main, feat/local-stack-bootstrap]
   workflow_dispatch:
     inputs:
       chart_version:
