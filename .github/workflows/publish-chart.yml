@@ -12,7 +12,7 @@ on:
     branches: [main]
     tags: ["chart-v*"]
     paths:
-      - ".gitops/charts/cto/**"
+      - ".gitops/charts/**"
       - ".github/workflows/publish-chart.yml"
   workflow_dispatch:
 
@@ -21,7 +21,6 @@ permissions:
   packages: write
 
 env:
-  CHART_DIR: .gitops/charts/cto
   GHCR_REGISTRY: ghcr.io
   GITLAB_REGISTRY: ${{ vars.GITLAB_REGISTRY || 'registry.gitlab.com' }}
 
@@ -40,14 +39,23 @@ jobs:
         with:
           version: v3.16.2
 
-      - name: Lint chart
-        run: helm lint "${CHART_DIR}"
+      - name: Lint charts
+        run: |
+          for chart in .gitops/charts/*/; do
+            [ -f "$chart/Chart.yaml" ] || continue
+            echo "::group::helm lint $chart"
+            helm lint "$chart"
+            echo "::endgroup::"
+          done
 
-      - name: Package chart
+      - name: Package charts
         run: |
           mkdir -p dist
-          helm package "${CHART_DIR}" --destination dist
-          echo "PACKAGE=$(ls dist/*.tgz | head -n1)" >> "$GITHUB_ENV"
+          for chart in .gitops/charts/*/; do
+            [ -f "$chart/Chart.yaml" ] || continue
+            helm package "$chart" --destination dist
+          done
+          ls -la dist/
 
       - name: Login to GHCR
         run: |
@@ -58,7 +66,10 @@ jobs:
 
       - name: Push to GHCR (public)
         run: |
-          helm push "${PACKAGE}" "oci://${GHCR_REGISTRY}/${{ github.repository_owner }}/helm-charts"
+          for pkg in dist/*.tgz; do
+            echo "Pushing $pkg -> oci://${GHCR_REGISTRY}/${{ github.repository_owner }}/helm-charts"
+            helm push "$pkg" "oci://${GHCR_REGISTRY}/${{ github.repository_owner }}/helm-charts"
+          done
 
       - name: Login to GitLab registry
         if: ${{ vars.GITLAB_REGISTRY != '' && env.GITLAB_DEPLOY_TOKEN != '' }}
@@ -71,9 +82,12 @@ jobs:
       - name: Push to GitLab (mirror)
         if: ${{ vars.GITLAB_REGISTRY != '' && env.GITLAB_DEPLOY_TOKEN != '' }}
         run: |
-          helm push "${PACKAGE}" "oci://${GITLAB_REGISTRY}/${{ vars.GITLAB_HELM_PATH }}"
+          for pkg in dist/*.tgz; do
+            helm push "$pkg" "oci://${GITLAB_REGISTRY}/${{ vars.GITLAB_HELM_PATH }}"
+          done
 
       # NOTE: GHCR package visibility cannot be changed by the default
       # GITHUB_TOKEN (requires admin:packages scope on an org-owned package).
-      # Flip once via https://github.com/orgs/5dlabs/packages/container/helm-charts%2Fcto/settings
+      # Flip once per chart via
+      #   https://github.com/orgs/5dlabs/packages/container/helm-charts%2F<chart>/settings
       # or via a PAT with admin:packages.
