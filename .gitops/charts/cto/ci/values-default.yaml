@@ -1,0 +1,5 @@
+---
+# Minimum values so the chart renders in CI. Mirrors what the desktop
+# bootstrap provides at first install.
+agentKeys:
+  anthropicApiKey: "placeholder"

@@ -1,11 +1,15 @@
 use tauri::Manager;
 
+mod bootstrap;
+
+#[allow(clippy::missing_panics_doc)]
 #[tauri::command]
 fn app_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+#[allow(clippy::missing_panics_doc)]
 pub fn run() {
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -30,7 +34,11 @@ pub fn run() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![app_version])
+        .invoke_handler(tauri::generate_handler![
+            app_version,
+            bootstrap::bootstrap_local_stack,
+            bootstrap::bootstrap_probe
+        ])
         .run(tauri::generate_context!())
         .expect("error while running CTO Desktop");
 }

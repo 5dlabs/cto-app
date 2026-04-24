@@ -1,0 +1,50 @@
+---
+# CTO — the core platform chart (controller + tools).  Published by this
+# repo's GitHub Action to ghcr.io/5dlabs/helm-charts as a public OCI chart.
+#
+# This is currently the ONLY Argo Application shipped by the bootstrap.
+# Qdrant / mem0 / GitLab / runners will be layered in later once we step
+# through what each pre-release user actually needs.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cto
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: cto
+    app.kubernetes.io/part-of: platform
+    app.kubernetes.io/component: core
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  source:
+    # Public OCI chart published by .github/workflows/publish-chart.yml
+    repoURL: ghcr.io/5dlabs/helm-charts
+    chart: cto
+    targetRevision: 0.1.0
+    helm:
+      releaseName: cto
+      # Values are supplied by the desktop bootstrap at install time via a
+      # parameters override on this Application (bootstrap.rs patches
+      # `.spec.source.helm.valuesObject` after the user enters API keys).
+      valuesObject: {}
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cto-system
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m

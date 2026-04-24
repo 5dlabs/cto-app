@@ -1,0 +1,32 @@
+# yamllint config ported from 5dlabs/cto infra rules.  Targets the GitOps
+# subtree only — we don't want to force the whole Rust / TS repo through it.
+extends: default
+
+rules:
+  # GitHub Actions + Helm templates tend to have long lines; keep them.
+  line-length: disable
+  indentation:
+    indent-sequences: consistent
+  truthy:
+    allowed-values: ["true", "false", "on", "off", "yes", "no"]
+    check-keys: false
+  comments:
+    min-spaces-from-content: 1
+  document-start: disable
+  empty-lines:
+    max: 2
+    max-start: 1
+    max-end: 1
+  braces:
+    max-spaces-inside: 1
+
+ignore: |
+  node_modules/
+  target/
+  ui/dist/
+  src-tauri/target/
+  src-tauri/gen/
+  # Helm templates use Go template syntax that yamllint can't parse;
+  # `helm lint` covers them instead.
+  .gitops/charts/*/templates/
+  .gitops/charts/*/crds/

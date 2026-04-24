@@ -7,6 +7,7 @@ import "./styles/shell.css";
 import "./styles/views.css";
 import "./styles/views-v2.css";
 import "./styles/extras.css";
+import "./styles/bootstrap.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
