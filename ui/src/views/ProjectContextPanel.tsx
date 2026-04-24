@@ -34,10 +34,20 @@ export function ProjectContextPanel({
     refreshing,
     refresh,
     setActive,
+    verifyProject,
   } = useProjects();
   const [showNew, setShowNew] = useState(false);
+  const [busyFor, setBusyFor] = useState<string | null>(null);
 
-  const openCoderFor = (name: string) => {
+  const openCoderFor = async (name: string) => {
+    setBusyFor(name);
+    try {
+      await verifyProject(name);
+    } catch (err) {
+      console.warn("[project-ctx] verify failed, opening anyway:", err);
+    } finally {
+      setBusyFor(null);
+    }
     const url = buildCoderUrl({ repo: name });
     window.open(url, "_blank", "noreferrer");
   };
@@ -83,10 +93,12 @@ export function ProjectContextPanel({
             </button>
             <button
               type="button"
-              className="primary-btn"
+              className="primary-btn primary-btn--icon"
               onClick={() => setShowNew(true)}
+              aria-label="New project"
+              title="New project"
             >
-              <IconPlus size={12} /> New project
+              <IconPlus size={14} />
             </button>
           </div>
         </div>
@@ -119,10 +131,12 @@ export function ProjectContextPanel({
               <button
                 type="button"
                 className="ghost-btn"
-                onClick={() => openCoderFor(activeDescriptor.name)}
+                onClick={() => void openCoderFor(activeDescriptor.name)}
                 title="Open this project's workspace in a new tab"
+                disabled={busyFor === activeDescriptor.name}
               >
-                <IconExternal size={11} /> Open workspace
+                <IconExternal size={11} />{" "}
+                {busyFor === activeDescriptor.name ? "Preparing…" : "Open workspace"}
               </button>
             </div>
           </div>

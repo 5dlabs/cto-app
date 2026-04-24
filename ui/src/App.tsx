@@ -12,7 +12,6 @@ import {
   IconSearch,
   IconCommand,
   IconBell,
-  IconPlus,
   IconUsers,
   IconPalette,
   IconBracket,
@@ -145,13 +144,6 @@ export default function App() {
         <div className="titlebar__actions">
           <button className="ghost-btn" type="button" aria-label="Notifications">
             <IconBell size={14} />
-          </button>
-          <button
-            className="primary-btn"
-            type="button"
-            onClick={() => setShowNewAgent(true)}
-          >
-            <IconPlus size={12} /> New agent
           </button>
         </div>
       </header>

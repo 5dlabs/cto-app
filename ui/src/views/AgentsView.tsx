@@ -72,8 +72,14 @@ export function AgentsView({ onNewAgent }: { onNewAgent?: () => void }) {
           <button type="button" className="ghost-btn">
             <IconFilter size={12} /> Filters
           </button>
-          <button type="button" className="primary-btn" onClick={onNewAgent}>
-            <IconPlus size={12} /> New agent
+          <button
+            type="button"
+            className="primary-btn primary-btn--icon"
+            onClick={onNewAgent}
+            aria-label="New agent"
+            title="New agent"
+          >
+            <IconPlus size={14} />
           </button>
         </div>
       </div>
