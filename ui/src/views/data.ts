@@ -592,10 +592,31 @@ export const AGENTS: AgentCard[] = [
   },
 ];
 
-/** Base origin for the Coder / code-server host. */
-export const CODER_BASE_URL = "https://coder.5dlabs.ai";
+function resolveCoderBaseUrl(): string {
+  try {
+    const fromEnv =
+      (typeof import.meta !== "undefined" &&
+        (import.meta as unknown as { env?: { VITE_CODER_BASE_URL?: string } })
+          .env?.VITE_CODER_BASE_URL) ||
+      "";
+    if (fromEnv) return fromEnv.replace(/\/$/, "");
+  } catch {
+    /* ignore */
+  }
+  try {
+    const fromWindow = (window as unknown as { __CODER_BASE_URL__?: string })
+      .__CODER_BASE_URL__;
+    if (fromWindow) return fromWindow.replace(/\/$/, "");
+  } catch {
+    /* ignore */
+  }
+  return "https://morgan-ide.5dlabs.ai";
+}
 
-/** Parent dir inside the Coder pod where repos are checked out. */
+/** Base origin for Morgan's code-server host. */
+export const CODER_BASE_URL = resolveCoderBaseUrl();
+
+/** Parent dir inside the Morgan pod where repos are checked out. */
 export const CODER_REPOS_ROOT = "/workspace/repos";
 
 /**
