@@ -26,13 +26,27 @@ type Selection = { task: TaskCard; lane: ProjectBoardLane };
 /**
  * For every project in the live list that isn't already represented by a
  * task, synthesize a lightweight "pending" row so newly-created projects
- * appear on the board immediately. When the PRD hasn't been drafted yet the
- * implied next action is "Draft PRD", otherwise "Review PRD".
+ * appear on the board immediately. The title + note reflect the PRD state
+ * machine so the user knows what the next Morgan step is.
  */
 function syntheticTaskForProject(p: ProjectDescriptor): TaskCard {
+  const title = !p.hasPrd
+    ? "Draft PRD"
+    : p.state === "ready"
+      ? p.hasArchitecture
+        ? "Ready for intake"
+        : "Draft architecture"
+      : "Refine PRD";
+  const note = !p.hasPrd
+    ? "Have a conversation with Morgan, then say \u201cbegin intake\u201d."
+    : p.state === "ready"
+      ? p.hasArchitecture
+        ? "PRD + architecture are frozen — kick off the intake pipeline."
+        : "PRD is frozen — ask Morgan to draft .prd/architecture.md next."
+      : "PRD in progress — iterate with Morgan, then mark ready.";
   return {
     id: `P-${p.name}`,
-    title: p.hasPrd ? "Review PRD" : "Draft PRD",
+    title,
     projectId: p.name,
     projectName: p.name,
     agentId: "morgan",
@@ -47,9 +61,7 @@ function syntheticTaskForProject(p: ProjectDescriptor): TaskCard {
     iterations: 0,
     updated: p.updatedAt ?? "new",
     repo: p.name,
-    note: p.hasPrd
-      ? "prd.md exists — confirm and kick off intake pipeline."
-      : "Have a conversation with Morgan, then say \u201cbegin intake\u201d.",
+    note,
   };
 }
 

@@ -15,12 +15,29 @@
  * endpoint is unreachable so the shell stays usable without the backend.
  */
 
+/**
+ * Workflow state derived from `.prd/PRD.md` YAML frontmatter `status:`.
+ * `"drafting"` — PRD exists but not yet signed off by Morgan + user.
+ * `"ready"` — PRD is frozen, intake is eligible to run (architecture.md
+ * is tracked separately via `hasArchitecture`). The sidecar defaults to
+ * `"drafting"` whenever a PRD is present but the field is missing or
+ * unrecognized — tiles never silently disappear.
+ */
+export type PrdStatus = "drafting" | "ready";
+
 export interface ProjectDescriptor {
   name: string;
   /** Absolute path on the Morgan PVC, e.g. `/workspace/repos/foo`. */
   path: string;
   /** True when `.prd/PRD.md` exists (on GitHub default branch for remote-only listings, or on disk for cloned). */
   hasPrd: boolean;
+  /**
+   * True when `.prd/architecture.md` is also present — required alongside
+   * `state === "ready"` for the "ready for intake" tile CTA.
+   */
+  hasArchitecture: boolean;
+  /** Workflow state, see `PrdStatus`. */
+  state: PrdStatus;
   /** Git remote URL, if one is configured. */
   remoteUrl: string | null;
   /** ISO timestamp of the most recent commit or directory mtime. */
@@ -68,6 +85,9 @@ export interface WritePrdResponse {
   path: string;
   bytesWritten: number;
 }
+
+export type WriteArchitectureRequest = WritePrdRequest;
+export type WriteArchitectureResponse = WritePrdResponse;
 
 export class ProjectApiError extends Error {
   constructor(
@@ -249,6 +269,28 @@ export const projectApi = {
         body: JSON.stringify(body),
         signal,
       },
+    );
+  },
+
+  writeArchitecture(
+    name: string,
+    body: WriteArchitectureRequest,
+    signal?: AbortSignal,
+  ): Promise<WriteArchitectureResponse> {
+    return request<WriteArchitectureResponse>(
+      `/projects/${encodeURIComponent(name)}/architecture`,
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+        signal,
+      },
+    );
+  },
+
+  markReady(name: string, signal?: AbortSignal): Promise<ProjectDescriptor> {
+    return request<ProjectDescriptor>(
+      `/projects/${encodeURIComponent(name)}/mark-ready`,
+      { method: "POST", signal },
     );
   },
 };

@@ -533,6 +533,23 @@ button.projects-board__card:hover {
   color: oklch(85% 0.12 140);
   border: 1px solid oklch(70% 0.15 140 / 0.35);
 }
+/* Amber = drafting, green = ready, blue = architecture signal. */
+.project-ctx__item-badge--drafting {
+  background: oklch(70% 0.16 80 / 0.18);
+  color: oklch(85% 0.14 80);
+  border-color: oklch(70% 0.16 80 / 0.4);
+}
+.project-ctx__item-badge--ready {
+  background: oklch(72% 0.18 145 / 0.22);
+  color: oklch(88% 0.14 145);
+  border-color: oklch(72% 0.18 145 / 0.45);
+}
+.project-ctx__item-badge--arch {
+  background: oklch(70% 0.13 240 / 0.18);
+  color: oklch(85% 0.12 240);
+  border-color: oklch(70% 0.13 240 / 0.4);
+  margin-left: 4px;
+}
 .project-ctx__item-dot {
   width: 6px; height: 6px; border-radius: 50%;
   background: oklch(82% 0.18 282);

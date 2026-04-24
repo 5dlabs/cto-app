@@ -119,13 +119,31 @@ export function ProjectContextPanel({
             ) : null}
             <div className="project-ctx__meta-row">
               <span className="muted tiny">PRD</span>
-              <span
-                className={`chip chip--${
-                  activeDescriptor.hasPrd ? "success" : "muted"
-                }`}
-              >
-                {activeDescriptor.hasPrd ? "prd.md present" : "no prd.md yet"}
-              </span>
+              {activeDescriptor.hasPrd ? (
+                <span
+                  className={`chip chip--${
+                    activeDescriptor.state === "ready" ? "success" : "warn"
+                  }`}
+                  title={
+                    activeDescriptor.state === "ready"
+                      ? "PRD frozen — ready for intake"
+                      : "PRD in progress"
+                  }
+                >
+                  {activeDescriptor.state === "ready" ? "ready" : "drafting"}
+                </span>
+              ) : (
+                <span className="chip chip--muted">no prd.md yet</span>
+              )}
+              {activeDescriptor.hasArchitecture ? (
+                <span
+                  className="chip chip--success"
+                  title="architecture.md present"
+                  style={{ marginLeft: 4 }}
+                >
+                  arch
+                </span>
+              ) : null}
             </div>
             <div className="row" style={{ gap: 6, marginTop: 8 }}>
               <button
@@ -173,10 +191,24 @@ export function ProjectContextPanel({
                 <span className="project-ctx__item-name">{p.name}</span>
                 {p.hasPrd ? (
                   <span
-                    className="project-ctx__item-badge"
-                    title="prd.md present"
+                    className={`project-ctx__item-badge project-ctx__item-badge--${
+                      p.state === "ready" ? "ready" : "drafting"
+                    }`}
+                    title={
+                      p.state === "ready"
+                        ? "PRD marked ready"
+                        : "PRD in progress"
+                    }
                   >
-                    PRD
+                    {p.state === "ready" ? "READY" : "PRD"}
+                  </span>
+                ) : null}
+                {p.hasArchitecture ? (
+                  <span
+                    className="project-ctx__item-badge project-ctx__item-badge--arch"
+                    title="architecture.md present"
+                  >
+                    ARCH
                   </span>
                 ) : null}
                 {isActive ? (

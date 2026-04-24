@@ -25,6 +25,7 @@ import {
   ProjectApiError,
   projectApi,
   type ProjectDescriptor,
+  type PrdStatus,
 } from "../api/projectApi";
 
 const ACTIVE_STORAGE_KEY = "5d.activeProject";
@@ -78,7 +79,15 @@ const ProjectContext = createContext<ProjectContextValue | null>(null);
 const STUB_PROJECTS: ProjectDescriptor[] = [];
 
 function normalize(list: ProjectDescriptor[]): ProjectDescriptor[] {
-  return [...list].sort((a, b) => a.name.localeCompare(b.name));
+  return [...list]
+    .map((p) => ({
+      ...p,
+      // Defensive defaults so an older sidecar (missing state / hasArchitecture)
+      // still renders as a drafting tile rather than crashing the board.
+      hasArchitecture: p.hasArchitecture ?? false,
+      state: (p.state ?? "drafting") as PrdStatus,
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 export function ProjectProvider({ children }: { children: ReactNode }) {
