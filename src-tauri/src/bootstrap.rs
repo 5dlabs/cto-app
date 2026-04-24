@@ -44,7 +44,6 @@ const ARGOCD_VALUES: &str = include_str!("../../.gitops/charts/argocd/values.yam
 // Published by .github/workflows/publish-chart.yml to ghcr.io.
 const CTO_APP_MANIFEST: &str = include_str!("../../.gitops/apps/cto.yaml");
 
-
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BootstrapProgress {
@@ -135,8 +134,7 @@ pub fn bootstrap_probe() -> BootstrapReport {
         os: std::env::consts::OS.to_string(),
         arch: std::env::consts::ARCH.to_string(),
         runtime: detect_runtime_kind()
-            .map(|k| k.label().to_string())
-            .unwrap_or_else(|| "Unavailable".to_string()),
+            .map_or_else(|| "Unavailable".to_string(), |k| k.label().to_string()),
         cluster: CLUSTER_NAME.to_string(),
         tools: current_tool_statuses(),
     }
@@ -185,14 +183,14 @@ fn active_runtime() -> Option<RuntimeKind> {
     ACTIVE_RUNTIME.get().copied().or_else(detect_runtime_kind)
 }
 
+#[allow(clippy::unused_async)]
 async fn ensure_container_runtime(window: &Window) -> BootstrapResult<RuntimeKind> {
     match std::env::consts::OS {
         "macos" => ensure_macos_colima(window),
         "linux" => ensure_linux_podman(window),
         "windows" => ensure_windows_podman(window),
         other => Err(format!(
-            "Unsupported OS for automatic runtime setup: {}",
-            other
+            "Unsupported OS for automatic runtime setup: {other}"
         )),
     }
 }
@@ -258,22 +256,25 @@ fn ensure_windows_podman(window: &Window) -> BootstrapResult<RuntimeKind> {
     }
 
     emit(window, "runtime", "Preparing Podman machine...", 8);
-    if !podman_machine_exists()? {
-        let mut init = tool_command("podman");
-        init.args(["machine", "init", "--rootful", "--now"]);
-        run_command(init, "podman machine init").map(|_| ())?;
-    } else {
-        ensure_podman_machine_rootful()?;
+    if podman_machine_exists()? {
+        ensure_podman_machine_rootful();
         let mut start = tool_command("podman");
         start.args(["machine", "start"]);
         // Ignore "already running" errors.
         let _ = start.output();
+    } else {
+        let mut init = tool_command("podman");
+        init.args(["machine", "init", "--rootful", "--now"]);
+        run_command(init, "podman machine init").map(|_| ())?;
     }
 
     if wait_for_runtime_ready(RuntimeKind::Podman, Duration::from_secs(180)) {
         Ok(RuntimeKind::Podman)
     } else {
-        Err("Podman machine started but `podman info` did not become available in time.".to_string())
+        Err(
+            "Podman machine started but `podman info` did not become available in time."
+                .to_string(),
+        )
     }
 }
 
@@ -282,12 +283,11 @@ fn podman_machine_exists() -> BootstrapResult<bool> {
     Ok(!String::from_utf8_lossy(&output.stdout).trim().is_empty())
 }
 
-fn ensure_podman_machine_rootful() -> BootstrapResult<()> {
+fn ensure_podman_machine_rootful() {
     let mut cmd = tool_command("podman");
     cmd.args(["machine", "set", "--rootful"]);
     // Best-effort: machine must be stopped for `set` to take effect; ignore failures.
     let _ = cmd.output();
-    Ok(())
 }
 
 async fn ensure_host_tools(window: &Window) -> BootstrapResult<()> {
@@ -296,16 +296,11 @@ async fn ensure_host_tools(window: &Window) -> BootstrapResult<()> {
             continue;
         }
 
-        emit(
-            window,
-            "dependencies",
-            &format!("Installing {}...", tool),
-            18,
-        );
+        emit(window, "dependencies", &format!("Installing {tool}..."), 18);
         install_tool(tool).await?;
 
         if find_tool_binary(tool).is_none() {
-            return Err(format!("{} was installed but is not visible on PATH", tool));
+            return Err(format!("{tool} was installed but is not visible on PATH"));
         }
     }
 
@@ -340,8 +335,7 @@ async fn install_tool(tool: &str) -> BootstrapResult<()> {
     }
 
     Err(format!(
-        "Missing required tool '{}'. Install Homebrew or install '{}' manually.",
-        tool, tool
+        "Missing required tool '{tool}'. Install Homebrew or install '{tool}' manually."
     ))
 }
 
@@ -353,7 +347,7 @@ async fn install_direct_binary(tool: &str) -> BootstrapResult<()> {
     let url = direct_binary_url(tool).await?;
     let response = reqwest::get(&url)
         .await
-        .map_err(|error| format!("Failed to download {}: {}", tool, error))?;
+        .map_err(|error| format!("Failed to download {tool}: {error}"))?;
 
     if !response.status().is_success() {
         return Err(format!(
@@ -367,40 +361,40 @@ async fn install_direct_binary(tool: &str) -> BootstrapResult<()> {
     let bytes = response
         .bytes()
         .await
-        .map_err(|error| format!("Failed reading {} download: {}", tool, error))?;
+        .map_err(|error| format!("Failed reading {tool} download: {error}"))?;
 
     let local_bin = local_bin_dir().ok_or("Cannot resolve ~/.local/bin".to_string())?;
     std::fs::create_dir_all(&local_bin)
-        .map_err(|error| format!("Failed to create {:?}: {}", local_bin, error))?;
+        .map_err(|error| format!("Failed to create {}: {error}", local_bin.display()))?;
 
     let binary_name = if cfg!(windows) {
-        format!("{}.exe", tool)
+        format!("{tool}.exe")
     } else {
         tool.to_string()
     };
-    let temp_path = std::env::temp_dir().join(format!("cto-app-{}", binary_name));
+    let temp_path = std::env::temp_dir().join(format!("cto-app-{binary_name}"));
     let final_path = local_bin.join(binary_name);
 
     std::fs::write(&temp_path, bytes)
-        .map_err(|error| format!("Failed to write {:?}: {}", temp_path, error))?;
+        .map_err(|error| format!("Failed to write {}: {error}", temp_path.display()))?;
 
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         let mut permissions = std::fs::metadata(&temp_path)
-            .map_err(|error| format!("Failed to stat {:?}: {}", temp_path, error))?
+            .map_err(|error| format!("Failed to stat {}: {error}", temp_path.display()))?
             .permissions();
         permissions.set_mode(0o755);
         std::fs::set_permissions(&temp_path, permissions)
-            .map_err(|error| format!("Failed to chmod {:?}: {}", temp_path, error))?;
+            .map_err(|error| format!("Failed to chmod {}: {error}", temp_path.display()))?;
     }
 
     if final_path.exists() {
         std::fs::remove_file(&final_path)
-            .map_err(|error| format!("Failed to replace {:?}: {}", final_path, error))?;
+            .map_err(|error| format!("Failed to replace {}: {error}", final_path.display()))?;
     }
     std::fs::rename(&temp_path, &final_path)
-        .map_err(|error| format!("Failed to install {:?}: {}", final_path, error))?;
+        .map_err(|error| format!("Failed to install {}: {error}", final_path.display()))?;
 
     ensure_runtime_tool_paths_on_process();
     Ok(())
@@ -413,16 +407,15 @@ async fn direct_binary_url(tool: &str) -> BootstrapResult<String> {
 
     match tool {
         "kind" => Ok(format!(
-            "https://kind.sigs.k8s.io/dl/v0.31.0/kind-{}-{}",
-            os, arch
+            "https://kind.sigs.k8s.io/dl/v0.31.0/kind-{os}-{arch}"
         )),
         "kubectl" => {
             let version = reqwest::get("https://dl.k8s.io/release/stable.txt")
                 .await
-                .map_err(|error| format!("Failed to resolve kubectl version: {}", error))?
+                .map_err(|error| format!("Failed to resolve kubectl version: {error}"))?
                 .text()
                 .await
-                .map_err(|error| format!("Failed reading kubectl version: {}", error))?;
+                .map_err(|error| format!("Failed reading kubectl version: {error}"))?;
             Ok(format!(
                 "https://dl.k8s.io/release/{}/bin/{}/{}/kubectl{}",
                 version.trim(),
@@ -432,10 +425,9 @@ async fn direct_binary_url(tool: &str) -> BootstrapResult<String> {
             ))
         }
         "argocd" => Ok(format!(
-            "https://github.com/argoproj/argo-cd/releases/latest/download/argocd-{}-{}{}",
-            os, arch, exe
+            "https://github.com/argoproj/argo-cd/releases/latest/download/argocd-{os}-{arch}{exe}"
         )),
-        _ => Err(format!("No direct installer for {}", tool)),
+        _ => Err(format!("No direct installer for {tool}")),
     }
 }
 
@@ -444,7 +436,7 @@ fn target_os_for_download() -> BootstrapResult<&'static str> {
         "macos" => Ok("darwin"),
         "linux" => Ok("linux"),
         "windows" => Ok("windows"),
-        other => Err(format!("Unsupported OS for direct install: {}", other)),
+        other => Err(format!("Unsupported OS for direct install: {other}")),
     }
 }
 
@@ -453,8 +445,7 @@ fn target_arch_for_download() -> BootstrapResult<&'static str> {
         "aarch64" | "arm64" => Ok("arm64"),
         "x86_64" | "amd64" => Ok("amd64"),
         arch => Err(format!(
-            "Unsupported architecture for direct install: {}",
-            arch
+            "Unsupported architecture for direct install: {arch}"
         )),
     }
 }
@@ -464,7 +455,7 @@ fn ensure_kind_cluster() -> BootstrapResult<()> {
         return Ok(());
     }
 
-    let config = r#"kind: Cluster
+    let config = r"kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 nodes:
   - role: control-plane
@@ -475,7 +466,7 @@ nodes:
       - containerPort: 443
         hostPort: 8443
         protocol: TCP
-"#
+"
     .to_string();
 
     let mut child = kind_command()
@@ -484,18 +475,18 @@ nodes:
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|error| format!("Failed to run kind create cluster: {}", error))?;
+        .map_err(|error| format!("Failed to run kind create cluster: {error}"))?;
 
     child
         .stdin
         .as_mut()
         .ok_or("Failed to open kind stdin".to_string())?
         .write_all(config.as_bytes())
-        .map_err(|error| format!("Failed to write kind config: {}", error))?;
+        .map_err(|error| format!("Failed to write kind config: {error}"))?;
 
     let output = child
         .wait_with_output()
-        .map_err(|error| format!("Failed to wait for kind: {}", error))?;
+        .map_err(|error| format!("Failed to wait for kind: {error}"))?;
 
     if output.status.success() {
         Ok(())
@@ -522,20 +513,14 @@ fn kind_cluster_exists() -> BootstrapResult<bool> {
 async fn apply_remote_manifest_server_side(url: &str) -> BootstrapResult<()> {
     apply_manifest_with_args(
         &download_manifest(url).await?,
-        &[
-            "apply",
-            "--server-side",
-            "--force-conflicts",
-            "-f",
-            "-",
-        ],
+        &["apply", "--server-side", "--force-conflicts", "-f", "-"],
     )
 }
 
 async fn download_manifest(url: &str) -> BootstrapResult<String> {
     let response = reqwest::get(url)
         .await
-        .map_err(|error| format!("Failed to download manifest {}: {}", url, error))?;
+        .map_err(|error| format!("Failed to download manifest {url}: {error}"))?;
 
     if !response.status().is_success() {
         return Err(format!(
@@ -548,7 +533,7 @@ async fn download_manifest(url: &str) -> BootstrapResult<String> {
     response
         .text()
         .await
-        .map_err(|error| format!("Failed reading manifest {}: {}", url, error))
+        .map_err(|error| format!("Failed reading manifest {url}: {error}"))
 }
 
 fn apply_manifest(manifest: &str) -> BootstrapResult<()> {
@@ -564,18 +549,18 @@ fn apply_manifest_with_args(manifest: &str, args: &[&str]) -> BootstrapResult<()
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|error| format!("Failed to run kubectl apply: {}", error))?;
+        .map_err(|error| format!("Failed to run kubectl apply: {error}"))?;
 
     child
         .stdin
         .as_mut()
         .ok_or("Failed to open kubectl stdin".to_string())?
         .write_all(manifest.as_bytes())
-        .map_err(|error| format!("Failed to write manifest: {}", error))?;
+        .map_err(|error| format!("Failed to write manifest: {error}"))?;
 
     let output = child
         .wait_with_output()
-        .map_err(|error| format!("Failed to wait for kubectl apply: {}", error))?;
+        .map_err(|error| format!("Failed to wait for kubectl apply: {error}"))?;
 
     if output.status.success() {
         Ok(())
@@ -588,10 +573,7 @@ fn apply_manifest_with_args(manifest: &str, args: &[&str]) -> BootstrapResult<()
 }
 
 fn ensure_namespace(name: &str) -> BootstrapResult<()> {
-    let manifest = format!(
-        "apiVersion: v1\nkind: Namespace\nmetadata:\n  name: {}\n",
-        name
-    );
+    let manifest = format!("apiVersion: v1\nkind: Namespace\nmetadata:\n  name: {name}\n");
     apply_manifest(&manifest)
 }
 
@@ -622,7 +604,7 @@ fn wait_for_crd(name: &str, timeout: &str) -> BootstrapResult<()> {
     let output = run_kubectl(&[
         "wait",
         "--for=condition=Established",
-        &format!("crd/{}", name),
+        &format!("crd/{name}"),
         "--timeout",
         timeout,
     ])?;
@@ -653,7 +635,7 @@ fn run_kubectl(args: &[&str]) -> BootstrapResult<Output> {
 fn run_command(mut command: Command, label: &str) -> BootstrapResult<Output> {
     command
         .output()
-        .map_err(|error| format!("Failed to run {}: {}", label, error))
+        .map_err(|error| format!("Failed to run {label}: {error}"))
 }
 
 fn kubectl_command() -> Command {
@@ -680,6 +662,7 @@ fn helm_command() -> Command {
     command
 }
 
+#[allow(clippy::unused_async)]
 async fn install_argocd() -> BootstrapResult<()> {
     // Register the argo-helm repo (idempotent) and refresh its index.
     {
@@ -722,17 +705,17 @@ async fn install_argocd() -> BootstrapResult<()> {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|error| format!("helm upgrade failed to spawn: {}", error))?;
+        .map_err(|error| format!("helm upgrade failed to spawn: {error}"))?;
 
     if let Some(mut stdin) = child.stdin.take() {
         stdin
             .write_all(ARGOCD_VALUES.as_bytes())
-            .map_err(|error| format!("helm upgrade stdin write failed: {}", error))?;
+            .map_err(|error| format!("helm upgrade stdin write failed: {error}"))?;
     }
 
     let output = child
         .wait_with_output()
-        .map_err(|error| format!("helm upgrade wait failed: {}", error))?;
+        .map_err(|error| format!("helm upgrade wait failed: {error}"))?;
 
     if !output.status.success() {
         return Err(format!(
@@ -747,7 +730,7 @@ async fn install_argocd() -> BootstrapResult<()> {
 fn run_expecting_success(mut command: Command, action: &str) -> BootstrapResult<()> {
     let output = command
         .output()
-        .map_err(|error| format!("{} failed to run: {}", action, error))?;
+        .map_err(|error| format!("{action} failed to run: {error}"))?;
 
     if !output.status.success() {
         return Err(format!(
@@ -763,19 +746,13 @@ fn run_expecting_success(mut command: Command, action: &str) -> BootstrapResult<
 fn docker_ready() -> bool {
     let mut command = docker_command();
     command.arg("info");
-    command
-        .output()
-        .map(|output| output.status.success())
-        .unwrap_or(false)
+    command.output().is_ok_and(|output| output.status.success())
 }
 
 fn podman_ready() -> bool {
     let mut command = tool_command("podman");
     command.arg("info");
-    command
-        .output()
-        .map(|output| output.status.success())
-        .unwrap_or(false)
+    command.output().is_ok_and(|output| output.status.success())
 }
 
 fn runtime_ready(kind: RuntimeKind) -> bool {
@@ -851,8 +828,11 @@ fn common_tool_dirs() -> Vec<PathBuf> {
 }
 
 fn binary_names(name: &str) -> Vec<String> {
-    if cfg!(windows) && !name.ends_with(".exe") {
-        vec![format!("{}.exe", name), name.to_string()]
+    let is_exe = std::path::Path::new(name)
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("exe"));
+    if cfg!(windows) && !is_exe {
+        vec![format!("{name}.exe"), name.to_string()]
     } else {
         vec![name.to_string()]
     }

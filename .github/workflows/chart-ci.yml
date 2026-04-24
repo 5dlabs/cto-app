@@ -11,7 +11,7 @@ on:
       - ".github/workflows/chart-ci.yml"
       - ".yamllint.yaml"
   push:
-    branches: [main]
+    branches: ['**']
     paths:
       - ".gitops/**"
       - ".github/workflows/chart-ci.yml"
