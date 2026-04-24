@@ -1,0 +1,93 @@
+name: publish-chart
+
+# Publishes the stripped CTO Helm chart to two OCI registries:
+#   - ghcr.io/5dlabs           (public; primary for desktop bootstrap)
+#   - registry.gitlab.com/... OR self-hosted gitlab.5dlabs.ai (mirror)
+#
+# Triggers on push to main when the chart directory changes, plus tags like
+# chart-v* for explicit version bumps.
+
+on:
+  push:
+    branches: [main]
+    tags: ["chart-v*"]
+    paths:
+      - ".gitops/charts/**"
+      - ".github/workflows/publish-chart.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  GHCR_REGISTRY: ghcr.io
+  GITLAB_REGISTRY: ${{ vars.GITLAB_REGISTRY || 'registry.gitlab.com' }}
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      # Exposing secrets via env lets us reference them in step `if:`
+      # conditions (GitHub Actions doesn't allow `secrets.*` in step ifs).
+      GITLAB_DEPLOY_TOKEN: ${{ secrets.GITLAB_DEPLOY_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.16.2
+
+      - name: Lint charts
+        run: |
+          for chart in .gitops/charts/*/; do
+            [ -f "$chart/Chart.yaml" ] || continue
+            echo "::group::helm lint $chart"
+            helm lint "$chart"
+            echo "::endgroup::"
+          done
+
+      - name: Package charts
+        run: |
+          mkdir -p dist
+          for chart in .gitops/charts/*/; do
+            [ -f "$chart/Chart.yaml" ] || continue
+            helm package "$chart" --destination dist
+          done
+          ls -la dist/
+
+      - name: Login to GHCR
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" \
+            | helm registry login "${GHCR_REGISTRY}" \
+              --username "${{ github.actor }}" \
+              --password-stdin
+
+      - name: Push to GHCR (public)
+        run: |
+          for pkg in dist/*.tgz; do
+            echo "Pushing $pkg -> oci://${GHCR_REGISTRY}/${{ github.repository_owner }}/helm-charts"
+            helm push "$pkg" "oci://${GHCR_REGISTRY}/${{ github.repository_owner }}/helm-charts"
+          done
+
+      - name: Login to GitLab registry
+        if: ${{ vars.GITLAB_REGISTRY != '' && env.GITLAB_DEPLOY_TOKEN != '' }}
+        run: |
+          echo "${GITLAB_DEPLOY_TOKEN}" \
+            | helm registry login "${GITLAB_REGISTRY}" \
+              --username "${{ vars.GITLAB_DEPLOY_USER }}" \
+              --password-stdin
+
+      - name: Push to GitLab (mirror)
+        if: ${{ vars.GITLAB_REGISTRY != '' && env.GITLAB_DEPLOY_TOKEN != '' }}
+        run: |
+          for pkg in dist/*.tgz; do
+            helm push "$pkg" "oci://${GITLAB_REGISTRY}/${{ vars.GITLAB_HELM_PATH }}"
+          done
+
+      # NOTE: GHCR package visibility cannot be changed by the default
+      # GITHUB_TOKEN (requires admin:packages scope on an org-owned package).
+      # Flip once per chart via
+      #   https://github.com/orgs/5dlabs/packages/container/helm-charts%2F<chart>/settings
+      # or via a PAT with admin:packages.
