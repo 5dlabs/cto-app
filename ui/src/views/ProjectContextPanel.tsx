@@ -93,12 +93,12 @@ export function ProjectContextPanel({
             </button>
             <button
               type="button"
-              className="primary-btn primary-btn--icon"
+              className="session-full__icon-btn"
               onClick={() => setShowNew(true)}
               aria-label="New project"
               title="New project"
             >
-              <IconPlus size={14} />
+              <IconPlus size={12} />
             </button>
           </div>
         </div>

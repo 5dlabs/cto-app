@@ -74,12 +74,12 @@ export function AgentsView({ onNewAgent }: { onNewAgent?: () => void }) {
           </button>
           <button
             type="button"
-            className="primary-btn primary-btn--icon"
+            className="session-full__icon-btn"
             onClick={onNewAgent}
             aria-label="New agent"
             title="New agent"
           >
-            <IconPlus size={14} />
+            <IconPlus size={12} />
           </button>
         </div>
       </div>
