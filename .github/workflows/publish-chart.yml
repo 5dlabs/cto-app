@@ -28,6 +28,10 @@ env:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    env:
+      # Exposing secrets via env lets us reference them in step `if:`
+      # conditions (GitHub Actions doesn't allow `secrets.*` in step ifs).
+      GITLAB_DEPLOY_TOKEN: ${{ secrets.GITLAB_DEPLOY_TOKEN }}
     steps:
       - uses: actions/checkout@v4
 
@@ -57,15 +61,15 @@ jobs:
           helm push "${PACKAGE}" "oci://${GHCR_REGISTRY}/${{ github.repository_owner }}/helm-charts"
 
       - name: Login to GitLab registry
-        if: ${{ vars.GITLAB_REGISTRY != '' && secrets.GITLAB_DEPLOY_TOKEN != '' }}
+        if: ${{ vars.GITLAB_REGISTRY != '' && env.GITLAB_DEPLOY_TOKEN != '' }}
         run: |
-          echo "${{ secrets.GITLAB_DEPLOY_TOKEN }}" \
+          echo "${GITLAB_DEPLOY_TOKEN}" \
             | helm registry login "${GITLAB_REGISTRY}" \
               --username "${{ vars.GITLAB_DEPLOY_USER }}" \
               --password-stdin
 
       - name: Push to GitLab (mirror)
-        if: ${{ vars.GITLAB_REGISTRY != '' && secrets.GITLAB_DEPLOY_TOKEN != '' }}
+        if: ${{ vars.GITLAB_REGISTRY != '' && env.GITLAB_DEPLOY_TOKEN != '' }}
         run: |
           helm push "${PACKAGE}" "oci://${GITLAB_REGISTRY}/${{ vars.GITLAB_HELM_PATH }}"
 
