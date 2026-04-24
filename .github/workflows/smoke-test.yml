@@ -12,9 +12,9 @@ name: Smoke Test (Chart)
 
 on:
   workflow_run:
-    workflows: ["Publish Charts"]
+    workflows: ["publish-chart"]
     types: [completed]
-    branches: [main]
+    branches: [main, feat/local-stack-bootstrap]
   workflow_dispatch:
     inputs:
       chart_version:
