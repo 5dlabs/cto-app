@@ -10,11 +10,10 @@ name: publish-chart
 on:
   push:
     branches: [main]
+    tags: ["chart-v*"]
     paths:
       - ".gitops/charts/cto/**"
       - ".github/workflows/publish-chart.yml"
-    tags:
-      - "chart-v*"
   workflow_dispatch:
 
 permissions:

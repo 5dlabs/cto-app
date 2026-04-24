@@ -45,7 +45,6 @@ imagePullSecrets:
 {{- define "cto.controller.labels" -}}
 {{ include "cto.labels" . }}
 app.kubernetes.io/name: controller
-app.kubernetes.io/component: orchestration
 {{- end }}
 
 {{- define "cto.controller.selectorLabels" -}}
@@ -65,7 +64,6 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- define "cto.tools.labels" -}}
 {{ include "cto.labels" . }}
 app.kubernetes.io/name: tools
-app.kubernetes.io/component: mcp-proxy
 {{- end }}
 
 {{- define "cto.tools.selectorLabels" -}}
