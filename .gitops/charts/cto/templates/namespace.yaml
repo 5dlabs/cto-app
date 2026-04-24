@@ -1,0 +1,11 @@
+{{- if ((.Values.global).createNamespace | default true) }}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ include "cto.namespace" . }}
+  labels:
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/audit: privileged
+    pod-security.kubernetes.io/warn: privileged
+    {{- include "cto.labels" . | nindent 4 }}
+{{- end }}

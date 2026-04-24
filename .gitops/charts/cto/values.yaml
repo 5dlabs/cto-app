@@ -1,0 +1,98 @@
+global:
+  # Empty = use cluster default (kind ships local-path-provisioner)
+  storageClass: ""
+  # Optional image pull secrets for ephemeral agent pods. Default empty.
+  imagePullSecrets: []
+  # Namespace for the platform. Created by templates/namespace.yaml.
+  namespace: cto-system
+
+# Agent / model provider API keys. Rendered as a single plain Kubernetes Secret
+# named `cto-agent-keys`. The desktop app prompts the user for these on first run
+# and writes them here before `helm install`.
+agentKeys:
+  ANTHROPIC_API_KEY: ""
+  OPENAI_API_KEY: ""
+  OPENROUTER_API_KEY: ""
+  FIREWORKS_API_KEY: ""
+  GEMINI_API_KEY: ""
+  GOOGLE_API_KEY: ""
+  XAI_API_KEY: ""
+  PERPLEXITY_API_KEY: ""
+  CURSOR_API_KEY: ""
+  CONTEXT7_API_KEY: ""
+  BRAVE_API_KEY: ""
+  FACTORY_API_KEY: ""
+  MINIMAX_API_KEY: ""
+  MINIMAX_GROUP_ID: ""
+
+controller:
+  image:
+    repository: ghcr.io/5dlabs/cto-controller
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+  replicas: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+  # Template set identifier used by the controller
+  templateVersion: cto
+  skillsCache:
+    enabled: true
+    size: 10Gi
+  service:
+    type: ClusterIP
+    port: 8080
+
+tools:
+  enabled: true
+  image:
+    repository: ghcr.io/5dlabs/cto-tools
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 8080
+  # Path-based ingress on kind's NGINX. Host defaults to the ingress controller's listen addr.
+  ingress:
+    enabled: true
+    className: nginx
+    host: ""          # empty = match any host (kind local)
+    path: /tools
+    pathType: Prefix
+  workspace:
+    enabled: true
+    size: 5Gi
+  # MCP servers enabled in the tools deployment. Secrets for each server live inline here
+  # to keep the config-source next to its consumer.
+  servers:
+    github:
+      enabled: true
+      secret:
+        # keys: GITHUB_TOKEN
+        GITHUB_TOKEN: ""
+    kubernetes:
+      enabled: true
+      secret:
+        # keys: KUBECONFIG (base64)
+        KUBECONFIG: ""
+    filesystem:
+      enabled: true
+    firecrawl:
+      enabled: false
+      secret:
+        FIRECRAWL_API_KEY: ""
+    s3:
+      enabled: false
+      secret:
+        AWS_ACCESS_KEY_ID: ""
+        AWS_SECRET_ACCESS_KEY: ""
+        AWS_REGION: ""
+    argocd:
+      enabled: true
+      secret:
+        ARGOCD_SERVER: ""
+        ARGOCD_AUTH_TOKEN: ""

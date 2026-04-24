@@ -1,0 +1,84 @@
+name: publish-chart
+
+# Publishes the stripped CTO Helm chart to two OCI registries:
+#   - ghcr.io/5dlabs           (public; primary for desktop bootstrap)
+#   - registry.gitlab.com/... OR self-hosted gitlab.5dlabs.ai (mirror)
+#
+# Triggers on push to main when the chart directory changes, plus tags like
+# chart-v* for explicit version bumps.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".gitops/charts/cto/**"
+      - ".github/workflows/publish-chart.yml"
+    tags:
+      - "chart-v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  CHART_DIR: .gitops/charts/cto
+  GHCR_REGISTRY: ghcr.io
+  GITLAB_REGISTRY: ${{ vars.GITLAB_REGISTRY || 'registry.gitlab.com' }}
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.16.2
+
+      - name: Lint chart
+        run: helm lint "${CHART_DIR}"
+
+      - name: Package chart
+        run: |
+          mkdir -p dist
+          helm package "${CHART_DIR}" --destination dist
+          echo "PACKAGE=$(ls dist/*.tgz | head -n1)" >> "$GITHUB_ENV"
+
+      - name: Login to GHCR
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" \
+            | helm registry login "${GHCR_REGISTRY}" \
+              --username "${{ github.actor }}" \
+              --password-stdin
+
+      - name: Push to GHCR (public)
+        run: |
+          helm push "${PACKAGE}" "oci://${GHCR_REGISTRY}/${{ github.repository_owner }}/helm-charts"
+
+      - name: Login to GitLab registry
+        if: ${{ vars.GITLAB_REGISTRY != '' && secrets.GITLAB_DEPLOY_TOKEN != '' }}
+        run: |
+          echo "${{ secrets.GITLAB_DEPLOY_TOKEN }}" \
+            | helm registry login "${GITLAB_REGISTRY}" \
+              --username "${{ vars.GITLAB_DEPLOY_USER }}" \
+              --password-stdin
+
+      - name: Push to GitLab (mirror)
+        if: ${{ vars.GITLAB_REGISTRY != '' && secrets.GITLAB_DEPLOY_TOKEN != '' }}
+        run: |
+          helm push "${PACKAGE}" "oci://${GITLAB_REGISTRY}/${{ vars.GITLAB_HELM_PATH }}"
+
+      - name: Ensure GHCR package is public
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Package name is the chart name; visibility flip is a one-time op
+          # but running it repeatedly is idempotent.
+          gh api \
+            --method PATCH \
+            -H "Accept: application/vnd.github+json" \
+            "/orgs/${{ github.repository_owner }}/packages/container/helm-charts%2Fcto" \
+            -f visibility=public || true

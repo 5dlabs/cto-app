@@ -1,0 +1,42 @@
+# GitLab mirror publish pipeline for the CTO Helm chart.
+# Kept minimal: the canonical publish flow runs on GitHub Actions; this
+# pipeline is the fallback for when we cut over to GitLab as the primary SCM.
+
+stages:
+  - lint
+  - publish
+
+variables:
+  CHART_DIR: .gitops/charts/cto
+  HELM_VERSION: v3.16.2
+
+.helm-base: &helm-base
+  image: alpine/helm:${HELM_VERSION}
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      changes: [".gitops/charts/cto/**/*"]
+    - if: '$CI_COMMIT_TAG =~ /^chart-v/'
+
+chart:lint:
+  <<: *helm-base
+  stage: lint
+  script:
+    - helm lint "${CHART_DIR}"
+
+chart:publish:
+  <<: *helm-base
+  stage: publish
+  needs: [chart:lint]
+  script:
+    - helm package "${CHART_DIR}" --destination dist
+    - PACKAGE=$(ls dist/*.tgz | head -n1)
+    - |
+      echo "${CI_REGISTRY_PASSWORD}" \
+        | helm registry login "${CI_REGISTRY}" \
+          --username "${CI_REGISTRY_USER}" \
+          --password-stdin
+    - helm push "${PACKAGE}" "oci://${CI_REGISTRY_IMAGE}/helm-charts"
+  artifacts:
+    paths:
+      - dist/*.tgz
+    expire_in: 1 week

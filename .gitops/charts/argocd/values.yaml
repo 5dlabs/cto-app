@@ -1,0 +1,72 @@
+# Values for the upstream argo-cd chart (argoproj/argo-helm -> charts/argo-cd).
+# Usage (from bootstrap.rs):
+#   helm upgrade --install argocd argo/argo-cd \
+#     --namespace argocd --create-namespace \
+#     -f .gitops/charts/argocd/values.yaml
+#
+# These overrides target a single-user local kind cluster with the NGINX
+# ingress controller that ships with the bootstrap. No OIDC, no HA, no TLS.
+
+global:
+  domain: cto.local
+
+crds:
+  install: true
+  keep: false
+
+configs:
+  params:
+    server.insecure: true        # serve HTTP, ingress terminates
+  cm:
+    timeout.reconciliation: 30s
+    application.resourceTrackingMethod: annotation
+    # Allow OCI Helm repos from ghcr.io (our published chart will live here).
+    helm.enabled: "true"
+
+controller:
+  replicas: 1
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits:   { cpu: 1,    memory: 1Gi  }
+
+repoServer:
+  replicas: 1
+  resources:
+    requests: { cpu: 50m,  memory: 128Mi }
+    limits:   { cpu: 500m, memory: 512Mi }
+
+applicationSet:
+  enabled: true
+  replicas: 1
+
+dex:
+  enabled: false
+
+notifications:
+  enabled: false
+
+redis-ha:
+  enabled: false
+
+redis:
+  enabled: true
+
+server:
+  replicas: 1
+  service:
+    type: ClusterIP
+  ingress:
+    enabled: true
+    ingressClassName: nginx
+    hostname: argocd.cto.local
+    paths:
+      - /
+    pathType: Prefix
+    annotations:
+      nginx.ingress.kubernetes.io/backend-protocol: HTTP
+      nginx.ingress.kubernetes.io/force-ssl-redirect: "false"
+  extraArgs:
+    - --insecure
+  resources:
+    requests: { cpu: 50m,  memory: 128Mi }
+    limits:   { cpu: 500m, memory: 512Mi }

@@ -1,0 +1,25 @@
+{{- if .Values.tools.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "cto.tools.fullname" . }}-config
+  namespace: {{ include "cto.namespace" . }}
+  labels:
+    {{- include "cto.tools.labels" . | nindent 4 }}
+data:
+  mcp-servers.json: |
+    {
+      "servers": {
+        {{- $first := true -}}
+        {{- range $name, $cfg := .Values.tools.servers }}
+        {{- if $cfg.enabled }}
+        {{- if not $first }},{{ end }}
+        {{- $first = false }}
+        "{{ $name }}": {
+          "enabled": true
+        }
+        {{- end }}
+        {{- end }}
+      }
+    }
+{{- end }}

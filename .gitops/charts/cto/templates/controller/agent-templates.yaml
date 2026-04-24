@@ -1,0 +1,39 @@
+{{- /*
+Agent template ConfigMaps consumed by the controller / Argo Workflows
+when launching ephemeral agent pods. Kept minimal; CTO-side template
+sets are mounted from the controller image at /app/templates and
+selected by .Values.controller.templateVersion.
+*/ -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: controller-agents
+  namespace: {{ include "cto.namespace" . }}
+  labels:
+    {{- include "cto.controller.labels" . | nindent 4 }}
+    app.kubernetes.io/component: agents
+data:
+  agents.json: |
+    {
+      "version": "1.0.0",
+      "agents": {
+        "play": {
+          "name": "play",
+          "type": "play",
+          "description": "Task implementation"
+        }
+      }
+    }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: controller-templates-shared
+  namespace: {{ include "cto.namespace" . }}
+  labels:
+    {{- include "cto.controller.labels" . | nindent 4 }}
+    app.kubernetes.io/component: templates
+data:
+  .keep: |
+    # Shared template partials for agent runtime use.
+    # The controller renders templates into per-job ConfigMaps at runtime.
