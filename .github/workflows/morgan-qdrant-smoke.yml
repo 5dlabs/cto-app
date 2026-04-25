@@ -1,0 +1,367 @@
+name: Morgan Qdrant Diagnostics Smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      live_kind:
+        description: "Live kind checks: auto detects a mounted kind context, require fails without one, skip runs render/preflight only."
+        required: false
+        default: auto
+        type: choice
+        options:
+          - auto
+          - require
+          - skip
+      require_public_artifacts:
+        description: "Fail when Morgan OCI charts/images are not anonymously pullable from GHCR."
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: morgan-qdrant-diagnostics-smoke-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  NS: cto-system
+  QDRANT_RELEASE: qdrant
+  MORGAN_RELEASE: morgan
+  QDRANT_URL: http://127.0.0.1:6333
+  MORGAN_URL: http://127.0.0.1:18789
+  RENDER_DIR: .chart-ci-rendered
+  DEBUG_DIR: .debug/morgan-qdrant-smoke
+  CARGO_TERM_COLOR: always
+  LIVE_KIND: ${{ inputs.live_kind || 'auto' }}
+  REQUIRE_PUBLIC_ARTIFACTS: ${{ inputs.require_public_artifacts }}
+
+jobs:
+  morgan-qdrant-smoke:
+    name: Morgan diagnostics + Qdrant kind smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.2
+
+      - uses: azure/setup-kubectl@v4
+        with:
+          version: v1.30.0
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Validate Rust CI assertions
+        run: |
+          cargo fmt --manifest-path crates/ci-tools/Cargo.toml --all -- --check
+          cargo test --manifest-path crates/ci-tools/Cargo.toml
+          cargo clippy --manifest-path crates/ci-tools/Cargo.toml --all-targets -- -W clippy::pedantic -D warnings
+          cargo build --manifest-path crates/ci-tools/Cargo.toml --bin cto-ci-assert
+
+      - name: Render Morgan and Qdrant with Rust assertions
+        run: |
+          set -euo pipefail
+          ci_tool="crates/ci-tools/target/debug/cto-ci-assert"
+          rm -rf "${RENDER_DIR}" "${DEBUG_DIR}"
+          mkdir -p "${RENDER_DIR}" "${DEBUG_DIR}"
+
+          helm template "${QDRANT_RELEASE}" .gitops/charts/qdrant \
+            --namespace "${NS}" \
+            > "${RENDER_DIR}/qdrant-local-smoke.yaml"
+          cp "${RENDER_DIR}/qdrant-local-smoke.yaml" "${DEBUG_DIR}/qdrant-local-smoke.yaml"
+          "${ci_tool}" qdrant-render-config < "${RENDER_DIR}/qdrant-local-smoke.yaml"
+
+          helm template "${MORGAN_RELEASE}" .gitops/charts/agent \
+            --namespace "${NS}" \
+            -f .gitops/charts/agent/ci/values-morgan.yaml \
+            > "${RENDER_DIR}/agent-morgan-local-smoke.yaml"
+          cp "${RENDER_DIR}/agent-morgan-local-smoke.yaml" "${DEBUG_DIR}/agent-morgan-local-smoke.yaml"
+          "${ci_tool}" morgan-mem0-config < "${RENDER_DIR}/agent-morgan-local-smoke.yaml"
+          "${ci_tool}" morgan-diagnostics-config < "${RENDER_DIR}/agent-morgan-local-smoke.yaml"
+
+      - name: Detect local kind kube context
+        id: kind
+        run: |
+          set -euo pipefail
+          mkdir -p "${DEBUG_DIR}"
+          echo "kind_available=false" >> "${GITHUB_OUTPUT}"
+
+          if [ "${LIVE_KIND}" = "skip" ]; then
+            echo "LIVE_KIND=skip: live cluster checks intentionally skipped."
+            exit 0
+          fi
+
+          if ! context="$(kubectl config current-context 2>"${DEBUG_DIR}/kubectl-current-context.err")"; then
+            cat "${DEBUG_DIR}/kubectl-current-context.err" >&2 || true
+            if [ "${LIVE_KIND}" = "require" ]; then
+              echo "Expected a mounted local kind kube context, but kubectl has no current context." >&2
+              exit 1
+            fi
+            echo "No kube context mounted; render/preflight checks will continue without live kind checks."
+            exit 0
+          fi
+
+          echo "Current kube context: ${context}" | tee "${DEBUG_DIR}/kubectl-current-context.txt"
+          case "${context}" in
+            kind-*) ;;
+            *)
+              if [ "${LIVE_KIND}" = "require" ]; then
+                echo "Expected a local kind-* kube context mounted into act; found ${context}." >&2
+                exit 1
+              fi
+              echo "Context is not kind-*; live checks skipped in auto mode."
+              exit 0
+              ;;
+          esac
+
+          echo "kind_available=true" >> "${GITHUB_OUTPUT}"
+          echo "context=${context}" >> "${GITHUB_OUTPUT}"
+          kubectl cluster-info | tee "${DEBUG_DIR}/kubectl-cluster-info.txt"
+          kubectl get nodes -o wide | tee "${DEBUG_DIR}/kubectl-nodes.txt"
+
+      - name: Install or update local Qdrant chart from source
+        if: steps.kind.outputs.kind_available == 'true'
+        run: |
+          set -euo pipefail
+          kubectl create namespace "${NS}" --dry-run=client -o yaml | kubectl apply -f -
+          helm upgrade --install "${QDRANT_RELEASE}" .gitops/charts/qdrant \
+            --namespace "${NS}" \
+            --set namespace="${NS}" \
+            --set fullnameOverride=qdrant \
+            --wait \
+            --timeout=8m
+          kubectl -n "${NS}" rollout status statefulset/qdrant --timeout=5m
+          kubectl -n "${NS}" get svc/qdrant statefulset/qdrant -o wide | tee "${DEBUG_DIR}/qdrant-resources.txt"
+          kubectl -n "${NS}" get pods -l app.kubernetes.io/name=qdrant -o wide | tee "${DEBUG_DIR}/qdrant-pods.txt"
+
+      - name: Port-forward Qdrant and run Rust HTTP health
+        if: steps.kind.outputs.kind_available == 'true'
+        run: |
+          set -euo pipefail
+          ci_tool="crates/ci-tools/target/debug/cto-ci-assert"
+          mkdir -p "${DEBUG_DIR}"
+          kubectl -n "${NS}" port-forward svc/qdrant 6333:6333 > "${DEBUG_DIR}/qdrant-port-forward.log" 2>&1 &
+          port_forward_pid="$!"
+          cleanup() {
+            kill "${port_forward_pid}" 2>/dev/null || true
+            wait "${port_forward_pid}" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          healthy=false
+          for _ in $(seq 1 30); do
+            if "${ci_tool}" qdrant-http-health "${QDRANT_URL}"; then
+              healthy=true
+              break
+            fi
+            sleep 2
+          done
+
+          if [ "${healthy}" != "true" ]; then
+            cat "${DEBUG_DIR}/qdrant-port-forward.log" || true
+            exit 1
+          fi
+
+      - name: Public chart and image availability preflight
+        id: public_preflight
+        run: |
+          set -euo pipefail
+          mkdir -p "${DEBUG_DIR}"
+          summary="${DEBUG_DIR}/public-artifact-preflight.txt"
+          : > "${summary}"
+          failures=0
+
+          note_failure() {
+            failures=$((failures + 1))
+            printf '%s\n' "$1" | tee -a "${summary}" >&2
+          }
+
+          check_chart() {
+            chart="$1"
+            version="$2"
+            log="${DEBUG_DIR}/helm-show-${chart}-${version}.log"
+            if helm show chart "oci://ghcr.io/5dlabs/helm-charts/${chart}" --version "${version}" >"${log}" 2>&1; then
+              echo "ok chart ${chart}:${version}" | tee -a "${summary}"
+            else
+              note_failure "blocked chart ${chart}:${version}: ghcr.io/5dlabs/helm-charts is not anonymously readable or version is not published (see ${log})"
+            fi
+          }
+
+          check_ghcr_image() {
+            image="$1"
+            tag="$2"
+            repo="${image#ghcr.io/}"
+            safe_name="$(printf '%s' "${repo}-${tag}" | tr '/:' '__')"
+            body_file="${DEBUG_DIR}/ghcr-manifest-${safe_name}.body"
+            err_file="${DEBUG_DIR}/ghcr-manifest-${safe_name}.err"
+            status_file="${DEBUG_DIR}/ghcr-manifest-${safe_name}.status"
+
+            if ! token_response="$(curl -fsSL "https://ghcr.io/token?service=ghcr.io&scope=repository:${repo}:pull" 2>"${err_file}")"; then
+              note_failure "blocked image ${image}:${tag}: failed to request anonymous GHCR pull token (see ${err_file})"
+              return
+            fi
+            token="$(printf '%s' "${token_response}" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p' | head -1)"
+            if [ -z "${token}" ]; then
+              note_failure "blocked image ${image}:${tag}: anonymous GHCR token response did not include a token"
+              return
+            fi
+
+            http_code="$(curl -fsSL \
+              -o "${body_file}" \
+              -w '%{http_code}' \
+              -H "Authorization: Bearer ${token}" \
+              -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' \
+              "https://ghcr.io/v2/${repo}/manifests/${tag}" \
+              2>"${err_file}" || true)"
+            printf '%s\n' "${http_code}" > "${status_file}"
+            if [ "${http_code}" = "200" ]; then
+              echo "ok image ${image}:${tag}" | tee -a "${summary}"
+            else
+              note_failure "blocked image ${image}:${tag}: anonymous manifest request returned HTTP ${http_code:-curl-error} (see ${err_file})"
+            fi
+          }
+
+          agent_chart_version="$(awk '/^version:/ {print $2; exit}' .gitops/charts/agent/Chart.yaml)"
+          qdrant_chart_version="$(awk '/^version:/ {print $2; exit}' .gitops/charts/qdrant/Chart.yaml)"
+          check_chart agent "${agent_chart_version}"
+          check_chart qdrant "${qdrant_chart_version}"
+          check_ghcr_image ghcr.io/5dlabs/agents latest
+          check_ghcr_image ghcr.io/5dlabs/project-api latest
+
+          if [ "${failures}" -eq 0 ]; then
+            echo "public_morgan=true" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          echo "public_morgan=false" >> "${GITHUB_OUTPUT}"
+          echo "::error::Morgan live pod checks are blocked by unpublished/private GHCR chart or image artifacts. See ${summary}."
+          if [ "${REQUIRE_PUBLIC_ARTIFACTS}" = "true" ]; then
+            exit 1
+          fi
+          echo "REQUIRE_PUBLIC_ARTIFACTS=false: continuing with a controlled live Morgan skip."
+
+      - name: Controlled live Morgan skip
+        if: steps.kind.outputs.kind_available == 'true' && steps.public_preflight.outputs.public_morgan != 'true'
+        run: |
+          set -euo pipefail
+          echo "Live Morgan install/checks skipped because GHCR preflight did not pass."
+          echo "This is an explicit skip; render assertions and Qdrant live checks already ran."
+          cat "${DEBUG_DIR}/public-artifact-preflight.txt"
+
+      - name: Install Morgan chart from source and run live diagnostics
+        if: steps.kind.outputs.kind_available == 'true' && steps.public_preflight.outputs.public_morgan == 'true'
+        run: |
+          set -euo pipefail
+          ci_tool="crates/ci-tools/target/debug/cto-ci-assert"
+          mkdir -p "${DEBUG_DIR}"
+
+          if kubectl -n "${NS}" get secret cto-agent-keys >/dev/null 2>&1; then
+            echo "Preserving existing ${NS}/cto-agent-keys secret for Morgan."
+          else
+            kubectl -n "${NS}" create secret generic cto-agent-keys --dry-run=client -o yaml | kubectl apply -f -
+          fi
+
+          helm upgrade --install "${MORGAN_RELEASE}" .gitops/charts/agent \
+            --namespace "${NS}" \
+            -f .gitops/charts/agent/ci/values-morgan.yaml \
+            --wait \
+            --timeout=12m
+          kubectl -n "${NS}" rollout status statefulset/openclaw-gateway-morgan --timeout=8m
+          kubectl -n "${NS}" get svc/openclaw-gateway-morgan statefulset/openclaw-gateway-morgan -o wide | tee "${DEBUG_DIR}/morgan-resources.txt"
+          kubectl -n "${NS}" get pods -l app.kubernetes.io/name=openclaw-gateway-morgan,app.kubernetes.io/instance="${MORGAN_RELEASE}" -o wide | tee "${DEBUG_DIR}/morgan-pods.txt"
+
+          kubectl -n "${NS}" port-forward svc/openclaw-gateway-morgan 18789:18789 > "${DEBUG_DIR}/morgan-port-forward.log" 2>&1 &
+          port_forward_pid="$!"
+          cleanup() {
+            kill "${port_forward_pid}" 2>/dev/null || true
+            wait "${port_forward_pid}" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          healthy=false
+          for _ in $(seq 1 45); do
+            if "${ci_tool}" gateway-health "${MORGAN_URL}"; then
+              healthy=true
+              break
+            fi
+            sleep 2
+          done
+          if [ "${healthy}" != "true" ]; then
+            cat "${DEBUG_DIR}/morgan-port-forward.log" || true
+            exit 1
+          fi
+
+          pod="$(kubectl -n "${NS}" get pod -l app.kubernetes.io/name=openclaw-gateway-morgan,app.kubernetes.io/instance="${MORGAN_RELEASE}" -o jsonpath='{.items[0].metadata.name}')"
+          set +e
+          kubectl -n "${NS}" exec "${pod}" -c agent -- sh -c 'openclaw doctor --non-interactive 2>&1' > "${DEBUG_DIR}/openclaw-doctor.txt" 2>&1
+          doctor_exit="$?"
+          set -e
+          cat "${DEBUG_DIR}/openclaw-doctor.txt"
+          "${ci_tool}" openclaw-doctor-output < "${DEBUG_DIR}/openclaw-doctor.txt"
+          if [ "${doctor_exit}" -ne 0 ]; then
+            echo "::warning::openclaw doctor exited ${doctor_exit}; parser accepted only known no-key warnings."
+          fi
+
+          kubectl -n "${NS}" exec "${pod}" -c agent -- sh -c 'test -s /workspace/.openclaw/logs/raw-stream.jsonl && tail -n 100 /workspace/.openclaw/logs/raw-stream.jsonl || true' > "${DEBUG_DIR}/raw-stream-tail.jsonl" 2>&1 || true
+          if [ -s "${DEBUG_DIR}/raw-stream-tail.jsonl" ]; then
+            "${ci_tool}" raw-stream-jsonl < "${DEBUG_DIR}/raw-stream-tail.jsonl"
+          else
+            echo "::warning::Morgan raw stream JSONL has not emitted events yet; render/env assertions verified the path."
+          fi
+
+      - name: Collect diagnostics on failure
+        if: failure()
+        run: |
+          set +e
+          mkdir -p "${DEBUG_DIR}"
+          ci_tool="crates/ci-tools/target/debug/cto-ci-assert"
+
+          kubectl config current-context > "${DEBUG_DIR}/failure-current-context.txt" 2>&1
+          kubectl cluster-info > "${DEBUG_DIR}/failure-cluster-info.txt" 2>&1
+          kubectl get nodes -o wide > "${DEBUG_DIR}/failure-nodes.txt" 2>&1
+          kubectl -n "${NS}" get all -o wide > "${DEBUG_DIR}/failure-all.txt" 2>&1
+          kubectl -n "${NS}" get events --sort-by=.lastTimestamp > "${DEBUG_DIR}/failure-events.txt" 2>&1
+          helm -n "${NS}" status "${QDRANT_RELEASE}" > "${DEBUG_DIR}/helm-status-qdrant.txt" 2>&1
+          helm -n "${NS}" status "${MORGAN_RELEASE}" > "${DEBUG_DIR}/helm-status-morgan.txt" 2>&1
+
+          for resource in statefulset/qdrant statefulset/openclaw-gateway-morgan deployment/openclaw-gateway-morgan svc/qdrant svc/openclaw-gateway-morgan ingress/qdrant ingress/openclaw-gateway-morgan; do
+            safe="$(printf '%s' "${resource}" | tr '/' '-')"
+            kubectl -n "${NS}" describe "${resource}" > "${DEBUG_DIR}/describe-${safe}.txt" 2>&1
+          done
+
+          for selector in 'app.kubernetes.io/name=qdrant' 'app.kubernetes.io/name=openclaw-gateway-morgan,app.kubernetes.io/instance=morgan'; do
+            pods="$(kubectl -n "${NS}" get pods -l "${selector}" -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null)"
+            for pod in ${pods}; do
+              kubectl -n "${NS}" describe pod "${pod}" > "${DEBUG_DIR}/describe-pod-${pod}.txt" 2>&1
+              kubectl -n "${NS}" logs "${pod}" --all-containers --tail=300 > "${DEBUG_DIR}/logs-${pod}.txt" 2>&1
+              kubectl -n "${NS}" logs "${pod}" --all-containers --previous --tail=300 > "${DEBUG_DIR}/logs-previous-${pod}.txt" 2>&1
+            done
+          done
+
+          morgan_pod="$(kubectl -n "${NS}" get pod -l app.kubernetes.io/name=openclaw-gateway-morgan,app.kubernetes.io/instance=morgan -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)"
+          if [ -n "${morgan_pod}" ]; then
+            kubectl -n "${NS}" exec "${morgan_pod}" -c agent -- sh -c 'openclaw doctor --non-interactive 2>&1' > "${DEBUG_DIR}/failure-openclaw-doctor.txt" 2>&1
+            if [ -s "${DEBUG_DIR}/failure-openclaw-doctor.txt" ] && [ -x "${ci_tool}" ]; then
+              "${ci_tool}" openclaw-doctor-output < "${DEBUG_DIR}/failure-openclaw-doctor.txt" > "${DEBUG_DIR}/failure-openclaw-doctor-assert.txt" 2>&1 || true
+            fi
+            kubectl -n "${NS}" exec "${morgan_pod}" -c agent -- sh -c 'cat /workspace/.openclaw/logs/openclaw.log 2>/dev/null || true' > "${DEBUG_DIR}/failure-openclaw.log" 2>&1
+            kubectl -n "${NS}" exec "${morgan_pod}" -c agent -- sh -c 'cat /workspace/.openclaw/logs/raw-stream.jsonl 2>/dev/null || true' > "${DEBUG_DIR}/failure-raw-stream.jsonl" 2>&1
+            if [ -s "${DEBUG_DIR}/failure-raw-stream.jsonl" ] && [ -x "${ci_tool}" ]; then
+              "${ci_tool}" raw-stream-jsonl < "${DEBUG_DIR}/failure-raw-stream.jsonl" > "${DEBUG_DIR}/failure-raw-stream-assert.txt" 2>&1 || true
+            fi
+          fi
+
+          find "${DEBUG_DIR}" -maxdepth 1 -type f -print | sort
+
+      - name: Upload debug artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: morgan-qdrant-smoke-debug
+          path: .debug
+          if-no-files-found: ignore

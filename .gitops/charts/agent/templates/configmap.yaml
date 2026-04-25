@@ -143,7 +143,7 @@ data:
       },
       "channels": {
         "discord": {
-          {{- if $discordConfig.enabled }}
+          {{- if or (not (hasKey $discordConfig "enabled")) $discordConfig.enabled }}
           "accounts": {
             "default": {
               "token": "${DISCORD_TOKEN}"
@@ -224,7 +224,7 @@ data:
       "plugins": {
         "entries": {
           "discord": {
-            "enabled": true
+            "enabled": {{ if hasKey $discordConfig "enabled" }}{{ $discordConfig.enabled }}{{ else }}true{{ end }}
           },
           "memory-core": {
             "enabled": {{ if and (hasKey $mem0Plugin "enabled") $mem0Plugin.enabled }}false{{ else if hasKey $memoryCore "enabled" }}{{ $memoryCore.enabled }}{{ else }}true{{ end }}
@@ -277,6 +277,9 @@ data:
               "autoCapture": {{ $mem0Plugin.autoCapture | default true }},
               "topK": {{ $mem0Plugin.topK | default 5 }},
               "searchThreshold": {{ $mem0Plugin.searchThreshold | default 0.6 }},
+              "metadataSource": {{ $mem0Plugin.metadataSource | default "openclaw" | quote }},
+              "customCategories": {{ $mem0Plugin.customCategories | default list | toJson }},
+              "customInstructions": {{ $mem0Plugin.customInstructions | default "" | quote }},
               "oss": {
                 "vectorStore": {
                   "provider": {{ ($mem0Plugin.oss).vectorStore.provider | default "qdrant" | quote }},

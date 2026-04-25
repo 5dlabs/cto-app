@@ -1,0 +1,8 @@
+{{- if .Values.createNamespace }}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ include "observability.namespace" . }}
+  labels:
+    app.kubernetes.io/part-of: cto
+{{- end }}

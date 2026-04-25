@@ -7,6 +7,7 @@ import {
   IconLock,
   IconCheck,
 } from "./icons";
+import { SourceControlSettings } from "./SourceControlSettings";
 
 interface ProviderKey {
   provider: string;
@@ -25,7 +26,7 @@ const INITIAL_KEYS: ProviderKey[] = [
   { provider: "HuggingFace", placeholder: "hf_••••••••••••mN4k", state: "active" },
 ];
 
-type TabKey = "profile" | "keys" | "shortcuts" | "themes" | "advanced";
+type TabKey = "profile" | "keys" | "scm" | "shortcuts" | "themes" | "advanced";
 
 export function SettingsView() {
   const [tab, setTab] = useState<TabKey>("keys");
@@ -36,6 +37,7 @@ export function SettingsView() {
         {(
           [
             ["keys", "API keys"],
+            ["scm", "Source control"],
             ["profile", "Profile"],
             ["shortcuts", "Shortcuts"],
             ["themes", "Themes"],
@@ -54,6 +56,7 @@ export function SettingsView() {
       </div>
 
       {tab === "keys" ? <KeysTab /> : null}
+      {tab === "scm" ? <SourceControlSettings /> : null}
       {tab === "profile" ? <ProfileTab /> : null}
       {tab === "shortcuts" ? <ShortcutsTab /> : null}
       {tab === "themes" ? <ThemesTab /> : null}

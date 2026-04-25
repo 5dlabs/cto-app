@@ -42,5 +42,17 @@ spec:
       protocol: TCP
       name: project-api
     {{- end }}
+    {{- if and .Values.narrator.enabled .Values.narrator.musetalk.enabled }}
+    - port: {{ .Values.narrator.musetalk.port }}
+      targetPort: narr-muse
+      protocol: TCP
+      name: narr-muse
+    {{- end }}
+    {{- if and .Values.narrator.enabled .Values.narrator.hunyuan.enabled }}
+    - port: {{ .Values.narrator.hunyuan.port }}
+      targetPort: narr-huny
+      protocol: TCP
+      name: narr-huny
+    {{- end }}
   selector:
     {{- include "agent.selectorLabels" . | nindent 4 }}

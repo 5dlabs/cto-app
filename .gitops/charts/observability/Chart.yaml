@@ -1,0 +1,16 @@
+apiVersion: v2
+name: observability
+description: Optional local Loki, Prometheus, Grafana, and Promtail stack for CTO Desktop
+type: application
+version: 0.1.0
+appVersion: "local"
+keywords:
+  - observability
+  - loki
+  - grafana
+  - prometheus
+  - promtail
+  - local
+maintainers:
+  - name: 5D Labs
+    email: jonathon@5dlabs.ai

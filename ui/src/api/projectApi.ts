@@ -9,7 +9,7 @@
  * Base URL precedence:
  *   1. `VITE_PROJECT_API_URL` build-time env,
  *   2. `window.__PROJECT_API_URL__` (lets Tauri / runtime override),
- *   3. `https://morgan-project-api.5dlabs.ai` (default when deployed).
+ *   3. `http://localhost:8080/morgan/project-api` (desktop local ingress).
  *
  * All calls are resilient — the UI falls back to static demo data when the
  * endpoint is unreachable so the shell stays usable without the backend.
@@ -135,7 +135,7 @@ function resolveBaseUrl(): string {
   } catch {
     /* ignore */
   }
-  return "https://morgan-project-api.5dlabs.ai";
+  return "http://localhost:8080/morgan/project-api";
 }
 
 export const PROJECT_API_BASE_URL = resolveBaseUrl();

@@ -1,0 +1,32 @@
+{{- if .Values.grafana.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "observability.fullname" . }}-grafana
+  namespace: {{ include "observability.namespace" . }}
+  labels:
+    {{- include "observability.labels" . | nindent 4 }}
+    app.kubernetes.io/component: grafana
+data:
+  datasources.yaml: |
+    apiVersion: 1
+    datasources:
+      {{- if .Values.loki.enabled }}
+      - name: Local Loki
+        uid: local-loki
+        type: loki
+        access: proxy
+        url: http://{{ include "observability.fullname" . }}-loki:{{ .Values.loki.service.port }}
+        isDefault: true
+        editable: false
+      {{- end }}
+      {{- if .Values.prometheus.enabled }}
+      - name: Local Prometheus
+        uid: local-prometheus
+        type: prometheus
+        access: proxy
+        url: http://{{ include "observability.fullname" . }}-prometheus:{{ .Values.prometheus.service.port }}
+        isDefault: {{ not .Values.loki.enabled }}
+        editable: false
+      {{- end }}
+{{- end }}

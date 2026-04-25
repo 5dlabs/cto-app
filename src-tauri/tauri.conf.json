@@ -23,7 +23,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https://unpkg.com; script-src 'self' https://unpkg.com; script-src-elem 'self' https://unpkg.com; connect-src 'self' https: wss:; media-src 'self' blob: https:; worker-src 'self' blob:; frame-src 'self' https:;"
+      "csp": "default-src 'self'; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https://unpkg.com; script-src 'self' https://unpkg.com; script-src-elem 'self' https://unpkg.com; connect-src 'self' http://localhost http://localhost:8080 ws://localhost ws://localhost:8080 http://127.0.0.1:* ws://127.0.0.1:* https: wss:; media-src 'self' blob: https:; worker-src 'self' blob:; frame-src 'self' http://localhost http://localhost:8080 http://127.0.0.1:* https:;"
     }
   },
   "bundle": {

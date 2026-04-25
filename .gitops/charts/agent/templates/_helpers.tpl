@@ -12,7 +12,7 @@ Create a default fully qualified app name using agent ID.
 {{- if .Values.fullnameOverride }}
 {{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" }}
 {{- else }}
-{{- printf "openclaw-%s" .Values.agent.id | trunc 63 | trimSuffix "-" }}
+{{- printf "openclaw-gateway-%s" .Values.agent.id | trunc 63 | trimSuffix "-" }}
 {{- end }}
 {{- end }}
 
@@ -23,7 +23,7 @@ Common labels
 helm.sh/chart: {{ include "agent.name" . }}
 {{ include "agent.selectorLabels" . }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
-app.kubernetes.io/part-of: openclaw
+app.kubernetes.io/part-of: openclaw-gateway
 openclaw.io/agent: {{ .Values.agent.id }}
 {{- end }}
 
@@ -49,7 +49,7 @@ openclaw.io/sandbox: {{ .Values.agent.sandbox | quote }}
 openclaw.io/tools-profile: {{ .Values.tools.profile | quote }}
 {{- if .Values.datadog }}
 {{- if .Values.datadog.enabled }}
-ad.datadoghq.com/agent.logs: {{ printf "[{\"source\":\"openclaw-agent\",\"service\":\"cto-%s\",\"tags\":[\"agent:%s\",\"model:%s\"]}]" .Values.agent.id .Values.agent.id .Values.agent.model | quote }}
+ad.datadoghq.com/agent.logs: {{ printf "[{\"source\":\"openclaw-gateway\",\"service\":\"cto-%s\",\"tags\":[\"agent:%s\",\"model:%s\"]}]" .Values.agent.id .Values.agent.id .Values.agent.model | quote }}
 {{- end }}
 {{- end }}
 {{- with .Values.podAnnotations }}

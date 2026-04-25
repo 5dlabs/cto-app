@@ -2,9 +2,8 @@
 # CTO — the core platform chart (controller + tools).  Published by this
 # repo's GitHub Action to ghcr.io/5dlabs/helm-charts as a public OCI chart.
 #
-# This is currently the ONLY Argo Application shipped by the bootstrap.
-# Qdrant / mem0 / GitLab / runners will be layered in later once we step
-# through what each pre-release user actually needs.
+# Morgan and Qdrant are layered as separate local Applications; GitLab/runners
+# will follow once we step through what each pre-release user actually needs.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:

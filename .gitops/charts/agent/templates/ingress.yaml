@@ -1,0 +1,72 @@
+{{- if .Values.localIngress.enabled }}
+{{- $pathBase := .Values.localIngress.pathBase | default (printf "/%s" (include "agent.fullname" .)) -}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "agent.fullname" . }}
+  namespace: {{ .Values.namespace | default .Release.Namespace }}
+  labels:
+    {{- include "agent.labels" . | nindent 4 }}
+  {{- with .Values.localIngress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  ingressClassName: {{ .Values.localIngress.className | default "nginx" }}
+  rules:
+    - {{- with .Values.localIngress.host }}
+      host: {{ . | quote }}
+      {{- end }}
+      http:
+        paths:
+          {{- if .Values.codeServer.enabled }}
+          - path: {{ printf "%s/code(/|$)(.*)" $pathBase | quote }}
+            pathType: {{ .Values.localIngress.pathType | default "ImplementationSpecific" }}
+            backend:
+              service:
+                name: {{ include "agent.fullname" . }}
+                port:
+                  name: code-server
+          {{- end }}
+          {{- if .Values.projectApi.enabled }}
+          - path: {{ printf "%s/project-api(/|$)(.*)" $pathBase | quote }}
+            pathType: {{ .Values.localIngress.pathType | default "ImplementationSpecific" }}
+            backend:
+              service:
+                name: {{ include "agent.fullname" . }}
+                port:
+                  name: project-api
+          {{- end }}
+          {{- if and .Values.narrator.enabled .Values.narrator.musetalk.enabled }}
+          - path: {{ printf "%s/voice/musetalk(/|$)(.*)" $pathBase | quote }}
+            pathType: {{ .Values.localIngress.pathType | default "ImplementationSpecific" }}
+            backend:
+              service:
+                name: {{ include "agent.fullname" . }}
+                port:
+                  name: narr-muse
+          {{- end }}
+          {{- if and .Values.narrator.enabled .Values.narrator.hunyuan.enabled }}
+          - path: {{ printf "%s/voice/hunyuan(/|$)(.*)" $pathBase | quote }}
+            pathType: {{ .Values.localIngress.pathType | default "ImplementationSpecific" }}
+            backend:
+              service:
+                name: {{ include "agent.fullname" . }}
+                port:
+                  name: narr-huny
+          {{- end }}
+          - path: {{ printf "%s/voice(/|$)(.*)" $pathBase | quote }}
+            pathType: {{ .Values.localIngress.pathType | default "ImplementationSpecific" }}
+            backend:
+              service:
+                name: {{ include "agent.fullname" . }}
+                port:
+                  name: gateway
+          - path: {{ printf "%s(/|$)(.*)" $pathBase | quote }}
+            pathType: {{ .Values.localIngress.pathType | default "ImplementationSpecific" }}
+            backend:
+              service:
+                name: {{ include "agent.fullname" . }}
+                port:
+                  name: gateway
+{{- end }}

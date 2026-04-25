@@ -1,0 +1,46 @@
+---
+# Observability — optional local-only Loki/Grafana/Prometheus stack for CTO Desktop.
+#
+# The desktop bootstrap does not apply this Application by default. Apply it when
+# local logs/metrics are desired; all services stay ClusterIP-only except Grafana,
+# which is reachable through the private localhost kind ingress path /grafana.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: observability
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: observability
+    app.kubernetes.io/part-of: platform
+    app.kubernetes.io/component: observability
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  source:
+    repoURL: ghcr.io/5dlabs/helm-charts
+    chart: observability
+    targetRevision: 0.1.0
+    helm:
+      releaseName: observability
+      valuesObject:
+        namespace: cto-system
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cto-system
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m

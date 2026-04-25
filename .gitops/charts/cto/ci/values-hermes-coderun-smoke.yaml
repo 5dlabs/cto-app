@@ -1,0 +1,13 @@
+---
+# Static Hermes CodeRun smoke values used by chart CI. This renders a Helm test
+# hook only; it does not create a live CodeRun unless a maintainer explicitly
+# installs the chart and runs `helm test`.
+tools:
+  enabled: false
+
+controller:
+  skillsCache:
+    enabled: false
+  codeRunSmoke:
+    enabled: true
+    harnessAgent: hermes
