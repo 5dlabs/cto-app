@@ -41,7 +41,7 @@ export interface VoiceClientHandlers {
 }
 
 export interface VoiceClientOptions {
-  /** ws://host:port/ws — defaults from VITE_VOICE_BRIDGE_WS or localhost:8090 */
+  /** ws://host/path/ws — defaults from VITE_VOICE_BRIDGE_WS or local ingress. */
   url?: string;
   /** Stable id passed to the bridge for session correlation. */
   sessionId?: string;
@@ -53,7 +53,7 @@ const DEFAULT_URL =
   (typeof import.meta !== "undefined" &&
     (import.meta as unknown as { env?: { VITE_VOICE_BRIDGE_WS?: string } }).env
       ?.VITE_VOICE_BRIDGE_WS) ||
-  "wss://morgan-voice.5dlabs.ai/ws";
+  "ws://localhost:8080/morgan/voice/ws";
 
 function defaultMime(): string {
   if (typeof MediaRecorder === "undefined") return "audio/webm";

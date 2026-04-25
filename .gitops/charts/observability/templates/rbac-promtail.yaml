@@ -1,0 +1,31 @@
+{{- if and .Values.promtail.enabled .Values.loki.enabled }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "observability.fullname" . }}-promtail
+  namespace: {{ include "observability.namespace" . }}
+  labels:
+    {{- include "observability.labels" . | nindent 4 }}
+    app.kubernetes.io/component: promtail
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "observability.fullname" . }}-promtail
+  namespace: {{ include "observability.namespace" . }}
+  labels:
+    {{- include "observability.labels" . | nindent 4 }}
+    app.kubernetes.io/component: promtail
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "observability.fullname" . }}-promtail
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "observability.promtailServiceAccountName" . }}
+    namespace: {{ include "observability.namespace" . }}
+{{- end }}

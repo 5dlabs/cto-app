@@ -1,0 +1,27 @@
+{{- if and .Values.controller.enabled .Values.controller.codeRunSmoke.enabled }}
+apiVersion: agents.platform/v1
+kind: CodeRun
+metadata:
+  name: {{ .Values.controller.codeRunSmoke.name }}
+  namespace: {{ include "cto.namespace" . }}
+  labels:
+    {{- include "cto.controller.labels" . | nindent 4 }}
+    app.kubernetes.io/component: hermes-coderun-smoke
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  runType: {{ .Values.controller.codeRunSmoke.runType }}
+  service: {{ .Values.controller.codeRunSmoke.service }}
+  repositoryUrl: {{ .Values.controller.codeRunSmoke.repositoryUrl }}
+  docsRepositoryUrl: {{ .Values.controller.codeRunSmoke.docsRepositoryUrl }}
+  workingDirectory: {{ .Values.controller.codeRunSmoke.workingDirectory | quote }}
+  githubApp: {{ .Values.controller.codeRunSmoke.githubApp }}
+  harnessAgent: {{ .Values.controller.codeRunSmoke.harnessAgent }}
+  enableDocker: {{ .Values.controller.codeRunSmoke.enableDocker }}
+  enableCodeServer: {{ .Values.controller.codeRunSmoke.enableCodeServer }}
+  quality: {{ .Values.controller.codeRunSmoke.quality }}
+  security: {{ .Values.controller.codeRunSmoke.security }}
+  testing: {{ .Values.controller.codeRunSmoke.testing }}
+  deployment: {{ .Values.controller.codeRunSmoke.deployment }}
+{{- end }}

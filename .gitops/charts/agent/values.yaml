@@ -1,5 +1,5 @@
 # =============================================================================
-# OpenClaw Agent Helm Chart - Default Values
+# OpenClaw Gateway Helm Chart - Default Values
 # =============================================================================
 # Each agent is deployed as a separate Helm release via ArgoCD.
 # Per-agent overrides are provided via inline values in the ArgoCD Application.
@@ -314,6 +314,21 @@ gateway:
   # Pod-internal gateway — static token for health probes
   auth:
     token: "openclaw-internal"
+
+# =============================================================================
+# Optional local ingress
+# =============================================================================
+# Disabled by default. Desktop overlays can expose the gateway and enabled
+# sidecars on a private localhost host with path-based routing.
+localIngress:
+  enabled: false
+  className: nginx
+  host: localhost
+  pathBase: /morgan
+  pathType: ImplementationSpecific
+  annotations:
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
 
 # =============================================================================
 # Optional SSH sidecar (disabled by default)

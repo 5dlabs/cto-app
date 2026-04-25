@@ -1,6 +1,7 @@
 use tauri::Manager;
 
 mod bootstrap;
+mod scm_auth;
 
 #[allow(clippy::missing_panics_doc)]
 #[tauri::command]
@@ -37,7 +38,11 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             app_version,
             bootstrap::bootstrap_local_stack,
-            bootstrap::bootstrap_probe
+            bootstrap::bootstrap_probe,
+            scm_auth::delete_scm_connection,
+            scm_auth::list_scm_connections,
+            scm_auth::prepare_scm_provisioning,
+            scm_auth::save_scm_connection
         ])
         .run(tauri::generate_context!())
         .expect("error while running CTO Desktop");

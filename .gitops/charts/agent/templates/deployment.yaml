@@ -1,6 +1,8 @@
 {{- $messaging := .Values.messaging | default dict -}}
 {{- $discordConfig := index $messaging "discord" | default .Values.discord -}}
 {{- $mem0Plugin := .Values.mem0Plugin | default dict -}}
+{{- $secrets := .Values.secrets | default dict -}}
+{{- $apiKeyNames := (index $secrets "apiKeyNames") | default dict -}}
 {{- $statefulset := eq (.Values.deploymentMode | default "deployment") "statefulset" -}}
 apiVersion: apps/v1
 kind: {{ if $statefulset }}StatefulSet{{ else }}Deployment{{ end }}
@@ -210,8 +212,13 @@ spec:
                  what you found and what you're resuming (or "nothing to
                  resume, standing by for next directive" if the workspace is
                  clean).
-              7. For Coder code-server access, always use the stable hostname
-                 https://coder.5dlabs.ai. Never post a trycloudflare URL.
+               {{- if .Values.codeServer.publicUrl }}
+               7. For Coder code-server access, always use the local desktop URL
+                  {{ .Values.codeServer.publicUrl }}. Never post public tunnel URLs.
+               {{- else }}
+               7. For Coder code-server access, use the local desktop ingress URL
+                  configured for this release. Never post public tunnel URLs.
+               {{- end }}
 
               You are fully autonomous. Do not wait for prompts. If a PRD or
               task is in progress, keep working until completion or a true
@@ -270,7 +277,7 @@ spec:
               else
                 echo "[tools] supergateway already present"
               fi
-              printf '#!/bin/sh\nBASE_URL="${TOOL_SERVER_URL:-{{ .Values.toolServer.url }}}"\nBASE_URL="${BASE_URL%%/sse}"\nexec /workspace/.npm-global/bin/supergateway --streamableHttp "${BASE_URL}/mcp" "$@"\n' > /workspace/.local/bin/tools
+              printf '#!/bin/sh\nBASE_URL="${TOOL_SERVER_URL:-{{ .Values.toolServer.url }}}"\nBASE_URL="${BASE_URL%/}"\ncase "$BASE_URL" in\n  */sse) MCP_URL="${BASE_URL%/sse}/mcp" ;;\n  */mcp) MCP_URL="$BASE_URL" ;;\n  *) MCP_URL="${BASE_URL}/mcp" ;;\nesac\nexec /workspace/.npm-global/bin/supergateway --streamableHttp "$MCP_URL" "$@"\n' > /workspace/.local/bin/tools
               chmod +x /workspace/.local/bin/tools
               echo "[tools] tools MCP proxy ready"
 
@@ -526,12 +533,14 @@ spec:
                 echo "=== Init complete for {{ .Values.agent.id }} — all clean ==="
               fi
           env:
+            {{- if or (not (hasKey $discordConfig "enabled")) $discordConfig.enabled }}
             # Discord token
             - name: DISCORD_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.secrets.discordTokensSecret }}
                   key: {{ $discordConfig.tokenSecretKey | default .Values.agent.id }}
+            {{- end }}
             # Provider API keys used when init renders openclaw.json via envsubst.
             {{- range $name, $provider := .Values.models.providers }}
             {{- if and (or (not (hasKey $provider "enabled")) $provider.enabled) $provider.apiKeySecretKey }}
@@ -548,34 +557,34 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.secrets.apiKeysSecret }}
-                  key: brave-api-key
+                  key: {{ get $apiKeyNames "brave" | default "brave-api-key" | quote }}
                   optional: true
             - name: FIRECRAWL_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.secrets.apiKeysSecret }}
-                  key: firecrawl-api-key
+                  key: {{ get $apiKeyNames "firecrawl" | default "firecrawl-api-key" | quote }}
                   optional: true
             # GitHub PAT for private repo cloning
             - name: GITHUB_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.secrets.apiKeysSecret }}
-                  key: github-pat
+                  key: {{ get $apiKeyNames "github" | default "github-pat" | quote }}
                   optional: true
             # Fireworks API key (used by envsubst for mem0 embedder/llm config)
             - name: FIREWORKS_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.secrets.apiKeysSecret }}
-                  key: fireworks-api-key
+                  key: {{ get $apiKeyNames "fireworks" | default "fireworks-api-key" | quote }}
                   optional: true
             # DigitalOcean Gradient AI model access key (OpenCode → Claude Opus 4.7 tier-3 fallback)
             - name: DO_INFERENCE_KEY
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.secrets.apiKeysSecret }}
-                  key: DO_INFERENCE_KEY
+                  key: {{ get $apiKeyNames "doInference" | default "DO_INFERENCE_KEY" | quote }}
                   optional: true
             {{- if .Values.cloudProviders.bedrock.enabled }}
             # AWS Bedrock credentials (used by OpenClaw gateway + Claude Code CLI)
@@ -583,13 +592,13 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.secrets.apiKeysSecret }}
-                  key: aws-access-key-id
+                  key: {{ get $apiKeyNames "awsAccessKeyId" | default "aws-access-key-id" | quote }}
                   optional: true
             - name: AWS_SECRET_ACCESS_KEY
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.secrets.apiKeysSecret }}
-                  key: aws-secret-access-key
+                  key: {{ get $apiKeyNames "awsSecretAccessKey" | default "aws-secret-access-key" | quote }}
                   optional: true
             - name: AWS_REGION
               value: {{ .Values.cloudProviders.bedrock.region | quote }}
@@ -609,7 +618,7 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.secrets.apiKeysSecret }}
-                  key: foundry-api-key
+                  key: {{ get $apiKeyNames "foundry" | default "foundry-api-key" | quote }}
                   optional: true
             {{- end }}
             {{- if and (hasKey .Values "codexPlugin") .Values.codexPlugin.authSecretKey }}
@@ -693,6 +702,7 @@ spec:
                   && echo "[workspace-files] Patched delivery fallback in $(basename $f)" \
                   || echo "[workspace-files] WARN: delivery patch failed for $(basename $f)"
               done
+              {{- if and (hasKey $mem0Plugin "enabled") $mem0Plugin.enabled }}
               # Increase mem0 recall timeout from 8s to 30s (qdrant can be slow
               # on large collections, especially after pod restarts).
               for f in /workspace/.openclaw/extensions/openclaw-mem0/node_modules/@mem0/openclaw-mem0/dist/index.js; do
@@ -702,6 +712,7 @@ spec:
                   && echo "[workspace-files] Patched mem0 recall timeout to 30s" \
                   || echo "[workspace-files] WARN: mem0 timeout patch failed"
               done
+              {{- end }}
           volumeMounts:
             - name: workspace
               mountPath: /workspace
@@ -805,18 +816,20 @@ spec:
             - name: OPENCLAW_DEFAULT_RECIPIENT
               value: {{ .Values.agent.defaultRecipient | quote }}
             {{- end }}
+            {{- if or (not (hasKey $discordConfig "enabled")) $discordConfig.enabled }}
             - name: DISCORD_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.secrets.discordTokensSecret }}
                   key: {{ $discordConfig.tokenSecretKey | default .Values.agent.id }}
                   optional: true
+            {{- end }}
             # Provider API keys (available at runtime for dynamic use)
             - name: ANTHROPIC_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.secrets.apiKeysSecret }}
-                  key: anthropic-api-key
+                  key: {{ get $apiKeyNames "anthropic" | default "anthropic-api-key" | quote }}
                   optional: true
             # OPENAI_API_KEY intentionally NOT set — Codex CLI detects it on boot
             # and rewrites /workspace/.codex/auth.json to apikey-mode, clobbering
@@ -826,51 +839,51 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.secrets.apiKeysSecret }}
-                  key: gemini-api-key
+                  key: {{ get $apiKeyNames "gemini" | default "gemini-api-key" | quote }}
                   optional: true
             - name: GOOGLE_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.secrets.apiKeysSecret }}
-                  key: gemini-api-key
+                  key: {{ get $apiKeyNames "google" | default "gemini-api-key" | quote }}
                   optional: true
             - name: PROVIDER_OPENAI_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.secrets.apiKeysSecret }}
-                  key: openai-api-key
+                  key: {{ get $apiKeyNames "openai" | default "openai-api-key" | quote }}
                   optional: true
             - name: FACTORY_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.secrets.apiKeysSecret }}
-                  key: factory-api-key
+                  key: {{ get $apiKeyNames "factory" | default "factory-api-key" | quote }}
                   optional: true
             - name: FIREWORKS_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.secrets.apiKeysSecret }}
-                  key: fireworks-api-key
+                  key: {{ get $apiKeyNames "fireworks" | default "fireworks-api-key" | quote }}
                   optional: true
             # DigitalOcean Gradient AI model access key (OpenCode → Claude Opus 4.7 tier-3 fallback)
             - name: DO_INFERENCE_KEY
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.secrets.apiKeysSecret }}
-                  key: DO_INFERENCE_KEY
+                  key: {{ get $apiKeyNames "doInference" | default "DO_INFERENCE_KEY" | quote }}
                   optional: true
             # Web tools API keys (Brave search + Firecrawl scraping)
             - name: BRAVE_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.secrets.apiKeysSecret }}
-                  key: brave-api-key
+                  key: {{ get $apiKeyNames "brave" | default "brave-api-key" | quote }}
                   optional: true
             - name: FIRECRAWL_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.secrets.apiKeysSecret }}
-                  key: firecrawl-api-key
+                  key: {{ get $apiKeyNames "firecrawl" | default "firecrawl-api-key" | quote }}
                   optional: true
             {{- if .Values.claudeCode.enabled }}
             # Claude Code CLI settings path (settings.json with permissions + teams)
@@ -934,59 +947,59 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.secrets.apiKeysSecret }}
-                  key: github-pat
+                  key: {{ get $apiKeyNames "github" | default "github-pat" | quote }}
                   optional: true
             # gh CLI auth (mirrors GITHUB_TOKEN)
             - name: GH_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.secrets.apiKeysSecret }}
-                  key: github-pat
+                  key: {{ get $apiKeyNames "github" | default "github-pat" | quote }}
                   optional: true
             # Copilot CLI headless auth (mirrors GITHUB_TOKEN)
             - name: COPILOT_GITHUB_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.secrets.apiKeysSecret }}
-                  key: github-pat
+                  key: {{ get $apiKeyNames "github" | default "github-pat" | quote }}
                   optional: true
             # 1Password CLI (headless via service account token)
             - name: OP_SERVICE_ACCOUNT_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.secrets.apiKeysSecret }}
-                  key: op-service-account-token
+                  key: {{ get $apiKeyNames "opServiceAccountToken" | default "op-service-account-token" | quote }}
                   optional: true
             # OVH API credentials (python-ovh SDK)
             - name: OVH_APPLICATION_KEY
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.secrets.apiKeysSecret }}
-                  key: ovh-application-key
+                  key: {{ get $apiKeyNames "ovhApplicationKey" | default "ovh-application-key" | quote }}
                   optional: true
             - name: OVH_APPLICATION_SECRET
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.secrets.apiKeysSecret }}
-                  key: ovh-application-secret
+                  key: {{ get $apiKeyNames "ovhApplicationSecret" | default "ovh-application-secret" | quote }}
                   optional: true
             - name: OVH_CONSUMER_KEY
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.secrets.apiKeysSecret }}
-                  key: ovh-consumer-key
+                  key: {{ get $apiKeyNames "ovhConsumerKey" | default "ovh-consumer-key" | quote }}
                   optional: true
             - name: OVH_ENDPOINT
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.secrets.apiKeysSecret }}
-                  key: ovh-endpoint
+                  key: {{ get $apiKeyNames "ovhEndpoint" | default "ovh-endpoint" | quote }}
                   optional: true
             - name: OVH_PROJECT_ID
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.secrets.apiKeysSecret }}
-                  key: ovh-project-id
+                  key: {{ get $apiKeyNames "ovhProjectId" | default "ovh-project-id" | quote }}
                   optional: true
             {{- if .Values.kaniko.enabled }}
             # Docker config for image builds/pushes (GHCR auth)
@@ -1008,13 +1021,13 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.secrets.apiKeysSecret }}
-                  key: aws-access-key-id
+                  key: {{ get $apiKeyNames "awsAccessKeyId" | default "aws-access-key-id" | quote }}
                   optional: true
             - name: AWS_SECRET_ACCESS_KEY
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.secrets.apiKeysSecret }}
-                  key: aws-secret-access-key
+                  key: {{ get $apiKeyNames "awsSecretAccessKey" | default "aws-secret-access-key" | quote }}
                   optional: true
             - name: AWS_REGION
               value: {{ .Values.cloudProviders.bedrock.region | quote }}
@@ -1034,7 +1047,7 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.secrets.apiKeysSecret }}
-                  key: foundry-api-key
+                  key: {{ get $apiKeyNames "foundry" | default "foundry-api-key" | quote }}
                   optional: true
             {{- end }}
             {{- with .Values.extraEnv }}
@@ -1249,26 +1262,24 @@ spec:
               sed -i 's/^              //' /workspace/.code-server/User/globalStorage/storage.json
               echo "$STORAGE_SEED_VERSION" > "$STORAGE_SEED_MARKER"
               fi
-              {{- if .Values.codeServer.githubToken }}
-              # Write code-server config with github-auth for Copilot
+              # Write code-server config explicitly so local ingress can reach
+              # the sidecar even when no GitHub auth token is configured.
               mkdir -p /root/.config/code-server
-              {{- if .Values.codeServer.password }}
               cat > /root/.config/code-server/config.yaml << CSCONF
               bind-addr: 0.0.0.0:{{ .Values.codeServer.port | default 8080 }}
+              {{- if .Values.codeServer.password }}
               auth: password
               password: ${PASSWORD}
-              cert: false
-              github-auth: ${GITHUB_TOKEN}
-              CSCONF
               {{- else }}
-              cat > /root/.config/code-server/config.yaml << CSCONF
-              bind-addr: 0.0.0.0:{{ .Values.codeServer.port | default 8080 }}
               auth: none
-              cert: false
-              github-auth: ${GITHUB_TOKEN}
-              CSCONF
               {{- end }}
+              cert: false
+              {{- if .Values.codeServer.githubToken }}
+              github-auth: ${GITHUB_TOKEN}
+              {{- end }}
+              CSCONF
               sed -i 's/^              //' /root/.config/code-server/config.yaml
+              {{- if .Values.codeServer.githubToken }}
               # Pre-seed Copilot auth via hosts.json (read by the extension at startup)
               mkdir -p /root/.config/github-copilot
               echo "{\"github.com\":{\"user\":\"copilot-user\",\"oauth_token\":\"${GITHUB_TOKEN}\"}}" \
@@ -1426,7 +1437,7 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.secrets.apiKeysSecret }}
-                  key: github-pat
+                  key: {{ get $apiKeyNames "github" | default "github-pat" | quote }}
                   optional: true
           ports:
             - name: project-api
@@ -1492,7 +1503,7 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.secrets.apiKeysSecret }}
-                  key: openai-api-key
+                  key: {{ get $apiKeyNames "openai" | default "openai-api-key" | quote }}
                   optional: true
             - name: LLM_MODEL
               value: "gpt-4o-mini"
@@ -1562,7 +1573,7 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.secrets.apiKeysSecret }}
-                  key: openai-api-key
+                  key: {{ get $apiKeyNames "openai" | default "openai-api-key" | quote }}
                   optional: true
             - name: LLM_MODEL
               value: "gpt-4o-mini"

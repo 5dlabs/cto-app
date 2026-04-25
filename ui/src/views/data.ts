@@ -610,7 +610,7 @@ function resolveCoderBaseUrl(): string {
   } catch {
     /* ignore */
   }
-  return "https://morgan-ide.5dlabs.ai";
+  return "http://localhost:8080/morgan/code";
 }
 
 /** Base origin for Morgan's code-server host. */

@@ -1,0 +1,52 @@
+---
+# Qdrant — lightweight local vector store for Morgan's mem0 plugin.
+#
+# This uses the same published-chart flow as cto.yaml and morgan.yaml: the
+# qdrant chart in .gitops/charts/qdrant is packaged by publish-chart.yml and
+# pushed to ghcr.io/5dlabs/helm-charts. Keeping it as an OCI chart lets the
+# desktop bootstrap hand Argo CD a public, in-cluster-resolvable source.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: qdrant
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: qdrant
+    app.kubernetes.io/part-of: platform
+    app.kubernetes.io/component: memory
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  source:
+    repoURL: ghcr.io/5dlabs/helm-charts
+    chart: qdrant
+    targetRevision: 0.1.0
+    helm:
+      releaseName: qdrant
+      valuesObject:
+        namespace: cto-system
+        fullnameOverride: qdrant
+        persistence:
+          enabled: true
+          # Empty means "use the cluster default"; kind's default is local-path.
+          storageClassName: ""
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cto-system
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m

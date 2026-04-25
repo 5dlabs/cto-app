@@ -1,20 +1,24 @@
 ---
 # =============================================================================
-# Morgan Agent Values
+# Morgan Agent Values — CTO desktop/local bootstrap
 # =============================================================================
-# Technical program manager for the CTO platform and avatar proof-of-concept.
-# Shares the openclaw-agent chart and infra baseline with Coder — only the
-# instructions (AGENTS.md / SOUL.md / heartbeat prompt), identity, and model
-# defaults differ. See coder-values.yaml for the paired baseline.
+# Morgan is the always-up local OpenClaw gateway/agent for cto-app. Keep this
+# overlay self-contained and free of server-only dependencies; the Morgan Argo
+# Application consumes this file from the published agent chart package.
 # =============================================================================
-namespace: cto
 
+namespace: cto-system
+
+global:
+  namespace: cto-system
+  createNamespace: false
+
+# Public/free desktop installs do not ship Datadog. Keep Datadog pod annotations
+# out of the rendered Morgan manifests.
 datadog:
-  enabled: true
+  enabled: false
 
-# =============================================================================
-# Logging & Diagnostics (shared infra baseline with Coder)
-# =============================================================================
+# Verbose, stdout/stderr-friendly OpenClaw diagnostics for local support.
 logging:
   level: "debug"
   file: "/workspace/.openclaw/logs/openclaw.log"
@@ -27,43 +31,32 @@ diagnostics:
   flags:
     - "acp.*"
     - "gateway.session"
+    - "session.*"
 
 replicaCount: 1
 deploymentMode: statefulset
 
-global:
-  namespace: cto
-  createNamespace: false
-
 image:
   repository: "ghcr.io/5dlabs/agents"
   tag: "latest"
-  pullPolicy: Always
+  pullPolicy: IfNotPresent
 
-imagePullSecrets:
-  - name: ghcr-secret
+# The desktop bootstrap must not require a private pull secret for public images.
+imagePullSecrets: []
 
 nodeSelector: {}
-tolerations:
-  - key: "node-role.kubernetes.io/control-plane"
-    operator: "Exists"
-    effect: "NoSchedule"
-  - key: "node-role.kubernetes.io/master"
-    operator: "Exists"
-    effect: "NoSchedule"
+tolerations: []
 
 resources:
   requests:
-    cpu: "200m"
-    memory: "1Gi"
+    cpu: "100m"
+    memory: "512Mi"
   limits:
-    cpu: "2000m"
     memory: "4Gi"
 
-nodeOptions: "--max-old-space-size=4096"
-
-telemetry:
-  enabled: false
+storage:
+  size: 10Gi
+  storageClass: "local-path"
 
 agent:
   id: "morgan"
@@ -78,6 +71,8 @@ agent:
       else. Do not start background work or new tasks on your own.
   sandbox: "off"
   skipGlobalSkills: false
+  tools:
+    allow: []
 
 agentDefaults:
   thinkingDefault: "low"
@@ -91,19 +86,15 @@ agentDefaults:
       enabled: true
       softThresholdTokens: 8000
       prompt: >-
-        Before this conversation is compacted, flush everything important
-        to mem0 and memory files. Include:
-        ## Active Tasks (what you're working on, status, next steps, blockers)
-        ## Decisions Made (what was decided, why, alternatives rejected)
-        ## Code Changes (files modified, PRs created, branches, commit SHAs)
-        ## Debugging Findings (root causes found, fixes applied, workarounds)
-        ## Configuration (env vars, secrets, model providers, endpoints changed)
-        Be specific — include file paths, commit hashes, error messages, and URLs.
-        Update existing entries rather than duplicating.
-        If nothing meaningful to store, reply NO_REPLY.
+        Before this conversation is compacted, write durable notes to
+        memory/YYYY-MM-DD.md. Include active tasks, decisions, code/config
+        changes, blockers, and important user preferences. If nothing meaningful
+        should persist, reply NO_REPLY.
   contextPruning:
     mode: "cache-ttl"
     ttl: "5m"
+  elevatedDefault: "full"
+  maxConcurrent: 4
   heartbeat:
     every: "12h"
     target: "last"
@@ -115,43 +106,38 @@ agentDefaults:
 modelDefaults:
   primary: "google/gemini-2.5-flash"
   fallbacks:
-    - "google/gemini-2.5-pro"
     - "anthropic/claude-sonnet-4-20250514"
     - "openai-api/gpt-5.4"
     - "openai-api/gpt-5.3-codex"
+    - "anthropic/claude-opus-4-6-20260201"
 
-# =============================================================================
-# Secrets (shared infra baseline with Coder — names differ per namespace)
-# =============================================================================
 secrets:
+  # Created by the cto chart in the same local namespace.
+  apiKeysSecret: "cto-agent-keys"
+  # cto-agent-keys renders provider/tool keys with environment-style names.
+  # Keep Morgan on that local desktop secret instead of upstream lowercase keys.
+  apiKeyNames:
+    anthropic: "ANTHROPIC_API_KEY"
+    brave: "BRAVE_API_KEY"
+    doInference: "DO_INFERENCE_KEY"
+    factory: "FACTORY_API_KEY"
+    firecrawl: "FIRECRAWL_API_KEY"
+    fireworks: "FIREWORKS_API_KEY"
+    gemini: "GEMINI_API_KEY"
+    github: "GITHUB_TOKEN"
+    google: "GOOGLE_API_KEY"
+    openai: "OPENAI_API_KEY"
+  # Discord is disabled for local bootstrap; this is retained only for explicit
+  # opt-in overlays that add a Discord token secret later.
   discordTokensSecret: "openclaw-discord-tokens"
-  # Shared with Coder so Morgan reads the same legacy-style provider key
-  # names (codex-auth-sub1/sub2, anthropic-sub1/sub2-oauth, fireworks-api-key,
-  # github-pat, ovh-*) that Coder's chart expects. `openclaw-api-keys` is
-  # ExternalSecret-managed from OpenBao and does NOT map those key names,
-  # which silently empties provider credentials and surfaces as the gateway
-  # error "Missing API key for the selected provider on the gateway."
-  apiKeysSecret: "cto-coder-api-keys"
-  githubSecret: "openclaw-github"
+
+# Local cto-app talks to Morgan through the in-cluster gateway/API, not Discord.
+discord:
+  enabled: false
 
 messaging:
   discord:
-    enabled: true
-    accountId: "morgan"
-    # NOTE: Historical key name; the Discord bot token for Morgan lives under
-    # the "henry" key in openclaw-discord-tokens. Rotating to "morgan" is a
-    # follow-up secret-store change.
-    tokenSecretKey: "henry"
-    allowBots: "mentions"
-    groupPolicy: "allowlist"
-    threadBindings:
-      enabled: true
-      spawnSubagentSessions: true
-      spawnAcpSessions: true
-    dm:
-      policy: "allowlist"
-    allowFrom:
-      - "444519104808878090"
+    enabled: false
 
 models:
   providers:
@@ -159,268 +145,30 @@ models:
       enabled: true
       api: "google-generative-ai"
       baseUrl: "https://generativelanguage.googleapis.com/v1beta"
-      apiKeySecretKey: "gemini-api-key"
+      apiKeySecretKey: "GEMINI_API_KEY"
       models:
         - id: "gemini-2.5-flash"
           name: "Gemini 2.5 Flash"
         - id: "gemini-2.5-pro"
           name: "Gemini 2.5 Pro"
-    openai:
-      enabled: true
-      apiKeySecretKey: "openai-api-key"
     anthropic:
       enabled: true
-      apiKeySecretKey: "anthropic-api-key"
-    minimax:
-      api: "anthropic-messages"
-      enabled: false
-      apiKeySecretKey: "minimax-api-key"
-      baseUrl: "https://api.minimax.io/anthropic"
-  repos: []
+      apiKeySecretKey: "ANTHROPIC_API_KEY"
+    openai:
+      enabled: true
+      apiKeySecretKey: "OPENAI_API_KEY"
+    openai-api:
+      enabled: true
+      apiKeySecretKey: "OPENAI_API_KEY"
 
+# Qdrant is shipped by cto-app's local qdrant Argo Application. Morgan uses
+# mem0 for long-term memory against that in-cluster service.
 memorySearch:
-  enabled: true
-  sessionMemory: true
-  model: "accounts/fireworks/models/kimi-k2p6"
-  provider: "fireworks"
-  maxResults: 6
-  cache:
+  enabled: false
+
+plugins:
+  memoryCore:
     enabled: true
-    maxEntries: 100
-  hybrid:
-    enabled: true
-    candidateMultiplier: 3
-    textWeight: 0.4
-    vectorWeight: 0.6
-  sources:
-    - "memory"
-    - "sessions"
-  sync:
-    deltaBytes: 4096
-    deltaMessages: 5
-    watch: true
-
-workspace:
-  repos:
-    - name: cto
-      url: "https://gitlab.5dlabs.ai/5dlabs/cto.git"
-      branch: "main"
-      path: "repos/cto"
-    - name: openclaw-platform
-      url: "https://gitlab.5dlabs.ai/5dlabs/openclaw-platform.git"
-      branch: "main"
-      path: "repos/openclaw-platform"
-    - name: openclaw
-      url: "https://github.com/openclaw/openclaw.git"
-      branch: "main"
-      path: "repos/openclaw"
-  files:
-    AGENTS.md: |
-      # AGENTS.md -- Morgan
-
-      You are **Morgan**, the technical program manager for CTO.
-
-      This deployment exists for a low-latency talking-avatar proof of concept.
-      Optimize for fast, spoken, high-signal replies.
-
-      ## Default Interaction Style
-
-      - Sound like a sharp technical PM: calm, direct, practical, collaborative.
-      - Lead with the recommendation, then the reason, then the next step.
-      - Prefer short answers that are easy to say out loud.
-      - Ask at most one clarifying question at a time when blocked.
-      - Avoid long preambles, jargon-heavy speeches, and process theater.
-
-      ## Operating Rules
-
-      - Treat the current user request as the priority. Do not start side quests.
-      - Use available tools when the user asks for action; do not self-limit to chat.
-      - For coding and diagnostic tasks, prefer ACP harnesses over generic shell
-        prose. If the user asks whether a coding CLI works, prove it with a real
-        check instead of speculating.
-      - Do not rely on NATS for the user-facing avatar loop, but do use ACP
-        sessions when the user wants work done with Claude, Codex, Gemini,
-        Kimi, Cursor, OpenCode, Copilot, Droid, or Pi.
-      - In avatar or web chat conversations, prefer one-shot ACP runs first.
-        Do not assume a thread-bound persistent ACP session is needed unless the
-        user explicitly asks for a long-running coding session.
-      - When the user asks for a plan, call out risks, dependencies, and go/no-go
-        criteria without turning the answer into bureaucracy.
-      - If you are uncertain, say what you know, what is missing, and the fastest
-        next check.
-
-      ## Voice Demo Constraints
-
-      - Keep default responses under five sentences unless the user asks for depth.
-      - Prefer plain language over jargon, but stay technically accurate.
-      - Stay outcome-focused: align people, scope work, remove blockers, and move
-        the decision forward.
-      - When a tool check succeeds or fails, summarize the result directly and
-        name the next step.
-
-    SOUL.md: |
-      # Morgan -- Soul
-
-      You are **Morgan**, a technically fluent program manager helping the team
-      move from ambiguity to execution.
-
-      ## Personality
-
-      You are steady, confident, younger-sounding, and pragmatic. You do not
-      hype. You do not waffle. You translate messy discussions into a clear plan,
-      clear owners, and a clear next step.
-
-      ## What You Optimize For
-
-      - Fast understanding
-      - Clear prioritization
-      - Honest tradeoffs
-      - Delivery confidence
-      - Team alignment without needless process
-
-      ## How You Think
-
-      Start with the outcome. Identify constraints, risks, dependencies, and the
-      smallest viable next step. Default to the leanest path that can prove value
-      quickly. If the user wants depth, go deeper. If not, keep it crisp.
-
-    IDENTITY.md: |
-      # IDENTITY.md
-
-      - **Name:** Morgan
-      - **Role:** Technical program manager for the avatar proof of concept
-      - **Primary mode:** Fast, spoken-friendly execution guidance
-      - **Model:** Gemini 2.5 Flash
-
-    TOOLS.md: |
-      # TOOLS.md -- Morgan
-
-      ## Workspace
-
-      - Root workspace: `/workspace`
-      - CTO repo: `/workspace/repos/cto`
-      - OpenClaw platform: `/workspace/repos/openclaw-platform`
-      - OpenClaw core: `/workspace/repos/openclaw`
-      - All user projects live under `/workspace/repos/<slug>`.
-
-      ## Project API (pod-local sidecar)
-
-      Surfaces `/workspace/repos/` to the cto-app UI and to you. HTTP on
-      `http://localhost:8091`. Use it via `exec` + `curl`:
-
-      - `GET /projects` — list projects on disk
-      - `GET /projects/active` — current active project (pointer you
-        should read on boot to set `cwd`)
-      - `POST /projects/active {"name":"<slug>"}` — set active project
-      - `POST /projects {"name":"<slug>"}` — create project (clone from
-        github.com/5dlabs if present, else `git init`)
-      - `GET /projects/<slug>` — descriptor for one project
-      - `POST /projects/<slug>/prd {"content":"..."}` — write `prd.md`
-        at the repo root and commit as Morgan
-
-      The cto-app UI drives intake via framed chat turns of the form
-      `[project-event] created=<slug>` / `active=<slug>`. When you see
-      those, follow the `intake-prd-authoring` skill.
-
-      ## Operating Principle
-
-      - When the user asks whether a CLI or runtime works, run a real smoke
-        check.
-      - Prefer ACP sessions for coding agents. Use raw `exec` for one-shot
-        availability checks or non-ACP commands.
-      - In the avatar or web chat path, prefer ACP `mode: run` with an explicit
-        `cwd` for coding tasks. Only use persistent ACP sessions when the user
-        explicitly wants a long-lived coding session.
-      - Do not claim a tool is unavailable until you have checked `command -v`,
-        the ACP registry, or a direct smoke command.
-      - Do not reference `acp-router` or other skills unless you have verified
-        they exist on disk.
-
-      ## Available Coding CLIs
-
-      - Claude Code: `claude --version`
-      - Claude ACP harness: `claude-agent-acp --help`
-      - Codex: `codex --version`
-      - Codex ACP harness: `codex-acp --help`
-      - Gemini: `gemini --version`
-      - Kimi: `kimi --version`
-      - Copilot: `copilot --help`
-      - OpenCode: `opencode --help`
-      - Cursor: `cursor-agent --help`
-      - Droid: `droid --help`
-      - Pi ACP runtime: `pi-acp --help`
-
-      ## ACP Sessions
-
-      Preferred way to delegate coding work from voice or web chat:
-
-      - `sessions_spawn` with `runtime: "acp"`, `mode: "run"`, and explicit
-        `cwd` set to a real repo such as `/workspace/repos/cto` or
-        `/workspace/repos/openclaw-platform`
-      - Use `agentId: "claude"` or `agentId: "codex"` first for coding tasks
-      - Use persistent thread-bound ACP sessions only when the user explicitly
-        asks for a long-lived coding session or wants to monitor it in Discord
-
-      Examples:
-
-      - `{"task":"Implement the splash page","runtime":"acp","agentId":"claude","mode":"run","cwd":"/workspace/repos/cto"}`
-      - `{"task":"Smoke test the coding harness","runtime":"acp","agentId":"codex","mode":"run","cwd":"/workspace/repos/openclaw-platform"}`
-
-      For quick proof that a harness is wired correctly, a direct command check
-      is acceptable:
-
-      - `claude-agent-acp --help >/dev/null && echo ACP_OK`
-      - `codex-acp --help >/dev/null && echo ACP_OK`
-
-      ## Web and Research
-
-      - Firecrawl MCP is available to Claude Code sessions.
-      - OpenClaw web search/fetch tools are enabled for Morgan directly.
-
-    HEARTBEAT.md: |
-      # HEARTBEAT.md -- Morgan
-
-      If there is active user work, continue that work first.
-
-      If idle, keep checks lightweight:
-
-      - Verify the local gateway is healthy.
-      - Verify Discord is connected.
-      - Verify ACP harness commands still resolve on PATH.
-      - Record meaningful findings in `memory/YYYY-MM-DD.md`.
-
-      Do not start unrelated projects on your own.
-
-    MEMORY.md: |
-      # MEMORY.md -- Morgan
-
-      - This Morgan instance backs the CTO desktop avatar and chat experience.
-      - The backend runs inside the local kind cluster that CTO manages.
-      - Coding CLI delegation should prefer ACP sessions over generic shell-only
-        claims.
-      - On March 10, 2026, the local Morgan runtime was brought closer to
-        Intake parity by enabling the full tool profile, ACP runtime support,
-        and bundled coding CLIs.
-      - In the avatar flow, one-shot ACP runs are the safest default for coding
-        tasks until persistent thread-bound ACP sessions are proven stable.
-      - When asked whether a CLI works, prove it with a concrete smoke check and
-        report the result plainly.
-
-storage:
-  size: 10Gi
-  storageClass: "local-path"
-
-gateway:
-  auth:
-    token: "openclaw-internal"
-  controlUi:
-    enabled: false
-  http:
-    endpoints:
-      chatCompletions:
-        enabled: true
-      responses:
-        enabled: false
 
 openmemory:
   enabled: false
@@ -428,92 +176,103 @@ openmemory:
 mem0:
   enabled: false
 
-tokenjuice:
-  enabled: true
-
 mem0Plugin:
   enabled: true
   mode: open-source
-  userId: "jonathon"
+  userId: "local:morgan"
   autoRecall: true
   autoCapture: true
   topK: 5
   searchThreshold: 0.3
-  metadataSource: "discord"
+  metadataSource: "desktop"
   customCategories:
-    task_objective: "What a task or CodeRun is trying to accomplish — goals, requirements, acceptance criteria"
-    task_progress: "Status updates, milestones reached, intermediate results during task execution"
-    task_completion: "Final outcomes, deliverables, PRs merged, build results when a task finishes"
-    task_summary: "Condensed summary of entire task written at completion"
-    intake_decision: "Decisions made during project intake and planning"
-    handoff: "Structured summary passed from a task agent back to Morgan after task completion"
-    blocker: "Issues that blocked progress — errors, missing permissions, dependency failures"
-    escalation: "Issues escalated to Morgan or the human user"
-    architecture: "Architecture decisions, patterns, and system design choices"
-    debugging: "Root cause analysis, debugging steps, and bug fixes"
-    code_review: "Code review findings and feedback"
-    technical: "Technical facts, configurations, dependencies"
-    decision: "Key decisions with rationale"
-    user_preference: "User preferences, workflows, and conventions"
-    configuration: "System configuration facts"
-    relationship: "Inter-agent or inter-service relationships"
-  customInstructions: |
-    You are Morgan, the CTO platform overseer. You have hierarchical memory access across all projects and agents.
-
-    GIT & REPO ACCESS:
-    - Git is ALREADY authenticated via credential store at /workspace/.git-credentials
-    - NEVER try to manually configure git credentials, write .git-credentials, or set up auth
-    - Just use `git clone https://github.com/...` directly — it works without any extra steps
-    - The GitHub PAT is pre-configured in the init container; do not read or echo the token
-    - If a clone fails, check the URL spelling first, not credentials
-
-    NAMESPACE CONVENTION (user_id field):
-    - Your global namespace: "jonathon" (portfolio-wide memories)
-    - Your operational memories: "jonathon:agent:morgan"
-    - Project-level: "jonathon:project:{projectId}" (shared summaries, handoffs)
-    - Task-level: "jonathon:project:{projectId}:task:{taskId}" (task-scoped)
-    - Agent-specific: "jonathon:project:{projectId}:task:{taskId}:{agent}"
-
-    TIERED RETRIEVAL — match query scope to namespace:
-    - "What's happening across projects?" → search user_id="jonathon" category=task_progress
-    - "How's project X?" → search user_id="jonathon:project:X"
-    - "Status of task 1?" → search user_id="jonathon:project:X:task:1" category=task_progress
-    - "What did Rex do?" → search user_id="jonathon:project:X:task:1:rex"
-    - "What blockers across all?" → search category=blocker (no user_id filter)
-    - "Rex's track record?" → search user_id LIKE "%:rex" category=task_completion
-
-    MEMORY SCHEMA — when using memory_add, ALWAYS include metadata:
-    - category: one of the customCategories
-    - tier: "portfolio" | "project" | "task" | "agent" | "artifact"
-    - project: project identifier
-    - project_name: human-readable project name
-    - task_id: task number (if applicable)
-    - agent: agent name who created the memory
-    - source: "discord" | "coderun" | "intake" | "manual" | "handoff" | "system"
-    - repo: repository path (if applicable)
-
-    WHEN STORING MEMORIES from conversations:
-    - Tag with metadata using the schema above
-    - Handoff memories go to project namespace (tier: "project")
-    - Decisions and blockers are high-importance — always store with category
-    - Use task_summary at task completion to write a condensed overview
+    - "project"
+    - "decision"
+    - "preference"
+  customInstructions: >-
+    Capture durable Morgan desktop bootstrap context only: project decisions,
+    user preferences, blockers, and validation results. Keep entries concise and
+    avoid secrets or transient log noise.
   oss:
-    collectionName: cto_memory
-    embedder:
-      provider: google
-      config:
-        model: gemini-embedding-001
+    collectionName: "cto_memory"
     vectorStore:
-      provider: qdrant
+      provider: "qdrant"
       config:
-        host: qdrant.cto.svc.cluster.local
+        host: "qdrant.cto-system.svc.cluster.local"
         port: 6333
-    llm:
-      provider: openai
+    embedder:
+      provider: "openai"
       config:
-        model: accounts/fireworks/models/kimi-k2p6
-        apiKey: "${FIREWORKS_API_KEY}"
-        baseUrl: "https://api.fireworks.ai/inference/v1"
+        model: "text-embedding-3-small"
+        apiKeyEnvVar: "PROVIDER_OPENAI_API_KEY"
+    llm:
+      provider: "openai"
+      config:
+        model: "gpt-4.1-nano"
+        apiKeyEnvVar: "PROVIDER_OPENAI_API_KEY"
+
+# The optional local observability Application ships Loki at this in-cluster
+# endpoint. Keep telemetry gated off by default so Morgan never requires Loki.
+telemetry:
+  enabled: false
+  promtail:
+    lokiUrl: "http://observability-loki.cto-system.svc.cluster.local:3100/loki/api/v1/push"
+
+# NATS is not shipped by cto-app's bootstrap yet.
+nats:
+  enabled: false
+
+# Avoid requiring a ghcr-secret volume in the public desktop install.
+kaniko:
+  enabled: false
+
+tokenjuice:
+  enabled: true
+
+browser:
+  enabled: false
+
+codeServer:
+  enabled: true
+  publicUrl: "http://localhost:8080/morgan/code"
+  quickTunnel:
+    enabled: false
+
+projectApi:
+  enabled: true
+  allowedOrigins: "http://localhost:5173,http://127.0.0.1:5173,http://localhost:8080,http://127.0.0.1:8080,http://tauri.localhost,https://tauri.localhost,tauri://localhost"
+
+ssh:
+  enabled: false
+
+# Voice/narrator endpoints stay disabled until the desktop bundle ships the
+# local voice bridge and backing workers. The local ingress template will expose
+# narrator routes automatically when this is enabled later.
+narrator:
+  enabled: false
+
+gateway:
+  auth:
+    token: "openclaw-internal"
+  controlUi:
+    enabled: true
+    basePath: "/openclaw"
+  http:
+    endpoints:
+      chatCompletions:
+        enabled: true
+      responses:
+        enabled: false
+
+localIngress:
+  enabled: true
+  className: nginx
+  host: localhost
+  pathBase: /morgan
+  pathType: ImplementationSpecific
+  annotations:
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
 
 session:
   scope: "per-sender"
@@ -563,8 +322,6 @@ tools:
     backend: "acpx"
     acpxVersion: "0.5.3"
     defaultAgent: "claude"
-    # Union of the allowed-agents lists across Coder and Morgan so both
-    # StatefulSets can hand off to the same ACP backends.
     allowedAgents:
       - "claude"
       - "codex"
@@ -610,52 +367,24 @@ tools:
       pi:
         command: "pi-acp"
 
+# Existing CTO tools service from the cto chart. The agent chart normalizes this
+# /mcp URL for CLI stdio bridges, while OpenClaw can use it directly.
 toolServer:
-  url: "http://cto-tools.cto.svc.cluster.local:3000/sse"
+  url: "http://cto-tools.cto-system.svc.cluster.local:8080/mcp"
 
-# =============================================================================
-# Claude Code CLI (shared infra baseline with Coder)
-# =============================================================================
+# Claude Code sidecar config is disabled for the local bootstrap to avoid
+# shipping MCP endpoints for services cto-app does not install yet. ACP still
+# exposes claude-agent-acp when present in the agent image.
 claudeCode:
-  enabled: true
-  oauthTokenSecretKey: "anthropic-sub1-oauth"
-  oauthTokenSecretKeySub2: "anthropic-sub2-oauth"
-  model: "claude-opus-4-7"
-  permissions:
-    defaultMode: "bypassPermissions"
-    allow:
-      - "Bash"
-      - "Read"
-      - "Edit"
-      - "Write"
-      - "WebFetch"
-      - "WebSearch"
-      - "Task"
-  agentTeams:
-    enabled: true
-    teammateMode: "in-process"
-  includeCoAuthoredBy: false
-  disableTelemetry: true
-  mcp:
-    servers:
-      tool-server:
-        command: "/workspace/.local/bin/tools"
-        args: []
-        cwd: "/workspace"
+  enabled: false
 
-# =============================================================================
-# Codex Harness (shared infra baseline with Coder)
-# =============================================================================
 codexPlugin:
   enabled: true
   approvalPolicy: "never"
   sandbox: "workspace-write"
-  authSecretKey: "codex-auth-sub1"
-  authSecretKeySub2: "codex-auth-sub2"
+  authSecretKey: "CODEX_AUTH_SUB1"
+  authSecretKeySub2: "CODEX_AUTH_SUB2"
 
-# =============================================================================
-# Cloud Providers (disabled — direct API keys)
-# =============================================================================
 cloudProviders:
   bedrock:
     enabled: false
@@ -664,125 +393,13 @@ cloudProviders:
   foundry:
     enabled: false
 
-browser:
-  enabled: false
-
-plugins:
-  memoryCore:
-    enabled: true
-
-supermemory:
-  enabled: false
-
-codeServer:
-  enabled: true
-  port: 8080
-  password: ""
-  publicUrl: "https://morgan-ide.5dlabs.ai"
-  defaultFolder: "/workspace/repos/cto"
-  quickTunnel:
-    enabled: false
-  githubToken:
-    secretName: "code-server-github-token"
-    key: "token"
-
-# =============================================================================
-# Project API sidecar
-# =============================================================================
-# Surfaces /workspace/repos and the "active project" pointer to the cto-app
-# UI and to Morgan's tool layer. Fronted by cloudflared (see
-# infra/manifests/morgan-support/project-api-tunnel-binding.yaml) at
-# https://morgan-project-api.5dlabs.ai.
-projectApi:
-  enabled: true
-  image:
-    repository: ghcr.io/5dlabs/project-api
-    tag: "latest"
-    pullPolicy: Always
-  port: 8091
-  servicePort: 8091
-  reposRoot: /workspace/repos
-  stateDir: /workspace/.openclaw
-  githubOrg: "5dlabs"
-  # TODO(edge_kase): tighten to the concrete cto-app origins once the desktop
-  # app settles on a canonical public host.
-  allowedOrigins: "*"
-  git:
-    commitName: "Morgan"
-    commitEmail: "morgan@5dlabs.ai"
-
-cloudflare:
-  tunnel:
-    enabled: true
-    quickTunnel: false
-    tunnelId: "45061e50-c044-4395-b672-1b12197bf9e5"
-    credentialsSecret: "cloudflared-tunnel-credentials"
-    hostname: "morgan-ide.5dlabs.ai"
-    targetPort: 8080
-
-ssh:
-  enabled: true
-  port: 2222
-  authorizedKeys:
-    - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINUYgmSYtJp5JM5MSJ9tFUhdRpt4LZoZmkWEZKxuvanc generated-key"
-
-nats:
-  enabled: true
-  url: "nats://nats.messaging.svc.cluster.local:4222"
-  agentRole: "intake"
-  maxPingPongTurns: 10
-  pingPongWindowMs: 300000
-  roster:
-    - id: atlas
-      role: "merge-gate"
-    - id: blaze
-      role: "frontend"
-    - id: bolt
-      role: "devops"
-    - id: cipher
-      role: "security"
-    - id: cleo
-      role: "code-quality"
-    - id: grizz
-      role: "go-implementation"
-    - id: healer
-      role: "self-healing"
-    - id: keeper
-      role: "operations"
-    - id: rex
-      role: "rust-implementation"
-    - id: stitch
-      role: "code-review"
-    - id: tess
-      role: "testing"
-    - id: coder
-      role: "general-purpose-coder"
-
-kaniko:
-  enabled: true
-  resources:
-    requests:
-      cpu: "2"
-      memory: "16Gi"
-    limits:
-      cpu: "8"
-      memory: "48Gi"
-
 toolsConfig:
   remoteTools:
     - "argocd_*"
-    - "context7_*"
-    - "exa_*"
-    - "firecrawl_*"
+    - "filesystem_*"
     - "github_*"
     - "kubernetes_*"
-    - "linear_*"
-    - "loki_*"
-    - "octocode_*"
-    - "openmemory_*"
-    - "playwright_*"
-    - "shadcn_*"
-    - "tavily_*"
+  localServers: {}
 
 cliBackends:
   claude-cli:
@@ -803,8 +420,62 @@ cliBackends:
       - "--json"
     output: "json"
 
-skills:
-  external:
-    openclaw:
-      - configMapName: "openclaw-morgan-external-skills"
-        optional: true
+workspace:
+  repos: []
+  files:
+    AGENTS.md: |
+      # AGENTS.md -- Morgan
+
+      You are **Morgan**, the local technical program manager for CTO Desktop.
+
+      ## Default Interaction Style
+
+      - Lead with the recommendation, then the reason, then the next step.
+      - Keep responses concise and spoken-friendly unless the user asks for depth.
+      - Treat the current user request as the priority; do not start side quests.
+      - Use tools for requested actions and summarize results directly.
+      - Prefer ACP sessions for coding-agent delegation when they are available.
+
+    SOUL.md: |
+      # Morgan -- Soul
+
+      You are steady, pragmatic, technically fluent, and focused on helping the
+      user move from ambiguity to execution in the local CTO desktop stack.
+
+    IDENTITY.md: |
+      # IDENTITY.md
+
+      - **Name:** Morgan
+      - **Role:** Local technical program manager and OpenClaw gateway agent
+      - **Primary mode:** Fast, spoken-friendly execution guidance
+      - **Model:** Gemini 2.5 Flash
+
+    TOOLS.md: |
+      # TOOLS.md -- Morgan
+
+      ## Local CTO Tools
+
+      - CTO tools MCP endpoint: `http://cto-tools.cto-system.svc.cluster.local:8080/mcp`
+      - Root workspace: `/workspace`
+      - User projects should live under `/workspace/repos/<slug>` when created.
+
+      ## ACP Sessions
+
+      Prefer one-shot ACP `run` sessions with an explicit `cwd` for coding tasks.
+      Use persistent ACP sessions only when the user explicitly asks for a
+      long-running coding session.
+
+    HEARTBEAT.md: |
+      # HEARTBEAT.md -- Morgan
+
+      If there is active user work, continue that work first. If idle, keep checks
+      lightweight: verify the local gateway is healthy and ACP harness commands
+      still resolve on PATH. Do not start unrelated projects on your own.
+
+    MEMORY.md: |
+      # MEMORY.md -- Morgan
+
+      - This Morgan instance backs the CTO Desktop local OpenClaw gateway.
+      - The runtime lives in the local kind cluster in the `cto-system` namespace.
+      - Long-term memory uses the local Qdrant service at
+        `qdrant.cto-system.svc.cluster.local:6333` through the mem0 plugin.

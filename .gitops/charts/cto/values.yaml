@@ -47,6 +47,25 @@ controller:
   service:
     type: ClusterIP
     port: 8080
+  # Static/manual CodeRun preflight. Disabled by default so normal desktop
+  # installs do not create runnable CodeRun objects. CI enables this to render
+  # a minimal Hermes CodeRun without requiring live controller images or keys.
+  codeRunSmoke:
+    enabled: false
+    name: hermes-coderun-smoke
+    harnessAgent: hermes
+    runType: documentation
+    service: hermes-smoke
+    repositoryUrl: https://github.com/5dlabs/cto-app
+    docsRepositoryUrl: https://github.com/5dlabs/cto-app
+    workingDirectory: "."
+    githubApp: hermes-smoke
+    enableDocker: false
+    enableCodeServer: false
+    quality: false
+    security: false
+    testing: false
+    deployment: false
 
 tools:
   enabled: true

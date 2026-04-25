@@ -8,13 +8,17 @@ on:
   pull_request:
     paths:
       - ".gitops/**"
+      - "crates/ci-tools/**"
       - ".github/workflows/chart-ci.yml"
+      - ".github/workflows/morgan-qdrant-smoke.yml"
       - ".yamllint.yaml"
   push:
     branches: ['**']
     paths:
       - ".gitops/**"
+      - "crates/ci-tools/**"
       - ".github/workflows/chart-ci.yml"
+      - ".github/workflows/morgan-qdrant-smoke.yml"
       - ".yamllint.yaml"
   workflow_dispatch:
 
@@ -56,10 +60,20 @@ jobs:
           version: v3.16.2
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
       - name: Add upstream Helm repos
         run: |
           helm repo add argo https://argoproj.github.io/argo-helm
           helm repo update
+
+      - name: Validate Rust CI tools
+        run: |
+          cargo fmt --manifest-path crates/ci-tools/Cargo.toml --all -- --check
+          cargo test --manifest-path crates/ci-tools/Cargo.toml
+          cargo clippy --manifest-path crates/ci-tools/Cargo.toml --all-targets -- -W clippy::pedantic -D warnings
 
       - name: Lint local charts
         run: |
@@ -87,27 +101,163 @@ jobs:
       - name: Render regression assertions
         run: |
           set -euo pipefail
+          render_dir=".chart-ci-rendered"
+          rm -rf "${render_dir}"
+          mkdir -p "${render_dir}"
 
           helm template check .gitops/charts/cto \
             --set tools.dockerInDocker.enabled=false \
-            > /tmp/cto-nodind.yaml
-          if grep -E 'DOCKER_HOST|docker-sock-dir|supplementalGroups|docker-daemon' /tmp/cto-nodind.yaml; then
+            > "${render_dir}/cto-nodind.yaml"
+          if grep -E 'DOCKER_HOST|docker-sock-dir|supplementalGroups|docker-daemon' "${render_dir}/cto-nodind.yaml"; then
             echo "Docker runtime wiring rendered with tools.dockerInDocker.enabled=false" >&2
             exit 1
           fi
-          grep -q 'TOOLS_SERVER_URL: "http://cto-tools.cto-system.svc.cluster.local:8080/mcp"' /tmp/cto-nodind.yaml
+          grep -q 'TOOLS_SERVER_URL: "http://cto-tools.cto-system.svc.cluster.local:8080/mcp"' "${render_dir}/cto-nodind.yaml"
 
           helm template check .gitops/charts/cto \
             --set tools.dockerInDocker.enabled=true \
-            > /tmp/cto-dind.yaml
-          grep -q 'DOCKER_HOST' /tmp/cto-dind.yaml
-          grep -q 'docker-daemon' /tmp/cto-dind.yaml
+            > "${render_dir}/cto-dind.yaml"
+          grep -q 'DOCKER_HOST' "${render_dir}/cto-dind.yaml"
+          grep -q 'docker-daemon' "${render_dir}/cto-dind.yaml"
+
+          helm template check .gitops/charts/cto \
+            --include-crds \
+            -f .gitops/charts/cto/ci/values-hermes-coderun-smoke.yaml \
+            > "${render_dir}/cto-hermes-coderun-smoke.yaml"
+          cargo run --quiet \
+            --manifest-path crates/ci-tools/Cargo.toml \
+            --bin cto-ci-assert \
+            -- hermes-coderun-preflight < "${render_dir}/cto-hermes-coderun-smoke.yaml"
+
+          qdrant_chart_version="$(awk '/^version:/ {print $2; exit}' .gitops/charts/qdrant/Chart.yaml)"
+          grep -q 'chart: qdrant' .gitops/apps/qdrant.yaml
+          grep -q "targetRevision: ${qdrant_chart_version}" .gitops/apps/qdrant.yaml
+          grep -q 'namespace: cto-system' .gitops/apps/qdrant.yaml
+          helm template qdrant .gitops/charts/qdrant \
+            --namespace cto-system \
+            > "${render_dir}/qdrant.yaml"
+          cargo run --quiet \
+            --manifest-path crates/ci-tools/Cargo.toml \
+            --bin cto-ci-assert \
+            -- qdrant-render-config < "${render_dir}/qdrant.yaml"
+          grep -q 'name: qdrant' "${render_dir}/qdrant.yaml"
+          grep -q 'namespace: cto-system' "${render_dir}/qdrant.yaml"
+          grep -q 'port: 6333' "${render_dir}/qdrant.yaml"
+          grep -q 'QDRANT__TELEMETRY_DISABLED' "${render_dir}/qdrant.yaml"
+          grep -Fq "path: \"/qdrant(/|\$)(.*)\"" "${render_dir}/qdrant.yaml"
+          grep -Fq 'host: "localhost"' "${render_dir}/qdrant.yaml"
+          grep -Fq "nginx.ingress.kubernetes.io/rewrite-target: /\$2" "${render_dir}/qdrant.yaml"
+          grep -q 'storage: "5Gi"' "${render_dir}/qdrant.yaml"
+          if grep -Eiq 'datadog|gp3|kind: LoadBalancer' "${render_dir}/qdrant.yaml"; then
+            echo "Forbidden Datadog/gp3/public exposure rendered for local Qdrant" >&2
+            exit 1
+          fi
+
+          observability_chart_version="$(awk '/^version:/ {print $2; exit}' .gitops/charts/observability/Chart.yaml)"
+          grep -q 'chart: observability' .gitops/apps/observability.yaml
+          grep -q "targetRevision: ${observability_chart_version}" .gitops/apps/observability.yaml
+          grep -q 'namespace: cto-system' .gitops/apps/observability.yaml
+          helm template observability .gitops/charts/observability \
+            --namespace cto-system \
+            > "${render_dir}/observability.yaml"
+          grep -q 'name: observability-loki' "${render_dir}/observability.yaml"
+          grep -q 'name: observability-prometheus' "${render_dir}/observability.yaml"
+          grep -q 'name: observability-grafana' "${render_dir}/observability.yaml"
+          grep -q 'name: observability-promtail' "${render_dir}/observability.yaml"
+          grep -q 'kind: DaemonSet' "${render_dir}/observability.yaml"
+          grep -q 'namespace: cto-system' "${render_dir}/observability.yaml"
+          grep -Fq 'host: "localhost"' "${render_dir}/observability.yaml"
+          grep -Fq 'path: "/grafana(/|$)(.*)"' "${render_dir}/observability.yaml"
+          grep -Fq 'http://observability-loki.cto-system.svc.cluster.local:3100/loki/api/v1/push' "${render_dir}/observability.yaml"
+          test "$(grep -c '^kind: Ingress' "${render_dir}/observability.yaml")" -eq 1
+          if grep -Eiq 'datadog|type: LoadBalancer|type: NodePort|kind: Secret|secretKeyRef|5dlabs\.ai' "${render_dir}/observability.yaml"; then
+            echo "Forbidden Datadog, public exposure, or secret requirement rendered for local observability" >&2
+            exit 1
+          fi
+          helm template observability .gitops/charts/observability \
+            --namespace cto-system \
+            --set loki.enabled=false \
+            > "${render_dir}/observability-no-loki.yaml"
+          if grep -Eiq 'promtail|loki/api/v1/push' "${render_dir}/observability-no-loki.yaml"; then
+            echo "Promtail rendered while Loki is disabled" >&2
+            exit 1
+          fi
+
+          agent_chart_version="$(awk '/^version:/ {print $2; exit}' .gitops/charts/agent/Chart.yaml)"
+          grep -q 'chart: agent' .gitops/apps/morgan.yaml
+          grep -q "targetRevision: ${agent_chart_version}" .gitops/apps/morgan.yaml
+          grep -q 'namespace: cto-system' .gitops/apps/morgan.yaml
+          grep -q 'ci/values-morgan.yaml' .gitops/apps/morgan.yaml
 
           helm template check .gitops/charts/agent \
             -f .gitops/charts/agent/ci/values-morgan.yaml \
-            > /tmp/agent-morgan.yaml
-          grep -q '"acp": {' /tmp/agent-morgan.yaml
-          grep -q '"backend": "acpx"' /tmp/agent-morgan.yaml
+            > "${render_dir}/agent-morgan.yaml"
+          grep -q 'namespace: cto-system' "${render_dir}/agent-morgan.yaml"
+          grep -q 'name: openclaw-gateway-morgan' "${render_dir}/agent-morgan.yaml"
+          grep -q 'app.kubernetes.io/name: openclaw-gateway-morgan' "${render_dir}/agent-morgan.yaml"
+          grep -q 'app.kubernetes.io/part-of: openclaw-gateway' "${render_dir}/agent-morgan.yaml"
+          grep -q '"acp": {' "${render_dir}/agent-morgan.yaml"
+          grep -q '"backend": "acpx"' "${render_dir}/agent-morgan.yaml"
+          grep -q '"allowedAgents":' "${render_dir}/agent-morgan.yaml"
+          grep -q '"claude"' "${render_dir}/agent-morgan.yaml"
+          grep -q '"diagnostics": {' "${render_dir}/agent-morgan.yaml"
+          grep -q '"logging": {' "${render_dir}/agent-morgan.yaml"
+          grep -q 'OPENCLAW_RAW_STREAM_PATH' "${render_dir}/agent-morgan.yaml"
+          grep -q 'openclaw-mem0' "${render_dir}/agent-morgan.yaml"
+          grep -q '"memory": "openclaw-mem0"' "${render_dir}/agent-morgan.yaml"
+          grep -q '"host": "qdrant.cto-system.svc.cluster.local"' "${render_dir}/agent-morgan.yaml"
+          grep -q '"port": 6333' "${render_dir}/agent-morgan.yaml"
+          grep -q '"collectionName": "cto_memory"' "${render_dir}/agent-morgan.yaml"
+          grep -q 'http://cto-tools.cto-system.svc.cluster.local:8080/mcp' "${render_dir}/agent-morgan.yaml"
+          grep -q 'name: cto-agent-keys' "${render_dir}/agent-morgan.yaml"
+          grep -q 'key: "ANTHROPIC_API_KEY"' "${render_dir}/agent-morgan.yaml"
+          grep -q 'key: "GEMINI_API_KEY"' "${render_dir}/agent-morgan.yaml"
+          grep -q 'key: "GOOGLE_API_KEY"' "${render_dir}/agent-morgan.yaml"
+          grep -q 'key: "OPENAI_API_KEY"' "${render_dir}/agent-morgan.yaml"
+          grep -q 'key: "BRAVE_API_KEY"' "${render_dir}/agent-morgan.yaml"
+          grep -q 'key: "FIREWORKS_API_KEY"' "${render_dir}/agent-morgan.yaml"
+          grep -Fq 'host: "localhost"' "${render_dir}/agent-morgan.yaml"
+          grep -Fq 'path: "/morgan/code(/|$)(.*)"' "${render_dir}/agent-morgan.yaml"
+          grep -Fq 'path: "/morgan/project-api(/|$)(.*)"' "${render_dir}/agent-morgan.yaml"
+          grep -Fq 'path: "/morgan/voice(/|$)(.*)"' "${render_dir}/agent-morgan.yaml"
+          grep -Fq 'path: "/morgan(/|$)(.*)"' "${render_dir}/agent-morgan.yaml"
+          grep -Fq 'http://localhost:8080/morgan/code' "${render_dir}/agent-morgan.yaml"
+          grep -q 'ALLOWED_ORIGINS' "${render_dir}/agent-morgan.yaml"
+          grep -Fq 'http://localhost:5173,http://127.0.0.1:5173,http://localhost:8080,http://127.0.0.1:8080,http://tauri.localhost,https://tauri.localhost,tauri://localhost' "${render_dir}/agent-morgan.yaml"
+          grep -q 'bind-addr: 0.0.0.0:8080' "${render_dir}/agent-morgan.yaml"
+          grep -q 'auth: none' "${render_dir}/agent-morgan.yaml"
+          if grep -Fq 'value: "*"' "${render_dir}/agent-morgan.yaml"; then
+            echo "Wildcard CORS rendered for local Morgan project API" >&2
+            exit 1
+          fi
+          if grep -q 'ad.datadoghq.com' "${render_dir}/agent-morgan.yaml"; then
+            echo "Datadog annotations rendered for local Morgan" >&2
+            exit 1
+          fi
+          if grep -Eq 'loki\.observability|observability-loki|loki/api/v1/push|/etc/promtail' "${render_dir}/agent-morgan.yaml"; then
+            echo "Promtail/Loki dependency rendered for local Morgan" >&2
+            exit 1
+          fi
+          if grep -q 'qdrant.cto.svc.cluster.local' "${render_dir}/agent-morgan.yaml"; then
+            echo "Upstream cto namespace Qdrant dependency rendered for local Morgan" >&2
+            exit 1
+          fi
+          if grep -Eq 'cto-tools\.cto\.svc\.cluster\.local|:3000/sse' "${render_dir}/agent-morgan.yaml"; then
+            echo "Upstream cto namespace/port tool server URL rendered for local Morgan" >&2
+            exit 1
+          fi
+          if grep -Eiq 'cloudflared|trycloudflare|morgan-ide\.5dlabs\.ai|morgan-project-api\.5dlabs\.ai|morgan-voice\.5dlabs\.ai' "${render_dir}/agent-morgan.yaml"; then
+            echo "Public tunnel/domain rendered for local Morgan sidecars" >&2
+            exit 1
+          fi
+          cargo run --quiet \
+            --manifest-path crates/ci-tools/Cargo.toml \
+            --bin cto-ci-assert \
+            -- morgan-mem0-config < "${render_dir}/agent-morgan.yaml"
+          cargo run --quiet \
+            --manifest-path crates/ci-tools/Cargo.toml \
+            --bin cto-ci-assert \
+            -- morgan-diagnostics-config < "${render_dir}/agent-morgan.yaml"
 
   schema-validation:
     name: Kubernetes Schema Validation

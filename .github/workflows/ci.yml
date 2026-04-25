@@ -28,8 +28,35 @@ jobs:
       - name: Typecheck
         run: npm --workspace ui run typecheck
 
+      - name: Assert local Morgan URLs
+        run: |
+          if grep -R -nE 'morgan-(ide|project-api|voice)\.5dlabs\.ai' ui/src; then
+            echo "Morgan desktop defaults must use localhost ingress paths" >&2
+            exit 1
+          fi
+
       - name: Build UI
         run: npm --workspace ui run build
+
+  ci-tools:
+    name: CI tools fmt + test + clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: cargo fmt
+        run: cargo fmt --manifest-path crates/ci-tools/Cargo.toml --all -- --check
+
+      - name: cargo test
+        run: cargo test --manifest-path crates/ci-tools/Cargo.toml
+
+      - name: cargo clippy (pedantic)
+        run: cargo clippy --manifest-path crates/ci-tools/Cargo.toml --all-targets -- -W clippy::pedantic -D warnings
 
   rust:
     name: Rust fmt + clippy

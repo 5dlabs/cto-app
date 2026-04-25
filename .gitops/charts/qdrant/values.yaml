@@ -1,0 +1,106 @@
+---
+namespace: cto-system
+createNamespace: false
+
+# The shipped desktop app expects qdrant.cto-system.svc.cluster.local:6333.
+fullnameOverride: qdrant
+nameOverride: ""
+
+replicaCount: 1
+
+image:
+  repository: qdrant/qdrant
+  tag: "v1.17.1"
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext:
+  fsGroup: 3000
+  fsGroupChangePolicy: Always
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  privileged: false
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 2000
+
+service:
+  type: ClusterIP
+  annotations: {}
+  httpPort: 6333
+  grpcPort: 6334
+
+# Qdrant serves its dashboard from the HTTP API listener at /dashboard. Keep the
+# service ClusterIP-only and expose the UI only through kind's local NGINX
+# ingress on localhost. Kind maps host port 8080 to ingress port 80. The regex
+# path rewrites /qdrant/* to the backend root, so the local dashboard URL is
+# http://localhost:8080/qdrant/dashboard.
+ingress:
+  enabled: true
+  className: nginx
+  host: localhost
+  path: /qdrant(/|$)(.*)
+  pathType: ImplementationSpecific
+  annotations:
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+  tls: []
+
+env:
+  QDRANT__TELEMETRY_DISABLED: "true"
+  QDRANT__SERVICE__HTTP_PORT: "6333"
+  QDRANT__SERVICE__GRPC_PORT: "6334"
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    memory: 1Gi
+
+persistence:
+  enabled: true
+  accessModes:
+    - ReadWriteOnce
+  size: 5Gi
+  # Empty means "use the cluster default"; kind's default is local-path.
+  storageClassName: ""
+  annotations: {}
+
+startupProbe:
+  enabled: true
+  path: /healthz
+  initialDelaySeconds: 5
+  periodSeconds: 5
+  timeoutSeconds: 2
+  failureThreshold: 30
+
+readinessProbe:
+  enabled: true
+  path: /readyz
+  initialDelaySeconds: 5
+  periodSeconds: 5
+  timeoutSeconds: 2
+  failureThreshold: 6
+
+livenessProbe:
+  enabled: true
+  path: /healthz
+  initialDelaySeconds: 30
+  periodSeconds: 30
+  timeoutSeconds: 2
+  failureThreshold: 3
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

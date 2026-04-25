@@ -1,0 +1,35 @@
+{{- if and .Values.grafana.enabled .Values.grafana.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "observability.fullname" . }}-grafana
+  namespace: {{ include "observability.namespace" . }}
+  labels:
+    {{- include "observability.labels" . | nindent 4 }}
+    app.kubernetes.io/component: grafana
+  {{- with .Values.grafana.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  ingressClassName: {{ .Values.grafana.ingress.className | default "nginx" }}
+  {{- with .Values.grafana.ingress.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    {{- if .Values.grafana.ingress.host }}
+    - host: {{ .Values.grafana.ingress.host | quote }}
+      {{- else }}
+    -
+      {{- end }}
+      http:
+        paths:
+          - path: {{ .Values.grafana.ingress.path | quote }}
+            pathType: {{ .Values.grafana.ingress.pathType | default "ImplementationSpecific" }}
+            backend:
+              service:
+                name: {{ include "observability.fullname" . }}-grafana
+                port:
+                  number: {{ .Values.grafana.service.port }}
+{{- end }}

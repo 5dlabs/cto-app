@@ -40,9 +40,84 @@ const ARGOCD_HELM_RELEASE: &str = "argocd";
 const ARGOCD_NAMESPACE: &str = "argocd";
 const ARGOCD_VALUES: &str = include_str!("../../.gitops/charts/argocd/values.yaml");
 
-// CTO platform Argo Application — the only app we ship for the pre-release.
-// Published by .github/workflows/publish-chart.yml to ghcr.io.
+// CTO platform + Qdrant + Morgan Argo Applications, published by
+// .github/workflows/publish-chart.yml to ghcr.io.
 const CTO_APP_MANIFEST: &str = include_str!("../../.gitops/apps/cto.yaml");
+const QDRANT_APP_MANIFEST: &str = include_str!("../../.gitops/apps/qdrant.yaml");
+const MORGAN_APP_MANIFEST: &str = include_str!("../../.gitops/apps/morgan.yaml");
+const BOOTSTRAP_TEST_MODE_ENV: &str = "CTO_BOOTSTRAP_TEST_MODE";
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum BootstrapAppMode {
+    Full,
+    ControllerOnly,
+}
+
+impl BootstrapAppMode {
+    fn from_env() -> BootstrapResult<Self> {
+        match std::env::var(BOOTSTRAP_TEST_MODE_ENV) {
+            Ok(value) => Self::parse(&value),
+            Err(std::env::VarError::NotPresent) => Ok(Self::Full),
+            Err(std::env::VarError::NotUnicode(_)) => {
+                Err(format!("{BOOTSTRAP_TEST_MODE_ENV} must be valid Unicode"))
+            }
+        }
+    }
+
+    fn parse(value: &str) -> BootstrapResult<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "" | "0" | "false" | "full" | "off" => Ok(Self::Full),
+            "1" | "true" | "controller-only" | "cto-only" | "on" => Ok(Self::ControllerOnly),
+            _ => Err(format!(
+                "Unsupported {BOOTSTRAP_TEST_MODE_ENV} value '{value}'. Use 'full' (default) or \
+                 'controller-only' to apply only the CTO Application."
+            )),
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Full => "full",
+            Self::ControllerOnly => "controller-only",
+        }
+    }
+
+    fn manifests(self) -> &'static [BootstrapAppManifest] {
+        match self {
+            Self::Full => &FULL_BOOTSTRAP_APPS,
+            Self::ControllerOnly => &CONTROLLER_ONLY_BOOTSTRAP_APPS,
+        }
+    }
+
+    fn skips_layered_apps(self) -> bool {
+        matches!(self, Self::ControllerOnly)
+    }
+}
+
+#[derive(Copy, Clone)]
+struct BootstrapAppManifest {
+    name: &'static str,
+    manifest: &'static str,
+}
+
+const CTO_BOOTSTRAP_APP: BootstrapAppManifest = BootstrapAppManifest {
+    name: "cto",
+    manifest: CTO_APP_MANIFEST,
+};
+const QDRANT_BOOTSTRAP_APP: BootstrapAppManifest = BootstrapAppManifest {
+    name: "qdrant",
+    manifest: QDRANT_APP_MANIFEST,
+};
+const MORGAN_BOOTSTRAP_APP: BootstrapAppManifest = BootstrapAppManifest {
+    name: "morgan",
+    manifest: MORGAN_APP_MANIFEST,
+};
+const FULL_BOOTSTRAP_APPS: [BootstrapAppManifest; 3] = [
+    CTO_BOOTSTRAP_APP,
+    QDRANT_BOOTSTRAP_APP,
+    MORGAN_BOOTSTRAP_APP,
+];
+const CONTROLLER_ONLY_BOOTSTRAP_APPS: [BootstrapAppManifest; 1] = [CTO_BOOTSTRAP_APP];
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -75,6 +150,14 @@ type BootstrapResult<T> = Result<T, String>;
 #[tauri::command]
 pub async fn bootstrap_local_stack(window: Window) -> BootstrapResult<BootstrapReport> {
     tracing::info!("bootstrap_local_stack invoked");
+    let app_mode = BootstrapAppMode::from_env()?;
+    if app_mode.skips_layered_apps() {
+        tracing::warn!(
+            "{BOOTSTRAP_TEST_MODE_ENV}={} enabled; qdrant and morgan Argo Applications will not be applied",
+            app_mode.label()
+        );
+    }
+
     emit(&window, "runtime", "Detecting container runtime...", 5);
     ensure_runtime_tool_paths_on_process();
 
@@ -114,8 +197,13 @@ pub async fn bootstrap_local_stack(window: Window) -> BootstrapResult<BootstrapR
         "300s",
     )?;
 
-    emit(&window, "tools", "Registering platform tools...", 86);
-    apply_manifest(CTO_APP_MANIFEST)?;
+    let app_message = if app_mode.skips_layered_apps() {
+        "Registering CTO app (test mode)..."
+    } else {
+        "Registering platform apps..."
+    };
+    emit(&window, "tools", app_message, 86);
+    apply_bootstrap_apps(app_mode)?;
 
     emit(&window, "ready", "Launching Codex App...", 100);
 
@@ -540,6 +628,16 @@ fn apply_manifest(manifest: &str) -> BootstrapResult<()> {
     apply_manifest_with_args(manifest, &["apply", "-f", "-"])
 }
 
+fn apply_bootstrap_apps(mode: BootstrapAppMode) -> BootstrapResult<()> {
+    for app in mode.manifests() {
+        tracing::info!("Applying {} Argo Application", app.name);
+        apply_manifest(app.manifest)
+            .map_err(|error| format!("Failed to apply {} Argo Application: {error}", app.name))?;
+    }
+
+    Ok(())
+}
+
 fn apply_manifest_with_args(manifest: &str, args: &[&str]) -> BootstrapResult<()> {
     let mut command = kubectl_command();
     command.args(args);
@@ -885,5 +983,54 @@ fn ensure_runtime_tool_paths_on_process() {
     entries.extend(current_entries);
     if let Ok(path) = std::env::join_paths(entries) {
         std::env::set_var("PATH", path);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{BootstrapAppMode, BOOTSTRAP_TEST_MODE_ENV};
+
+    #[test]
+    fn bootstrap_test_mode_defaults_to_full_for_empty_or_false_values() {
+        for value in ["", "0", "false", "full", "off"] {
+            assert_eq!(
+                BootstrapAppMode::parse(value).unwrap(),
+                BootstrapAppMode::Full
+            );
+        }
+    }
+
+    #[test]
+    fn bootstrap_test_mode_accepts_controller_only_values() {
+        for value in ["1", "true", "controller-only", "cto-only", "on"] {
+            assert_eq!(
+                BootstrapAppMode::parse(value).unwrap(),
+                BootstrapAppMode::ControllerOnly
+            );
+        }
+    }
+
+    #[test]
+    fn bootstrap_test_mode_rejects_unknown_values() {
+        let error = BootstrapAppMode::parse("qdrant-only").unwrap_err();
+        assert!(error.contains(BOOTSTRAP_TEST_MODE_ENV));
+        assert!(error.contains("controller-only"));
+    }
+
+    #[test]
+    fn bootstrap_app_order_is_full_by_default_and_cto_only_in_test_mode() {
+        let full_names: Vec<_> = BootstrapAppMode::Full
+            .manifests()
+            .iter()
+            .map(|app| app.name)
+            .collect();
+        assert_eq!(full_names, ["cto", "qdrant", "morgan"]);
+
+        let controller_only_names: Vec<_> = BootstrapAppMode::ControllerOnly
+            .manifests()
+            .iter()
+            .map(|app| app.name)
+            .collect();
+        assert_eq!(controller_only_names, ["cto"]);
     }
 }

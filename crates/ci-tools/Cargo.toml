@@ -1,0 +1,14 @@
+[package]
+name = "cto-ci-tools"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.77"
+license = "MIT"
+publish = false
+
+[[bin]]
+name = "cto-ci-assert"
+path = "src/main.rs"
+
+[dependencies]
+serde_json = "1"

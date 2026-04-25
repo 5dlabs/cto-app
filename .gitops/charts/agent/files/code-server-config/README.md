@@ -1,7 +1,7 @@
 # shared/code-server-config
 
 Canonical code-server configuration shared between the persistent Helm
-deployment (`infra/charts/openclaw-agent`) and the ephemeral controller-spawned
+OpenClaw gateway chart (`.gitops/charts/agent`) and the ephemeral controller-spawned
 CodeRun jobs (`crates/controller/src/tasks/code/resources.rs`).
 
 Both consumers **must** use these files so VS Code settings and workbench
@@ -17,7 +17,7 @@ state stay in lock-step.
 ## Consumers
 
 - **Helm** — included via a directory-level symlink at
-  `infra/charts/openclaw-agent/files/code-server-config` so Helm's
+  `.gitops/charts/agent/files/code-server-config` so Helm's
   `.Files.Get "files/code-server-config/<file>"` works despite the Helm
   restriction on paths that traverse `..`.
 - **Rust controller** — embedded with
