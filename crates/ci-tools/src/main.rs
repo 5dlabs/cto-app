@@ -1,9 +1,3 @@
-#![allow(
-    clippy::missing_errors_doc,
-    clippy::missing_panics_doc,
-    clippy::must_use_candidate
-)]
-
 use serde_json::Value;
 use std::env;
 use std::io::{self, Read, Write as _};
@@ -1830,7 +1824,6 @@ fn telemetry_disabled_observation(document: &Value) -> TelemetryDisabledObservat
 
 #[cfg(test)]
 mod tests {
-    #[allow(clippy::wildcard_imports)]
     use super::*;
     use serde_json::json;
 

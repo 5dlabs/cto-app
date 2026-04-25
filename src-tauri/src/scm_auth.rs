@@ -35,7 +35,7 @@ impl ScmProvider {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum ScmAuthStrategy {
     #[serde(rename = "github-app-manifest")]
     GitHubAppManifest,
@@ -45,7 +45,7 @@ pub enum ScmAuthStrategy {
     ManualToken,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum ScmConnectionStatus {
     #[serde(rename = "draft")]
     Draft,
@@ -120,15 +120,26 @@ pub struct ScmProvisioningPlan {
     pub warnings: Vec<String>,
 }
 
+struct ScmPlanBase {
+    connection_id: String,
+    display_name: String,
+    owner: String,
+    base_url: String,
+    local_callback_url: String,
+    webhook_url: Option<String>,
+    webhook_behavior: String,
+    now: String,
+}
+
 #[derive(Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ScmConnectionStore {
     connections: Vec<ScmConnection>,
 }
 
-#[allow(clippy::needless_pass_by_value)]
 #[tauri::command]
 pub fn list_scm_connections(app: AppHandle) -> ScmResult<Vec<ScmConnection>> {
+    let app = app;
     Ok(read_store(&app)?.connections)
 }
 
@@ -137,12 +148,12 @@ pub fn prepare_scm_provisioning(request: ScmProvisioningRequest) -> ScmResult<Sc
     build_provisioning_plan(request)
 }
 
-#[allow(clippy::needless_pass_by_value)]
 #[tauri::command]
 pub fn save_scm_connection(
     app: AppHandle,
     connection: ScmConnection,
 ) -> ScmResult<Vec<ScmConnection>> {
+    let app = app;
     validate_connection(&connection)?;
 
     let mut store = read_store(&app)?;
@@ -172,17 +183,17 @@ pub fn save_scm_connection(
     Ok(store.connections)
 }
 
-#[allow(clippy::needless_pass_by_value)]
 #[tauri::command]
 pub fn delete_scm_connection(
     app: AppHandle,
     provider: ScmProvider,
-    connection_id: &str,
+    connection_id: String,
 ) -> ScmResult<Vec<ScmConnection>> {
-    validate_connection_id(connection_id)?;
+    let app = app;
+    validate_connection_id(&connection_id)?;
 
     let mut store = read_store(&app)?;
-    store.connections.retain(|connection| {
+    store.connections.retain(move |connection| {
         !(connection.provider == provider && connection.connection_id == connection_id)
     });
     write_store(&app, &store)?;
@@ -203,7 +214,7 @@ fn build_provisioning_plan(request: ScmProvisioningRequest) -> ScmResult<ScmProv
     let connection_id = connection_id.trim().to_string();
     validate_connection_id(&connection_id)?;
 
-    let owner = owner.trim();
+    let owner = owner.trim().to_string();
     if owner.is_empty() {
         return Err("owner is required".to_string());
     }
@@ -245,72 +256,49 @@ fn build_provisioning_plan(request: ScmProvisioningRequest) -> ScmResult<ScmProv
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .unwrap_or(owner)
+        .unwrap_or(&owner)
         .to_string();
 
-    let plan = match provider {
-        ScmProvider::GitHub => github_plan(
-            connection_id,
-            display_name,
-            owner.to_string(),
-            base_url,
-            &local_callback_url,
-            webhook_url,
-            webhook_behavior,
-            repository_selection.unwrap_or_default(),
-            now,
-        ),
-        ScmProvider::GitLab => gitlab_plan(
-            connection_id,
-            display_name,
-            owner.to_string(),
-            base_url,
-            local_callback_url,
-            webhook_url,
-            webhook_behavior,
-            now,
-        ),
+    let plan_base = ScmPlanBase {
+        connection_id,
+        display_name,
+        owner,
+        base_url,
+        local_callback_url,
+        webhook_url,
+        webhook_behavior,
+        now,
     };
-    Ok(plan)
+
+    Ok(match provider {
+        ScmProvider::GitHub => github_plan(plan_base, repository_selection.unwrap_or_default()),
+        ScmProvider::GitLab => gitlab_plan(plan_base),
+    })
 }
 
-#[allow(clippy::too_many_arguments)]
 fn github_plan(
-    connection_id: String,
-    display_name: String,
-    owner: String,
-    base_url: String,
-    local_callback_url: &str,
-    webhook_url: Option<String>,
-    webhook_behavior: String,
+    plan_base: ScmPlanBase,
     repository_selection: RepositorySelection,
-    now: String,
 ) -> ScmProvisioningPlan {
+    let ScmPlanBase {
+        connection_id,
+        display_name,
+        owner,
+        base_url,
+        local_callback_url,
+        webhook_url,
+        webhook_behavior,
+        now,
+    } = plan_base;
     let secret_name = secret_name(ScmProvider::GitHub, &connection_id);
-    let secret_keys = vec![
-        "app-id".to_string(),
-        "client-id".to_string(),
-        "client-secret".to_string(),
-        "private-key".to_string(),
-        "webhook-secret".to_string(),
-        "installation-ids".to_string(),
-    ];
+    let secret_keys = github_secret_keys();
     let app_name = format!("CTO {display_name} {connection_id}");
-    let setup_urls = vec![
-        ScmSetupUrl {
-            label: "User-owned app".to_string(),
-            url: "https://github.com/settings/apps/new".to_string(),
-        },
-        ScmSetupUrl {
-            label: format!("Org-owned app ({owner})"),
-            url: format!("https://github.com/organizations/{owner}/settings/apps/new"),
-        },
-    ];
+    let setup_urls = github_setup_urls(&owner);
     let repository_selection_label = match repository_selection {
         RepositorySelection::All => "all",
         RepositorySelection::Selected => "selected",
     };
-    let callback_urls = vec![local_callback_url.to_string()];
+    let callback_urls = vec![local_callback_url.clone()];
     let github_manifest = json!({
         "name": app_name,
         "url": "http://localhost:8080/morgan",
@@ -363,35 +351,64 @@ fn github_plan(
         setup_urls,
         github_manifest: Some(github_manifest),
         gitlab_application_api_endpoint: None,
-        steps: vec![
-            "Copy the generated manifest JSON and create the GitHub App from \
-             the matching user/org setup URL."
-                .to_string(),
-            "Install the private app only on the repositories this CTO tenant should manage."
-                .to_string(),
-            "After GitHub redirects back with a manifest code, exchange it \
-             locally and store only this tenant's app credentials in the \
-             generated Kubernetes Secret."
-                .to_string(),
-        ],
-        warnings: vec![
-            "No shared 5dlabs GitHub App or PAT is used by this plan.".to_string(),
-            "Provider webhooks are disabled by default for localhost callbacks.".to_string(),
-        ],
+        steps: github_steps(),
+        warnings: github_warnings(),
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn gitlab_plan(
-    connection_id: String,
-    display_name: String,
-    owner: String,
-    base_url: String,
-    local_callback_url: String,
-    webhook_url: Option<String>,
-    webhook_behavior: String,
-    now: String,
-) -> ScmProvisioningPlan {
+fn github_secret_keys() -> Vec<String> {
+    strings(&[
+        "app-id",
+        "client-id",
+        "client-secret",
+        "private-key",
+        "webhook-secret",
+        "installation-ids",
+    ])
+}
+
+fn github_setup_urls(owner: &str) -> Vec<ScmSetupUrl> {
+    vec![
+        ScmSetupUrl {
+            label: "User-owned app".to_string(),
+            url: "https://github.com/settings/apps/new".to_string(),
+        },
+        ScmSetupUrl {
+            label: format!("Org-owned app ({owner})"),
+            url: format!("https://github.com/organizations/{owner}/settings/apps/new"),
+        },
+    ]
+}
+
+fn github_steps() -> Vec<String> {
+    strings(&[
+        "Copy the generated manifest JSON and create the GitHub App from \
+         the matching user/org setup URL.",
+        "Install the private app only on the repositories this CTO tenant should manage.",
+        "After GitHub redirects back with a manifest code, exchange it \
+         locally and store only this tenant's app credentials in the \
+         generated Kubernetes Secret.",
+    ])
+}
+
+fn github_warnings() -> Vec<String> {
+    strings(&[
+        "No shared 5dlabs GitHub App or PAT is used by this plan.",
+        "Provider webhooks are disabled by default for localhost callbacks.",
+    ])
+}
+
+fn gitlab_plan(plan_base: ScmPlanBase) -> ScmProvisioningPlan {
+    let ScmPlanBase {
+        connection_id,
+        display_name,
+        owner,
+        base_url,
+        local_callback_url,
+        webhook_url,
+        webhook_behavior,
+        now,
+    } = plan_base;
     let is_gitlab_dot_com = Url::parse(&base_url)
         .ok()
         .and_then(|url| {
@@ -410,22 +427,9 @@ fn gitlab_plan(
         ScmConnectionStatus::PendingInstall
     };
     let secret_name = secret_name(ScmProvider::GitLab, &connection_id);
-    let secret_keys = if is_gitlab_dot_com {
-        vec!["token".to_string()]
-    } else {
-        vec![
-            "application-id".to_string(),
-            "application-secret".to_string(),
-            "redirect-uri".to_string(),
-            "access-token".to_string(),
-            "refresh-token".to_string(),
-        ]
-    };
+    let secret_keys = gitlab_secret_keys(is_gitlab_dot_com);
     let api_endpoint = (!is_gitlab_dot_com).then(|| format!("{base_url}/api/v4/applications"));
-    let setup_urls = vec![ScmSetupUrl {
-        label: "GitLab applications".to_string(),
-        url: format!("{base_url}/admin/applications"),
-    }];
+    let setup_urls = gitlab_setup_urls(&base_url);
     let connection = ScmConnection {
         provider: ScmProvider::GitLab,
         connection_id,
@@ -444,36 +448,6 @@ fn gitlab_plan(
         updated_at: now,
     };
 
-    let mut steps = if is_gitlab_dot_com {
-        vec![
-            "Create a project or group access token in GitLab.com for the \
-             selected repositories/groups."
-                .to_string(),
-            "Store the token in the generated tenant-owned Kubernetes Secret.".to_string(),
-        ]
-    } else {
-        vec![
-            "If the authenticated user is an administrator, create the instance \
-             OAuth application via /api/v4/applications."
-                .to_string(),
-            "Otherwise create the GitLab application manually in Admin > Applications.".to_string(),
-            "Prefer project/group access tokens for unattended agents that only \
-             need selected repository access."
-                .to_string(),
-        ]
-    };
-    steps.push("Do not reuse 5dlabs global app credentials for this connection.".to_string());
-
-    let mut warnings =
-        vec!["Provider webhooks are disabled by default for localhost callbacks.".to_string()];
-    if is_gitlab_dot_com {
-        warnings.push(
-            "GitLab.com does not allow CTO to create an instance OAuth app; \
-             manual token provisioning is expected."
-                .to_string(),
-        );
-    }
-
     ScmProvisioningPlan {
         kubernetes_secret_name: secret_name,
         kubernetes_secret_keys: secret_keys,
@@ -483,9 +457,67 @@ fn gitlab_plan(
         setup_urls,
         github_manifest: None,
         gitlab_application_api_endpoint: api_endpoint,
-        steps,
-        warnings,
+        steps: gitlab_steps(is_gitlab_dot_com),
+        warnings: gitlab_warnings(is_gitlab_dot_com),
     }
+}
+
+fn gitlab_secret_keys(is_gitlab_dot_com: bool) -> Vec<String> {
+    if is_gitlab_dot_com {
+        strings(&["token"])
+    } else {
+        strings(&[
+            "application-id",
+            "application-secret",
+            "redirect-uri",
+            "access-token",
+            "refresh-token",
+        ])
+    }
+}
+
+fn gitlab_setup_urls(base_url: &str) -> Vec<ScmSetupUrl> {
+    vec![ScmSetupUrl {
+        label: "GitLab applications".to_string(),
+        url: format!("{base_url}/admin/applications"),
+    }]
+}
+
+fn gitlab_steps(is_gitlab_dot_com: bool) -> Vec<String> {
+    let mut steps = if is_gitlab_dot_com {
+        strings(&[
+            "Create a project or group access token in GitLab.com for the \
+             selected repositories/groups.",
+            "Store the token in the generated tenant-owned Kubernetes Secret.",
+        ])
+    } else {
+        strings(&[
+            "If the authenticated user is an administrator, create the instance \
+             OAuth application via /api/v4/applications.",
+            "Otherwise create the GitLab application manually in Admin > Applications.",
+            "Prefer project/group access tokens for unattended agents that only \
+             need selected repository access.",
+        ])
+    };
+    steps.push("Do not reuse 5dlabs global app credentials for this connection.".to_string());
+    steps
+}
+
+fn gitlab_warnings(is_gitlab_dot_com: bool) -> Vec<String> {
+    let mut warnings =
+        strings(&["Provider webhooks are disabled by default for localhost callbacks."]);
+    if is_gitlab_dot_com {
+        warnings.push(
+            "GitLab.com does not allow CTO to create an instance OAuth app; \
+             manual token provisioning is expected."
+                .to_string(),
+        );
+    }
+    warnings
+}
+
+fn strings(values: &[&str]) -> Vec<String> {
+    values.iter().copied().map(str::to_string).collect()
 }
 
 fn validate_connection(connection: &ScmConnection) -> ScmResult<()> {
