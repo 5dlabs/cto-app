@@ -11,7 +11,7 @@ type ScmResult<T> = Result<T, String>;
 const CONNECTION_ID_MAX_LEN: usize = 48;
 const LOCAL_CALLBACK_BASE_URL: &str = "http://localhost:8080";
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum ScmProvider {
     #[serde(rename = "github")]
     GitHub,
@@ -20,14 +20,14 @@ pub enum ScmProvider {
 }
 
 impl ScmProvider {
-    const fn slug(&self) -> &'static str {
+    const fn slug(self) -> &'static str {
         match self {
             Self::GitHub => "github",
             Self::GitLab => "gitlab",
         }
     }
 
-    const fn default_base_url(&self) -> &'static str {
+    const fn default_base_url(self) -> &'static str {
         match self {
             Self::GitHub => "https://github.com",
             Self::GitLab => "https://gitlab.com",
@@ -57,7 +57,7 @@ pub enum ScmConnectionStatus {
     Ready,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub enum RepositorySelection {
     #[serde(rename = "all")]
     All,
@@ -126,6 +126,7 @@ struct ScmConnectionStore {
     connections: Vec<ScmConnection>,
 }
 
+#[allow(clippy::needless_pass_by_value)]
 #[tauri::command]
 pub fn list_scm_connections(app: AppHandle) -> ScmResult<Vec<ScmConnection>> {
     Ok(read_store(&app)?.connections)
@@ -136,6 +137,7 @@ pub fn prepare_scm_provisioning(request: ScmProvisioningRequest) -> ScmResult<Sc
     build_provisioning_plan(request)
 }
 
+#[allow(clippy::needless_pass_by_value)]
 #[tauri::command]
 pub fn save_scm_connection(
     app: AppHandle,
@@ -151,7 +153,7 @@ pub fn save_scm_connection(
     if let Some(existing) = store.connections.iter_mut().find(|candidate| {
         candidate.provider == next.provider && candidate.connection_id == next.connection_id
     }) {
-        next.created_at = existing.created_at.clone();
+        next.created_at.clone_from(&existing.created_at);
         *existing = next;
     } else {
         if next.created_at.trim().is_empty() {
@@ -170,13 +172,14 @@ pub fn save_scm_connection(
     Ok(store.connections)
 }
 
+#[allow(clippy::needless_pass_by_value)]
 #[tauri::command]
 pub fn delete_scm_connection(
     app: AppHandle,
     provider: ScmProvider,
-    connection_id: String,
+    connection_id: &str,
 ) -> ScmResult<Vec<ScmConnection>> {
-    validate_connection_id(&connection_id)?;
+    validate_connection_id(connection_id)?;
 
     let mut store = read_store(&app)?;
     store.connections.retain(|connection| {
@@ -187,37 +190,45 @@ pub fn delete_scm_connection(
 }
 
 fn build_provisioning_plan(request: ScmProvisioningRequest) -> ScmResult<ScmProvisioningPlan> {
-    let connection_id = request.connection_id.trim().to_string();
+    let ScmProvisioningRequest {
+        provider,
+        connection_id,
+        display_name,
+        owner,
+        base_url,
+        callback_base_url,
+        repository_selection,
+    } = request;
+
+    let connection_id = connection_id.trim().to_string();
     validate_connection_id(&connection_id)?;
 
-    let owner = request.owner.trim();
+    let owner = owner.trim();
     if owner.is_empty() {
         return Err("owner is required".to_string());
     }
 
     let base_url = normalize_url(
-        request
-            .base_url
+        base_url
             .as_deref()
-            .unwrap_or_else(|| request.provider.default_base_url()),
+            .unwrap_or_else(|| provider.default_base_url()),
     )?;
     let callback_base_url = normalize_url(
-        request
-            .callback_base_url
+        callback_base_url
             .as_deref()
             .unwrap_or(LOCAL_CALLBACK_BASE_URL),
     )?;
     let local_callback_url = format!(
         "{}/morgan/source-control/{}/callback",
         callback_base_url,
-        request.provider.slug()
+        provider.slug()
     );
     let public_callback = !is_local_url(&callback_base_url)?;
     let webhook_url = public_callback.then(|| {
         format!(
             "{}/morgan/source-control/{}/webhook",
             callback_base_url,
-            request.provider.slug()
+            provider.slug()
         )
     });
     let webhook_behavior = if public_callback {
@@ -230,24 +241,23 @@ fn build_provisioning_plan(request: ScmProvisioningRequest) -> ScmResult<ScmProv
             .to_string()
     };
     let now = now_stamp();
-    let display_name = request
-        .display_name
+    let display_name = display_name
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .unwrap_or(owner)
         .to_string();
 
-    match request.provider {
+    let plan = match provider {
         ScmProvider::GitHub => github_plan(
             connection_id,
             display_name,
             owner.to_string(),
             base_url,
-            local_callback_url,
+            &local_callback_url,
             webhook_url,
             webhook_behavior,
-            request.repository_selection.unwrap_or_default(),
+            repository_selection.unwrap_or_default(),
             now,
         ),
         ScmProvider::GitLab => gitlab_plan(
@@ -260,7 +270,8 @@ fn build_provisioning_plan(request: ScmProvisioningRequest) -> ScmResult<ScmProv
             webhook_behavior,
             now,
         ),
-    }
+    };
+    Ok(plan)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -269,12 +280,12 @@ fn github_plan(
     display_name: String,
     owner: String,
     base_url: String,
-    local_callback_url: String,
+    local_callback_url: &str,
     webhook_url: Option<String>,
     webhook_behavior: String,
     repository_selection: RepositorySelection,
     now: String,
-) -> ScmResult<ScmProvisioningPlan> {
+) -> ScmProvisioningPlan {
     let secret_name = secret_name(ScmProvider::GitHub, &connection_id);
     let secret_keys = vec![
         "app-id".to_string(),
@@ -284,7 +295,7 @@ fn github_plan(
         "webhook-secret".to_string(),
         "installation-ids".to_string(),
     ];
-    let app_name = format!("CTO {} {}", display_name, connection_id);
+    let app_name = format!("CTO {display_name} {connection_id}");
     let setup_urls = vec![
         ScmSetupUrl {
             label: "User-owned app".to_string(),
@@ -299,7 +310,7 @@ fn github_plan(
         RepositorySelection::All => "all",
         RepositorySelection::Selected => "selected",
     };
-    let callback_urls = vec![local_callback_url.clone()];
+    let callback_urls = vec![local_callback_url.to_string()];
     let github_manifest = json!({
         "name": app_name,
         "url": "http://localhost:8080/morgan",
@@ -343,7 +354,7 @@ fn github_plan(
         updated_at: now,
     };
 
-    Ok(ScmProvisioningPlan {
+    ScmProvisioningPlan {
         kubernetes_secret_name: secret_name,
         kubernetes_secret_keys: secret_keys,
         local_callback_url: connection.callback_url.clone(),
@@ -367,7 +378,7 @@ fn github_plan(
             "No shared 5dlabs GitHub App or PAT is used by this plan.".to_string(),
             "Provider webhooks are disabled by default for localhost callbacks.".to_string(),
         ],
-    })
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -380,7 +391,7 @@ fn gitlab_plan(
     webhook_url: Option<String>,
     webhook_behavior: String,
     now: String,
-) -> ScmResult<ScmProvisioningPlan> {
+) -> ScmProvisioningPlan {
     let is_gitlab_dot_com = Url::parse(&base_url)
         .ok()
         .and_then(|url| {
@@ -463,7 +474,7 @@ fn gitlab_plan(
         );
     }
 
-    Ok(ScmProvisioningPlan {
+    ScmProvisioningPlan {
         kubernetes_secret_name: secret_name,
         kubernetes_secret_keys: secret_keys,
         local_callback_url,
@@ -474,12 +485,12 @@ fn gitlab_plan(
         gitlab_application_api_endpoint: api_endpoint,
         steps,
         warnings,
-    })
+    }
 }
 
 fn validate_connection(connection: &ScmConnection) -> ScmResult<()> {
     validate_connection_id(&connection.connection_id)?;
-    let expected_secret_name = secret_name(connection.provider.clone(), &connection.connection_id);
+    let expected_secret_name = secret_name(connection.provider, &connection.connection_id);
     if connection.secret_name != expected_secret_name {
         return Err(format!(
             "secretName must be tenant-owned and equal to {expected_secret_name}"
