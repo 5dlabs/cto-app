@@ -3,14 +3,21 @@ use tauri::Manager;
 mod bootstrap;
 mod scm_auth;
 
-#[allow(clippy::missing_panics_doc)]
 #[tauri::command]
 fn app_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }
 
+/// Runs the CTO Desktop Tauri application.
+///
+/// # Panics
+///
+/// Panics if Tauri cannot initialize or run the desktop event loop.
+#[expect(
+    clippy::exit,
+    reason = "tauri::generate_context! expands to process::exit for context creation panic handling"
+)]
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
-#[allow(clippy::missing_panics_doc)]
 pub fn run() {
     tracing_subscriber::fmt()
         .with_env_filter(

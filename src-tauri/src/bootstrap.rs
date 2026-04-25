@@ -161,7 +161,7 @@ pub async fn bootstrap_local_stack(window: Window) -> BootstrapResult<BootstrapR
     emit(&window, "runtime", "Detecting container runtime...", 5);
     ensure_runtime_tool_paths_on_process();
 
-    let runtime_kind = ensure_container_runtime(&window).await?;
+    let runtime_kind = ensure_container_runtime(&window)?;
     let _ = ACTIVE_RUNTIME.set(runtime_kind);
     let runtime = runtime_kind.label().to_string();
 
@@ -181,7 +181,7 @@ pub async fn bootstrap_local_stack(window: Window) -> BootstrapResult<BootstrapR
 
     emit(&window, "gitops", "Starting GitOps controller...", 68);
     ensure_namespace(ARGOCD_NAMESPACE)?;
-    install_argocd().await?;
+    install_argocd()?;
     wait_for_crd("applications.argoproj.io", "120s")?;
     wait_for_crd("appprojects.argoproj.io", "120s")?;
     wait_for_rollout(ARGOCD_NAMESPACE, "deployment/argocd-server", "300s")?;
@@ -271,8 +271,7 @@ fn active_runtime() -> Option<RuntimeKind> {
     ACTIVE_RUNTIME.get().copied().or_else(detect_runtime_kind)
 }
 
-#[allow(clippy::unused_async)]
-async fn ensure_container_runtime(window: &Window) -> BootstrapResult<RuntimeKind> {
+fn ensure_container_runtime(window: &Window) -> BootstrapResult<RuntimeKind> {
     match std::env::consts::OS {
         "macos" => ensure_macos_colima(window),
         "linux" => ensure_linux_podman(window),
@@ -760,8 +759,7 @@ fn helm_command() -> Command {
     command
 }
 
-#[allow(clippy::unused_async)]
-async fn install_argocd() -> BootstrapResult<()> {
+fn install_argocd() -> BootstrapResult<()> {
     // Register the argo-helm repo (idempotent) and refresh its index.
     {
         let mut cmd = helm_command();
