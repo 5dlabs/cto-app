@@ -177,6 +177,13 @@ async function rpc(method, params) {
 
 function parseToolResult(result, name) {
   const text = result?.content?.find((item) => item.type === "text")?.text;
+  if (result?.isError) {
+    throw new ToolError(
+      ErrorCodes.SERVER_ERROR,
+      text ?? `Tool ${name} returned an MCP error result`,
+      result,
+    );
+  }
   if (text === undefined) {
     throw new ToolError(
       ErrorCodes.SERVER_ERROR,
@@ -222,7 +229,7 @@ export async function describeTool(name) {
 }
 
 export async function callTool(name, args = {}) {
-  assertRemoteToolAllowed(name);
+  await describeTool(name);
   const result = await rpc("tools/call", { name, arguments: args });
   return parseToolResult(result, name);
 }
