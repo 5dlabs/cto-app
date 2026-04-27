@@ -25,14 +25,26 @@ pub fn run() {
         )
         .init();
 
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_os::init())
-        .plugin(tauri_plugin_store::Builder::default().build())
+        .plugin(tauri_plugin_store::Builder::default().build());
+
+    #[cfg(debug_assertions)]
+    {
+        builder = builder.plugin(tauri_plugin_mcp::init_with_config(
+            tauri_plugin_mcp::PluginConfig::new("CTO Desktop".to_string())
+                .start_socket_server(true)
+                .socket_path(std::path::PathBuf::from("/tmp/tauri-mcp.sock"))
+                .default_webview_label("main".to_string()),
+        ));
+    }
+
+    builder
         .setup(|app| {
             #[cfg(debug_assertions)]
             {
@@ -46,7 +58,10 @@ pub fn run() {
             app_version,
             bootstrap::bootstrap_local_stack,
             bootstrap::bootstrap_probe,
+            bootstrap::local_stack_bootstrap_defaults,
+            bootstrap::local_stack_resource_metrics,
             scm_auth::delete_scm_connection,
+            scm_auth::exchange_github_manifest_code,
             scm_auth::list_scm_connections,
             scm_auth::prepare_scm_provisioning,
             scm_auth::save_scm_connection

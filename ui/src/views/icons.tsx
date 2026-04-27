@@ -112,6 +112,7 @@ export const IconPlus = (p: IconProps) => (
     <path d="M5 12h14" />
   </Icon>
 );
+export const IconChevLeft = (p: IconProps) => <Icon {...p} d="M15 6l-6 6 6 6" />;
 export const IconChevRight = (p: IconProps) => <Icon {...p} d="M9 6l6 6-6 6" />;
 export const IconChevDown = (p: IconProps) => <Icon {...p} d="M6 9l6 6 6-6" />;
 export const IconFolder = (p: IconProps) => (

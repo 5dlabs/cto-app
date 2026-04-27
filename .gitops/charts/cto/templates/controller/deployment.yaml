@@ -17,6 +17,7 @@ spec:
         {{- include "cto.controller.selectorLabels" . | nindent 8 }}
       annotations:
         checksum/config: {{ include (print $.Template.BasePath "/controller/configmap.yaml") . | sha256sum }}
+        checksum/task-config: {{ include (print $.Template.BasePath "/controller/task-controller-config.yaml") . | sha256sum }}
     spec:
       {{- include "cto.imagePullSecrets" . | nindent 6 }}
       serviceAccountName: {{ include "cto.controller.serviceAccountName" . }}
@@ -41,6 +42,8 @@ spec:
               value: "/data/skills-cache"
             {{- end }}
           volumeMounts:
+            - name: config
+              mountPath: /config
             {{- if .Values.controller.skillsCache.enabled }}
             - name: skills-cache
               mountPath: /data/skills-cache
@@ -60,6 +63,9 @@ spec:
             initialDelaySeconds: 10
             periodSeconds: 30
       volumes:
+        - name: config
+          configMap:
+            name: task-controller-config
         {{- if .Values.controller.skillsCache.enabled }}
         - name: skills-cache
           persistentVolumeClaim:

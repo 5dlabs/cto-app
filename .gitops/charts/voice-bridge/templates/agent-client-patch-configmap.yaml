@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "voice-bridge.fullname" . }}-agent-client-patch
+  namespace: {{ include "voice-bridge.namespace" . }}
+  labels:
+    {{- include "voice-bridge.labels" . | nindent 4 }}
+data:
+  main.py: |
+{{ .Files.Get "files/main.py" | indent 4 }}
+  agent_client.py: |
+{{ .Files.Get "files/agent_client.py" | indent 4 }}
+  elevenlabs_client.py: |
+{{ .Files.Get "files/elevenlabs_client.py" | indent 4 }}

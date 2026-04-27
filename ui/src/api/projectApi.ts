@@ -16,9 +16,11 @@
  */
 
 /**
- * Workflow state derived from `.prd/PRD.md` YAML frontmatter `status:`.
+ * Workflow state derived from the Morgan PRD file frontmatter `status:`.
+ * Current OpenClaw projects use `.plan/prd/prd.md`; older projects may still
+ * report equivalent state from legacy `.prd/PRD.md`.
  * `"drafting"` — PRD exists but not yet signed off by Morgan + user.
- * `"ready"` — PRD is frozen, intake is eligible to run (architecture.md
+ * `"ready"` — PRD is frozen, intake is eligible to run (the architecture spec
  * is tracked separately via `hasArchitecture`). The sidecar defaults to
  * `"drafting"` whenever a PRD is present but the field is missing or
  * unrecognized — tiles never silently disappear.
@@ -40,10 +42,10 @@ export interface ProjectDescriptor {
   name: string;
   /** Absolute path on the Morgan PVC, e.g. `/workspace/repos/foo`. */
   path: string;
-  /** True when `.prd/PRD.md` exists (on GitHub default branch for remote-only listings, or on disk for cloned). */
+  /** True when the Morgan PRD exists on GitHub or in the cloned workspace. */
   hasPrd: boolean;
   /**
-   * True when `.prd/architecture.md` is also present — required alongside
+   * True when the Morgan architecture spec is also present — required alongside
    * `state === "ready"` for the "ready for intake" tile CTA.
    */
   hasArchitecture: boolean;

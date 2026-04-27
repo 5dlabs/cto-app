@@ -23,6 +23,30 @@ kbd { font-family: "JetBrains Mono", ui-monospace, monospace; }
   background: var(--bg-app, #0b0d12);
   overflow: hidden;
 }
+.app-shell--focus {
+  grid-template-rows: 1fr;
+}
+.app-shell--focus .shell-body {
+  grid-template-columns: 1fr;
+}
+.app-shell--focus .content {
+  padding: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.app-shell--morgan {
+  grid-template-rows: 36px minmax(0, 1fr);
+}
+.app-shell--morgan .shell-body {
+  grid-template-columns: minmax(0, 1fr);
+}
+.app-shell--morgan .content {
+  padding: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
 
 .titlebar {
   display: grid;
@@ -41,6 +65,23 @@ kbd { font-family: "JetBrains Mono", ui-monospace, monospace; }
   display: flex; align-items: center; gap: 8px;
   font-weight: 600; color: var(--fg-primary, #e6e7eb);
   letter-spacing: 0.2px;
+}
+.titlebar__brand--interactive {
+  -webkit-app-region: no-drag;
+}
+.titlebar--morgan {
+  grid-template-columns: minmax(140px, 1fr) auto minmax(140px, 1fr);
+}
+.titlebar__center {
+  justify-self: center;
+  color: var(--fg-muted, #8d94a5);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.titlebar__morgan-label {
+  color: var(--fg-primary, #e6e7eb);
+  font-weight: 600;
 }
 .titlebar__search {
   -webkit-app-region: no-drag;
@@ -81,6 +122,10 @@ kbd { font-family: "JetBrains Mono", ui-monospace, monospace; }
   color: #06121a; border-color: transparent; font-weight: 600;
 }
 .primary-btn:hover { filter: brightness(1.05); }
+.ghost-btn--compact {
+  height: 24px;
+  padding: 0 8px;
+}
 .primary-btn--icon, .ghost-btn--icon {
   width: 24px; padding: 0; justify-content: center; gap: 0;
   flex: 0 0 24px;

@@ -5,8 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "web:dev": "VITE_CTO_SKIP_LOCAL_STACK_BOOTSTRAP=1 vite --host localhost --port 5173 --strictPort=false",
     "build": "tsc && vite build",
     "preview": "vite preview",
+    "web:preview": "VITE_CTO_SKIP_LOCAL_STACK_BOOTSTRAP=1 vite preview --host localhost --port 4173 --strictPort=false",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -19,7 +21,8 @@
     "@tauri-apps/plugin-shell": "^2.0.0",
     "@tauri-apps/plugin-store": "^2.0.0",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "tauri-plugin-mcp": "^0.1.0"
   },
   "devDependencies": {
     "@types/react": "^18.3.12",

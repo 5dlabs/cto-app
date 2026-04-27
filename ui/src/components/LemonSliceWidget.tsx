@@ -4,13 +4,16 @@ import { useEffect, useRef } from "react";
  * LemonSlice agent IDs — two separate agents, never mix them up.
  *
  * PRODUCT (teams) Morgan — agent_3adc6522f21cc204
- *   Talks to operators / paying teams. Default for the CTO desktop app.
+ *   Historical hosted LemonSlice widget agent. Desktop does not use it as an
+ *   implicit fallback because the account-side avatar can drift.
  *
  * INVESTOR Morgan — agent_0b8ca791bd37c632
  *   Used on /pitch CTA on the marketing site; not used inside the app.
  */
 export const PRODUCT_MORGAN_AGENT_ID = "agent_3adc6522f21cc204";
 export const INVESTOR_MORGAN_AGENT_ID = "agent_0b8ca791bd37c632";
+export const CONFIGURED_PRODUCT_MORGAN_AGENT_ID =
+  import.meta.env.VITE_LEMONSLICE_PRODUCT_MORGAN_AGENT_ID?.trim() || "";
 
 const LEMON_SLICE_SCRIPT =
   "https://unpkg.com/@lemonsliceai/lemon-slice-widget@1.0.27/dist/index.js";
@@ -26,7 +29,7 @@ interface LemonSliceWidgetElement extends HTMLElement {
 }
 
 interface LemonSliceWidgetProps {
-  agentId?: string;
+  agentId: string;
   initialState?: "active" | "minimized";
   inline?: boolean;
   className?: string;
@@ -48,23 +51,25 @@ function ensureScript() {
 }
 
 export function LemonSliceWidget({
-  agentId = PRODUCT_MORGAN_AGENT_ID,
+  agentId,
   initialState = "active",
   inline = true,
   className,
   autoStartConversation = true,
 }: LemonSliceWidgetProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const normalizedAgentId = agentId.trim();
 
   useEffect(() => {
+    if (!normalizedAgentId) return;
     ensureScript();
     const containerEl = containerRef.current;
     if (!containerEl) return;
 
-    const widgetKey = `${agentId}::${initialState}::${inline ? "inline" : "floating"}`;
+    const widgetKey = `${normalizedAgentId}::${initialState}::${inline ? "inline" : "floating"}`;
     if (!sharedWidgetEl || sharedWidgetKey !== widgetKey) {
       const next = document.createElement(WIDGET_HOST_TAG) as LemonSliceWidgetElement;
-      next.setAttribute("agent-id", agentId);
+      next.setAttribute("agent-id", normalizedAgentId);
       next.setAttribute("initial-state", initialState);
       if (initialState === "active") {
         next.setAttribute("controlled-widget-state", "active");
@@ -117,20 +122,31 @@ export function LemonSliceWidget({
     const startConversation = async () => {
       if (!autoStartConversation || conversationStarted) return;
       try {
+        if (typeof el.unmute === "function" && (!el.canUnmute || el.canUnmute())) {
+          await el.unmute();
+        }
         if (typeof el.micOn !== "function") return;
         await el.micOn();
         conversationStarted = true;
-      } catch {
-        // retry via timers below
+      } catch (error) {
+        if (!(error instanceof DOMException && error.name === "NotAllowedError")) {
+          console.debug("LemonSlice auto-start deferred until user interaction.", error);
+        }
       }
     };
 
     const timers: number[] = [];
+    const scheduleStart = (delayMs: number) => {
+      const timer = window.setTimeout(() => {
+        void startConversation();
+      }, delayMs);
+      timers.push(timer);
+    };
+
     if (typeof window !== "undefined" && window.customElements) {
       void window.customElements.whenDefined("lemon-slice-widget").then(() => {
-        // Intentionally do not auto-call media actions here. Browsers reject
-        // media playback before user interaction, causing noisy NotAllowedError
-        // logs. We start only on first pointer interaction below.
+        if (!autoStartConversation) return;
+        [250, 1_000, 2_500].forEach(scheduleStart);
       });
     }
 
@@ -150,7 +166,7 @@ export function LemonSliceWidget({
       document.removeEventListener("pointerdown", handleFirstInteraction, true);
       if (el.parentElement === containerEl) containerEl.removeChild(el);
     };
-  }, [agentId, initialState, inline, autoStartConversation]);
+  }, [normalizedAgentId, initialState, inline, autoStartConversation]);
 
   return <div ref={containerRef} className={className} style={{ width: "100%", height: "100%" }} />;
 }

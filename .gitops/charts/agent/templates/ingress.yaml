@@ -1,5 +1,7 @@
 {{- if .Values.localIngress.enabled }}
 {{- $pathBase := .Values.localIngress.pathBase | default (printf "/%s" (include "agent.fullname" .)) -}}
+{{- $voiceServiceName := .Values.localIngress.voice.serviceName | default (include "agent.fullname" .) -}}
+{{- $voicePortName := .Values.localIngress.voice.servicePortName | default "gateway" -}}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -55,13 +57,19 @@ spec:
                 port:
                   name: narr-huny
           {{- end }}
+          {{- if dig "voice" "enabled" true .Values.localIngress }}
           - path: {{ printf "%s/voice(/|$)(.*)" $pathBase | quote }}
             pathType: {{ .Values.localIngress.pathType | default "ImplementationSpecific" }}
             backend:
               service:
-                name: {{ include "agent.fullname" . }}
+                name: {{ $voiceServiceName }}
                 port:
-                  name: gateway
+                  {{- if .Values.localIngress.voice.servicePortNumber }}
+                  number: {{ .Values.localIngress.voice.servicePortNumber }}
+                  {{- else }}
+                  name: {{ $voicePortName }}
+                  {{- end }}
+          {{- end }}
           - path: {{ printf "%s(/|$)(.*)" $pathBase | quote }}
             pathType: {{ .Values.localIngress.pathType | default "ImplementationSpecific" }}
             backend:

@@ -277,7 +277,18 @@ spec:
               else
                 echo "[tools] supergateway already present"
               fi
-              printf '#!/bin/sh\nBASE_URL="${TOOL_SERVER_URL:-{{ .Values.toolServer.url }}}"\nBASE_URL="${BASE_URL%/}"\ncase "$BASE_URL" in\n  */sse) MCP_URL="${BASE_URL%/sse}/mcp" ;;\n  */mcp) MCP_URL="$BASE_URL" ;;\n  *) MCP_URL="${BASE_URL}/mcp" ;;\nesac\nexec /workspace/.npm-global/bin/supergateway --streamableHttp "$MCP_URL" "$@"\n' > /workspace/.local/bin/tools
+              cat > /workspace/.local/bin/tools <<'TOOLSEOF'
+              #!/bin/sh
+              BASE_URL="${TOOL_SERVER_URL:-{{ .Values.toolServer.url }}}"
+              BASE_URL="${BASE_URL%/}"
+              case "$BASE_URL" in
+                */sse) MCP_URL="${BASE_URL%/sse}/mcp" ;;
+                */mcp) MCP_URL="$BASE_URL" ;;
+                *) MCP_URL="${BASE_URL}/mcp" ;;
+              esac
+              exec /workspace/.npm-global/bin/supergateway --streamableHttp "$MCP_URL" "$@"
+              TOOLSEOF
+              sed -i 's/^              //' /workspace/.local/bin/tools
               chmod +x /workspace/.local/bin/tools
               echo "[tools] tools MCP proxy ready"
 
@@ -291,7 +302,7 @@ spec:
                 echo "[cli] codex auth.json written from sub1"
 
                 # Generate OpenClaw auth-profiles.json from Codex OAuth tokens
-                AGENT_DIR="/workspace/.openclaw/agents/{{ .Values.agent.name | default "agent" }}/agent"
+                AGENT_DIR="/workspace/.openclaw/agents/{{ .Values.agent.id | default "agent" }}/agent"
                 mkdir -p "$AGENT_DIR"
                 export AGENT_DIR
                 echo "aW1wb3J0IGpzb24sIG9zLCBiYXNlNjQsIHN5cwp0cnk6CiAgICB3aXRoIG9wZW4oIi93b3Jrc3BhY2UvLmNvZGV4L2F1dGguanNvbiIpIGFzIGY6CiAgICAgICAgY29kZXggPSBqc29uLmxvYWQoZikKICAgIHQgPSBjb2RleC5nZXQoInRva2VucyIsIGNvZGV4KQogICAgYXQgPSB0LmdldCgiYWNjZXNzX3Rva2VuIiwgdC5nZXQoImFjY2Vzc1Rva2VuIiwgIiIpKQogICAgcnQgPSB0LmdldCgicmVmcmVzaF90b2tlbiIsIHQuZ2V0KCJyZWZyZXNoVG9rZW4iLCAiIikpCiAgICBhaWQgPSB0LmdldCgiYWNjb3VudF9pZCIsIHQuZ2V0KCJhY2NvdW50SWQiLCAiIikpCiAgICBleHAgPSAiIgogICAgdHJ5OgogICAgICAgIHBheWxvYWQgPSBqc29uLmxvYWRzKGJhc2U2NC51cmxzYWZlX2I2NGRlY29kZShhdC5zcGxpdCgiLiIpWzFdICsgIj09IikpCiAgICAgICAgZnJvbSBkYXRldGltZSBpbXBvcnQgZGF0ZXRpbWUsIHRpbWV6b25lCiAgICAgICAgZXhwID0gZGF0ZXRpbWUuZnJvbXRpbWVzdGFtcChwYXlsb2FkWyJleHAiXSwgdHo9dGltZXpvbmUudXRjKS5pc29mb3JtYXQoKS5yZXBsYWNlKCIrMDA6MDAiLCJaIikKICAgIGV4Y2VwdCBFeGNlcHRpb246CiAgICAgICAgZnJvbSBkYXRldGltZSBpbXBvcnQgZGF0ZXRpbWUsIHRpbWV6b25lLCB0aW1lZGVsdGEKICAgICAgICBleHAgPSAoZGF0ZXRpbWUubm93KHRpbWV6b25lLnV0YykgKyB0aW1lZGVsdGEoZGF5cz0zKSkuaXNvZm9ybWF0KCkucmVwbGFjZSgiKzAwOjAwIiwiWiIpCiAgICBwcm9maWxlcyA9IHsidmVyc2lvbiI6IDEsICJwcm9maWxlcyI6IHsib3BlbmFpLWNvZGV4OmRlZmF1bHQiOiB7InByb3ZpZGVyIjogIm9wZW5haS1jb2RleCIsICJ0eXBlIjogIm9hdXRoIiwgImFjY2Vzc1Rva2VuIjogYXQsICJyZWZyZXNoVG9rZW4iOiBydCwgImFjY291bnRJZCI6IGFpZCwgImV4cGlyZXMiOiBleHAsICJleHBpcmVzQXQiOiBleHAsICJzb3VyY2UiOiAibWFudWFsIiwgIm1hbmFnZWRCeSI6ICJjb2RleC1jbGkifX0sICJvcmRlciI6IFsib3BlbmFpLWNvZGV4OmRlZmF1bHQiXX0KICAgIGFnZW50X2RpciA9IG9zLmVudmlyb24uZ2V0KCJBR0VOVF9ESVIiLCAiL3dvcmtzcGFjZS8ub3BlbmNsYXcvYWdlbnRzL2FnZW50L2FnZW50IikKICAgIG91dCA9IG9zLnBhdGguam9pbihhZ2VudF9kaXIsICJhdXRoLXByb2ZpbGVzLmpzb24iKQogICAgd2l0aCBvcGVuKG91dCwgInciKSBhcyBmOgogICAgICAgIGpzb24uZHVtcChwcm9maWxlcywgZiwgaW5kZW50PTIpCiAgICBvcy5jaG1vZChvdXQsIDBvNjAwKQogICAgcHJpbnQoIltvcGVuY2xhd10gYXV0aC1wcm9maWxlcy5qc29uIHdyaXR0ZW4sIGV4cGlyZXM6IiwgZXhwKQpleGNlcHQgRXhjZXB0aW9uIGFzIGU6CiAgICBwcmludCgiW29wZW5jbGF3XSBhdXRoLXByb2ZpbGVzLmpzb24gZ2VuZXJhdGlvbiBmYWlsZWQ6IiwgZSwgZmlsZT1zeXMuc3RkZXJyKQo=" | base64 -d | python3
@@ -731,6 +742,17 @@ spec:
               export HOME=/workspace
               export PATH="/workspace/.local/bin:/usr/local/share/npm-global/bin:/usr/local/bin:$PATH"
               export OPENCLAW_CONFIG=/workspace/.openclaw/openclaw.json
+              {{- $openclaw := index .Values "openclaw" | default dict }}
+              {{- if $openclaw.version }}
+              CURRENT_OPENCLAW_VERSION="$(node -e 'try{process.stdout.write(require("/usr/local/share/npm-global/lib/node_modules/openclaw/package.json").version)}catch(e){process.exit(1)}' 2>/dev/null || true)"
+              if [ "$CURRENT_OPENCLAW_VERSION" != "{{ $openclaw.version }}" ]; then
+                echo "[openclaw] Installing OpenClaw {{ $openclaw.version }} (current: ${CURRENT_OPENCLAW_VERSION:-missing})"
+                npm install -g --no-audit --no-fund "openclaw@{{ $openclaw.version }}" || {
+                  echo "[openclaw] ERROR: failed to install OpenClaw {{ $openclaw.version }}"
+                  exit 1
+                }
+              fi
+              {{- end }}
               if [ -f /workspace/.acpxrc.json.chart ]; then
                 cp -f /workspace/.acpxrc.json.chart /workspace/.acpxrc.json 2>/dev/null || true
                 chmod 644 /workspace/.acpxrc.json 2>/dev/null || true
@@ -1347,8 +1369,6 @@ spec:
                 --disable-telemetry \
                 --user-data-dir /workspace/.code-server \
                 --extensions-dir "$EXTDIR" \
-                --disable-extension GitHub.copilot-chat \
-                --disable-extension GitHub.copilot \
                 {{ .Values.codeServer.defaultFolder | default "/workspace" }}
           env:
             - name: PASSWORD
@@ -1416,6 +1436,23 @@ spec:
         - name: project-api
           image: "{{ .Values.projectApi.image.repository }}:{{ .Values.projectApi.image.tag }}"
           imagePullPolicy: {{ .Values.projectApi.image.pullPolicy }}
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              if [ -x /app/project-api ]; then
+                exec /app/project-api
+              fi
+              if [ -f /app/src/index.ts ]; then
+                cd /app
+                exec bun run src/index.ts
+              fi
+              if [ -f /app/index.ts ]; then
+                cd /app
+                exec bun run index.ts
+              fi
+              exec bun run start
           env:
             - name: PORT
               value: {{ .Values.projectApi.port | quote }}

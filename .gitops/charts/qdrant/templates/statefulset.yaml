@@ -32,6 +32,27 @@ spec:
       securityContext:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- if and .Values.persistence.enabled .Values.initPermissions.enabled }}
+      initContainers:
+        - name: init-storage-permissions
+          image: "{{ .Values.initPermissions.image.repository }}:{{ .Values.initPermissions.image.tag }}"
+          imagePullPolicy: {{ .Values.initPermissions.image.pullPolicy }}
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              mkdir -p /qdrant/storage/snapshots/tmp
+              chown -R 1000:2000 /qdrant/storage
+              chmod -R u+rwX,g+rwX /qdrant/storage
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+            allowPrivilegeEscalation: false
+          volumeMounts:
+            - name: storage
+              mountPath: /qdrant/storage
+      {{- end }}
       containers:
         - name: qdrant
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"

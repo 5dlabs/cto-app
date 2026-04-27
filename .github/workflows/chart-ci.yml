@@ -101,6 +101,7 @@ jobs:
       - name: Render regression assertions
         run: |
           set -euo pipefail
+          trap 'echo "Render regression assertions failed: ${BASH_COMMAND}" >&2' ERR
           render_dir=".chart-ci-rendered"
           rm -rf "${render_dir}"
           mkdir -p "${render_dir}"
@@ -112,7 +113,7 @@ jobs:
             echo "Docker runtime wiring rendered with tools.dockerInDocker.enabled=false" >&2
             exit 1
           fi
-          grep -q 'TOOLS_SERVER_URL: "http://cto-tools.cto-system.svc.cluster.local:8080/mcp"' "${render_dir}/cto-nodind.yaml"
+          grep -q 'TOOLS_SERVER_URL: "http://cto-tools.cto-system.svc.cluster.local:3000/mcp"' "${render_dir}/cto-nodind.yaml"
 
           helm template check .gitops/charts/cto \
             --set tools.dockerInDocker.enabled=true \
@@ -150,6 +151,35 @@ jobs:
           grep -q 'storage: "5Gi"' "${render_dir}/qdrant.yaml"
           if grep -Eiq 'datadog|gp3|kind: LoadBalancer' "${render_dir}/qdrant.yaml"; then
             echo "Forbidden Datadog/gp3/public exposure rendered for local Qdrant" >&2
+            exit 1
+          fi
+
+          voice_bridge_chart_version="$(awk '/^version:/ {print $2; exit}' .gitops/charts/voice-bridge/Chart.yaml)"
+          grep -q 'chart: voice-bridge' .gitops/apps/voice-bridge.yaml
+          grep -q "targetRevision: ${voice_bridge_chart_version}" .gitops/apps/voice-bridge.yaml
+          grep -q 'namespace: cto-system' .gitops/apps/voice-bridge.yaml
+          helm template voice-bridge .gitops/charts/voice-bridge \
+            --namespace cto-system \
+            > "${render_dir}/voice-bridge.yaml"
+          grep -q 'name: voice-bridge' "${render_dir}/voice-bridge.yaml"
+          grep -q 'namespace: cto-system' "${render_dir}/voice-bridge.yaml"
+          grep -q 'ghcr.io/5dlabs/voice-bridge:desktop-python-3.11-v0.1.0' "${render_dir}/voice-bridge.yaml"
+          grep -q 'MORGAN_GATEWAY_URL' "${render_dir}/voice-bridge.yaml"
+          grep -q 'http://openclaw-gateway-morgan.cto-system.svc.cluster.local:18789' "${render_dir}/voice-bridge.yaml"
+          grep -q 'ELEVENLABS_API_KEY' "${render_dir}/voice-bridge.yaml"
+          grep -q 'mountPath: /app/app/main.py' "${render_dir}/voice-bridge.yaml"
+          grep -q 'mountPath: /app/app/elevenlabs_client.py' "${render_dir}/voice-bridge.yaml"
+          grep -q 'elevenlabs_stt_request' "${render_dir}/voice-bridge.yaml"
+          grep -q 'elevenlabs_tts_complete' "${render_dir}/voice-bridge.yaml"
+          grep -q 'speech_cue_metrics' "${render_dir}/voice-bridge.yaml"
+          grep -q 'optional: true' "${render_dir}/voice-bridge.yaml"
+          grep -q 'port: 8090' "${render_dir}/voice-bridge.yaml"
+          grep -Fq 'host: "localhost"' "${render_dir}/voice-bridge.yaml"
+          grep -Fq 'path: "/morgan/voice/ws"' "${render_dir}/voice-bridge.yaml"
+          grep -Fq 'pathType: Exact' "${render_dir}/voice-bridge.yaml"
+          grep -Fq 'nginx.ingress.kubernetes.io/rewrite-target: /ws' "${render_dir}/voice-bridge.yaml"
+          if grep -Eiq 'datadog|type: LoadBalancer|type: NodePort|morgan-voice\.5dlabs\.ai' "${render_dir}/voice-bridge.yaml"; then
+            echo "Forbidden telemetry or public exposure rendered for local voice bridge" >&2
             exit 1
           fi
 
@@ -203,12 +233,26 @@ jobs:
           grep -q '"diagnostics": {' "${render_dir}/agent-morgan.yaml"
           grep -q '"logging": {' "${render_dir}/agent-morgan.yaml"
           grep -q 'OPENCLAW_RAW_STREAM_PATH' "${render_dir}/agent-morgan.yaml"
+          grep -q 'openclaw@2026.4.23' "${render_dir}/agent-morgan.yaml"
           grep -q 'openclaw-mem0' "${render_dir}/agent-morgan.yaml"
+          if grep -q '"allowConversationAccess": true' "${render_dir}/agent-morgan.yaml"; then
+            echo "OpenClaw 2026.4.23 rejects mem0 allowConversationAccess in config" >&2
+            exit 1
+          fi
           grep -q '"memory": "openclaw-mem0"' "${render_dir}/agent-morgan.yaml"
           grep -q '"host": "qdrant.cto-system.svc.cluster.local"' "${render_dir}/agent-morgan.yaml"
           grep -q '"port": 6333' "${render_dir}/agent-morgan.yaml"
           grep -q '"collectionName": "cto_memory"' "${render_dir}/agent-morgan.yaml"
-          grep -q 'http://cto-tools.cto-system.svc.cluster.local:8080/mcp' "${render_dir}/agent-morgan.yaml"
+          grep -q '"userId": "jonathon"' "${render_dir}/agent-morgan.yaml"
+          grep -q '"provider": "google"' "${render_dir}/agent-morgan.yaml"
+          grep -q '"model": "gemini-embedding-001"' "${render_dir}/agent-morgan.yaml"
+          grep -q '"provider": "anthropic"' "${render_dir}/agent-morgan.yaml"
+          grep -q '"model": "claude-3-5-haiku-latest"' "${render_dir}/agent-morgan.yaml"
+          if grep -Eq '"customCategories"|"customInstructions"' "${render_dir}/agent-morgan.yaml"; then
+            echo "Local Morgan mem0 config drifted from OVH reference" >&2
+            exit 1
+          fi
+          grep -q 'http://cto-tools.cto-system.svc.cluster.local:3000/mcp' "${render_dir}/agent-morgan.yaml"
           grep -q 'name: cto-agent-keys' "${render_dir}/agent-morgan.yaml"
           grep -q 'key: "ANTHROPIC_API_KEY"' "${render_dir}/agent-morgan.yaml"
           grep -q 'key: "GEMINI_API_KEY"' "${render_dir}/agent-morgan.yaml"
@@ -220,6 +264,8 @@ jobs:
           grep -Fq 'path: "/morgan/code(/|$)(.*)"' "${render_dir}/agent-morgan.yaml"
           grep -Fq 'path: "/morgan/project-api(/|$)(.*)"' "${render_dir}/agent-morgan.yaml"
           grep -Fq 'path: "/morgan/voice(/|$)(.*)"' "${render_dir}/agent-morgan.yaml"
+          grep -q 'name: voice-bridge' "${render_dir}/agent-morgan.yaml"
+          grep -q 'number: 8090' "${render_dir}/agent-morgan.yaml"
           grep -Fq 'path: "/morgan(/|$)(.*)"' "${render_dir}/agent-morgan.yaml"
           grep -Fq 'http://localhost:8080/morgan/code' "${render_dir}/agent-morgan.yaml"
           grep -q 'ALLOWED_ORIGINS' "${render_dir}/agent-morgan.yaml"

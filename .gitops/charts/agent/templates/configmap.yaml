@@ -17,6 +17,10 @@ data:
     {{- $webSearch := index $webTools "search" | default dict }}
     {{- $webFetch := index $webTools "fetch" | default dict }}
     {
+      "meta": {
+        "lastTouchedVersion": {{ ((index .Values "openclaw" | default dict).version | default .Chart.AppVersion | default .Chart.Version) | quote }},
+        "lastTouchedAt": "1970-01-01T00:00:00.000Z"
+      },
       "agents": {
         "defaults": {
           "compaction": {
@@ -277,9 +281,12 @@ data:
               "autoCapture": {{ $mem0Plugin.autoCapture | default true }},
               "topK": {{ $mem0Plugin.topK | default 5 }},
               "searchThreshold": {{ $mem0Plugin.searchThreshold | default 0.6 }},
-              "metadataSource": {{ $mem0Plugin.metadataSource | default "openclaw" | quote }},
-              "customCategories": {{ $mem0Plugin.customCategories | default list | toJson }},
-              "customInstructions": {{ $mem0Plugin.customInstructions | default "" | quote }},
+              {{- if hasKey $mem0Plugin "customCategories" }}
+              "customCategories": {{ $mem0Plugin.customCategories | toJson }},
+              {{- end }}
+              {{- if hasKey $mem0Plugin "customInstructions" }}
+              "customInstructions": {{ $mem0Plugin.customInstructions | quote }},
+              {{- end }}
               "oss": {
                 "vectorStore": {
                   "provider": {{ ($mem0Plugin.oss).vectorStore.provider | default "qdrant" | quote }},
@@ -423,7 +430,11 @@ data:
           {{- if not $first }},{{ end }}
           {{ $name | quote }}: {
             "api": {{ $provider.api | quote }},
+            {{- if $provider.apiKeyLiteral }}
+            "apiKey": {{ $provider.apiKeyLiteral | quote }},
+            {{- else }}
             "apiKey": "${PROVIDER_{{ $name | upper | replace "-" "_" }}_KEY}",
+            {{- end }}
             "baseUrl": {{ $provider.baseUrl | quote }},
             "models": {{ $filteredModels | toJson }}
             {{- if $provider.auth }},
@@ -562,33 +573,19 @@ data:
           "search": { "enabled": {{ if hasKey $webSearch "enabled" }}{{ $webSearch.enabled }}{{ else }}true{{ end }} },
           "fetch": { "enabled": {{ if hasKey $webFetch "enabled" }}{{ $webFetch.enabled }}{{ else }}true{{ end }} }
         }
-        {{- if .Values.tools.acp.enabled }}
-        {{- $acp := .Values.tools.acp }}
-        {{- $acpDispatch := $acp.dispatch | default dict }}
-        {{- $acpStream := $acp.stream | default dict }}
-        {{- $acpRuntime := $acp.runtime | default dict }},
+        {{- if .Values.tools.acp.enabled }},
         "acp": {
           "enabled": true,
-          "backend": {{ $acp.backend | default "acpx" | quote }},
-          "defaultAgent": {{ $acp.defaultAgent | default "codex" | quote }},
-          "allowedAgents": {{ $acp.allowedAgents | default list | toJson }},
-          "maxConcurrentSessions": {{ $acp.maxConcurrentSessions | default 4 }},
-          "dispatch": {
-            "enabled": {{ if hasKey $acpDispatch "enabled" }}{{ $acpDispatch.enabled }}{{ else }}true{{ end }}
-          },
-          "stream": {
-            "coalesceIdleMs": {{ $acpStream.coalesceIdleMs | default 300 }},
-            "maxChunkChars": {{ $acpStream.maxChunkChars | default 1200 }}
-          },
-          "runtime": {
-            "ttlMinutes": {{ $acpRuntime.ttlMinutes | default 120 }}
-          }
-          {{- if $acp.wsUrl }},
-          "wsUrl": {{ $acp.wsUrl | quote }}
-          {{- end }}
-          {{- if $acp.tokenFile }},
-          "tokenFile": {{ $acp.tokenFile | quote }}
-          {{- end }}
+          "backend": {{ .Values.tools.acp.backend | default "acpx" | quote }},
+          "defaultAgent": {{ .Values.tools.acp.defaultAgent | default "codex" | quote }},
+          "allowedAgents": {{ .Values.tools.acp.allowedAgents | default list | toJson }},
+          "maxConcurrentSessions": {{ .Values.tools.acp.maxConcurrentSessions | default 4 }},
+          "permissionMode": {{ .Values.tools.acp.permissionMode | default "approve-all" | quote }},
+          "nonInteractivePermissions": {{ .Values.tools.acp.nonInteractivePermissions | default "deny" | quote }},
+          "pluginToolsMcpBridge": {{ .Values.tools.acp.pluginToolsMcpBridge | default false }},
+          "dispatch": {{ .Values.tools.acp.dispatch | default dict | toJson }},
+          "stream": {{ .Values.tools.acp.stream | default dict | toJson }},
+          "runtime": {{ .Values.tools.acp.runtime | default dict | toJson }}
         }
         {{- end }}
       },

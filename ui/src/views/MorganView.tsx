@@ -1,20 +1,95 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import {
   IconSend,
   IconVideo,
   IconMic,
   IconChat,
-  IconSparkles,
   IconRefresh,
+  IconPlus,
   IconExternal,
 } from "./icons";
-import { LemonSliceWidget, PRODUCT_MORGAN_AGENT_ID } from "../components/LemonSliceWidget";
+import {
+  CONFIGURED_PRODUCT_MORGAN_AGENT_ID,
+  LemonSliceWidget,
+} from "../components/LemonSliceWidget";
 import { MorganAvatar } from "../components/MorganAvatar";
 import { VoiceClient, type VoiceStatus } from "../components/VoiceClient";
-import { ProjectContextPanel } from "./ProjectContextPanel";
+import { NewProjectModal } from "./NewProjectModal";
 import { useProjects } from "../state/projectContext";
+import { buildCoderUrl } from "./data";
 
 type Mode = "video" | "voice" | "text";
+
+const DEFAULT_MORGAN_AVATAR_EMBED_URL =
+  "https://app.5dlabs.ai/morgan/avatar/embed";
+const MORGAN_EMBED_MIN_HEIGHT = 520;
+const MORGAN_EMBED_VIDEO_ASPECT = 0.66;
+const RAW_MORGAN_AVATAR_EMBED_URL =
+  import.meta.env.VITE_MORGAN_AVATAR_EMBED_URL?.trim();
+const CONFIGURED_MORGAN_AVATAR_EMBED_URL =
+  RAW_MORGAN_AVATAR_EMBED_URL === undefined
+    ? DEFAULT_MORGAN_AVATAR_EMBED_URL
+    : /^(local|none|off)$/i.test(RAW_MORGAN_AVATAR_EMBED_URL)
+      ? ""
+      : RAW_MORGAN_AVATAR_EMBED_URL;
+const VOICE_READYZ_URL =
+  import.meta.env.VITE_VOICE_BRIDGE_READYZ?.trim() ||
+  "http://localhost:8080/morgan/voice/readyz";
+const INTRO_CUE_SESSION_KEY = "morgan:intro-cue-played-at";
+const INTRO_CUE_SUPPRESS_MS = 120_000;
+
+const WORKING_CUES = [
+  "I’m checking the workspace context and lining up the next step.",
+  "I’m reading the project signals so the answer lands in the right place.",
+  "I’m tracing the relevant files now; I’ll keep this moving.",
+  "I’m comparing the current state with the expected behavior.",
+  "I’m looking for the smallest safe change that fixes the root cause.",
+  "I’m waiting on the model response, but I’m keeping the thread warm.",
+  "I’m checking the GitOps and runtime context before I answer.",
+  "I’m pulling together the implementation details now.",
+  "I’m narrowing this down to the files that matter.",
+  "I’m validating the path rather than guessing from the UI.",
+  "I’m checking the local stack and keeping the conversation live.",
+  "I’m looking for regressions tied to the last change.",
+  "I’m working through the logs and runtime state now.",
+  "I’m mapping the request to the active project context.",
+  "I’m getting a concise answer ready while the backend finishes.",
+  "I’m keeping an eye on the bridge and Morgan gateway.",
+  "I’m separating UI delay from backend response time.",
+  "I’m checking the current mode, project, and task context.",
+  "I’m making sure the next response is grounded in the repo.",
+  "I’m waiting on the inference path and staying with you.",
+  "I’m reviewing the chart and app wiring for this change.",
+  "I’m checking whether this is a frontend state issue or a bridge issue.",
+  "I’m lining up the answer with the current Morgan workflow.",
+  "I’m using the active context so I don’t give you a generic answer.",
+];
+
+function introCue(project: string | null): string {
+  return project
+    ? `Hey, I’m Morgan. I’m warming up ${project}, getting voice ready, and loading the live view now.`
+    : "Hey, I’m Morgan. I’m warming up the workspace, getting voice ready, and loading the live view now.";
+}
+
+function workingCue(index: number, project: string | null, latestText: string | null): string {
+  const base = WORKING_CUES[index % WORKING_CUES.length];
+  if (project) return `${base} I’m in ${project}.`;
+  const subject = latestText?.trim();
+  if (subject) return `${base} I’m using what you just said as the task context.`;
+  return base;
+}
+
+function reserveIntroCue(): boolean {
+  try {
+    const now = Date.now();
+    const previous = Number(window.sessionStorage.getItem(INTRO_CUE_SESSION_KEY) ?? "0");
+    if (previous && now - previous < INTRO_CUE_SUPPRESS_MS) return false;
+    window.sessionStorage.setItem(INTRO_CUE_SESSION_KEY, String(now));
+    return true;
+  } catch {
+    return true;
+  }
+}
 
 interface ChatMessage {
   id: string;
@@ -24,17 +99,15 @@ interface ChatMessage {
   pending?: boolean;
 }
 
-const MORGAN_PORTRAIT = "/uploads/morgan-hero.png";
-
 function statusLabel(status: VoiceStatus, connected: boolean): string {
-  if (!connected) return "DISCONNECTED";
+  if (!connected) return status === "error" ? "ERROR" : "WARMING UP";
   switch (status) {
     case "connecting":
       return "CONNECTING";
     case "listening":
       return "LISTENING";
     case "streaming_user":
-      return "YOU · SPEAKING";
+      return "LISTENING";
     case "awaiting_reply":
       return "MORGAN · THINKING";
     case "speaking":
@@ -55,20 +128,43 @@ export function MorganView() {
   const [voiceConnected, setVoiceConnected] = useState(false);
   const [voiceStatus, setVoiceStatus] = useState<VoiceStatus>("idle");
   const [voiceError, setVoiceError] = useState<string | null>(null);
+  const [voiceTranscript, setVoiceTranscript] = useState<string | null>(null);
+  const [voiceReply, setVoiceReply] = useState<string | null>(null);
+  const [voiceCue, setVoiceCue] = useState<string | null>(null);
   const [inputAnalyser, setInputAnalyser] = useState<AnalyserNode | null>(null);
   const [outputAnalyser, setOutputAnalyser] = useState<AnalyserNode | null>(null);
   const [textDraft, setTextDraft] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const { activeProject } = useProjects();
+  const [showNewProject, setShowNewProject] = useState(false);
+  const [workspaceBusy, setWorkspaceBusy] = useState(false);
+  const [avatarLoaded, setAvatarLoaded] = useState(false);
+  const [avatarEmbedLayout, setAvatarEmbedLayout] = useState({
+    scale: 1,
+    width: 0,
+    height: 0,
+  });
+  const {
+    projects,
+    activeProject,
+    activeDescriptor,
+    source,
+    error: projectError,
+    refresh,
+    refreshing,
+    setActive,
+    verifyProject,
+  } = useProjects();
   const clientRef = useRef<VoiceClient | null>(null);
   const pendingMorganIdRef = useRef<string | null>(null);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
-  // Tracks whether voice mode is active so post-turn callbacks can decide
-  // whether to auto-re-arm listening without relying on stale closures.
-  const modeRef = useRef<Mode>(mode);
-  modeRef.current = mode;
+  const stageRef = useRef<HTMLDivElement | null>(null);
+  const textEchoToIgnoreRef = useRef<string | null>(null);
   // Guards against overlapping auto-start attempts during a turn's tail end.
   const startingUtteranceRef = useRef(false);
+  const introPlayedRef = useRef(false);
+  const cueInFlightRef = useRef(false);
+  const workingCueIndexRef = useRef(0);
+  const listenPausedUntilRef = useRef(0);
 
   const appendUser = useCallback((text: string) => {
     const trimmed = text.trim();
@@ -85,7 +181,10 @@ export function MorganView() {
   const startPendingMorgan = useCallback(() => {
     const id = newId();
     pendingMorganIdRef.current = id;
-    setMessages((prev) => [...prev, { id, role: "morgan", text: "", pending: true }]);
+    setMessages((prev) => [
+      ...prev.filter((m) => !(m.role === "morgan" && m.pending && !m.text.trim())),
+      { id, role: "morgan", text: "", pending: true },
+    ]);
     return id;
   }, []);
 
@@ -107,7 +206,11 @@ export function MorganView() {
     const id = pendingMorganIdRef.current;
     if (!id) {
       if (!text.trim()) return;
-      setMessages((prev) => [...prev, { id: newId(), role: "morgan", text }]);
+      setMessages((prev) => {
+        const lastMorgan = [...prev].reverse().find((m) => m.role === "morgan");
+        if (lastMorgan?.text.trim() === text.trim()) return prev;
+        return [...prev, { id: newId(), role: "morgan", text }];
+      });
       return;
     }
     setMessages((prev) =>
@@ -124,21 +227,48 @@ export function MorganView() {
       if (hit && !hit.text.trim()) return prev.filter((m) => m.id !== id);
       return prev.map((m) => (m.id === id ? { ...m, pending: false } : m));
     });
-    // Note: we do NOT re-arm listening here. The dedicated "always-listening"
-    // effect below watches voiceStatus and fires a fresh utterance when the
-    // bridge returns to idle — that way we wait for TTS playback to actually
-    // finish, instead of re-opening the mic while Morgan is still speaking
-    // (which caused the "empty utterance" error from the bridge).
   }, []);
 
   const ensureClient = useCallback((): VoiceClient => {
     if (clientRef.current) return clientRef.current;
     const client = new VoiceClient({
-      onStatus: setVoiceStatus,
-      onTranscript: (t) => appendUser(t),
-      onReplyDelta: (t) => appendMorganDelta(t),
-      onReplyText: (t) => finalizeMorgan(t),
-      onTurnDone: () => completeTurn(),
+      onStatus: (status) => {
+        setVoiceStatus(status);
+        if (status !== "error") setVoiceError(null);
+      },
+      onTranscript: (t) => {
+        const transcript = t.trim();
+        if (transcript) setVoiceTranscript(transcript);
+        if (
+          transcript &&
+          textEchoToIgnoreRef.current &&
+          transcript === textEchoToIgnoreRef.current
+        ) {
+          textEchoToIgnoreRef.current = null;
+          return;
+        }
+        appendUser(t);
+      },
+      onReplyDelta: (t) => {
+        appendMorganDelta(t);
+        setVoiceReply((current) => `${current ?? ""}${t}`);
+      },
+      onReplyText: (t) => {
+        setVoiceReply(t);
+        finalizeMorgan(t);
+      },
+      onSpeechText: (text) => {
+        listenPausedUntilRef.current = performance.now() + 10_000;
+        setVoiceCue(text);
+      },
+      onSpeechDone: () => {
+        listenPausedUntilRef.current = performance.now() + 7000;
+        window.setTimeout(() => setVoiceCue(null), 1600);
+      },
+      onTurnDone: () => {
+        listenPausedUntilRef.current = performance.now() + 5000;
+        completeTurn();
+      },
       onError: (err) => setVoiceError(err),
       onInputAnalyser: setInputAnalyser,
       onOutputAnalyser: setOutputAnalyser,
@@ -158,15 +288,22 @@ export function MorganView() {
     }
   }, [ensureClient]);
 
-  const disconnectVoice = useCallback(() => {
-    clientRef.current?.close();
-    clientRef.current = null;
-    pendingMorganIdRef.current = null;
-    setVoiceConnected(false);
-    setVoiceStatus("idle");
-    setInputAnalyser(null);
-    setOutputAnalyser(null);
-  }, []);
+  const speakCue = useCallback(
+    async (text: string, reason = "cue") => {
+      const cue = text.trim();
+      if (!cue || cueInFlightRef.current) return;
+      cueInFlightRef.current = true;
+      setVoiceCue(cue);
+      try {
+        await ensureClient().speakCue(cue, reason);
+      } catch (err) {
+        setVoiceError(err instanceof Error ? err.message : String(err));
+      } finally {
+        cueInFlightRef.current = false;
+      }
+    },
+    [ensureClient],
+  );
 
   const startUtterance = useCallback(async () => {
     if (startingUtteranceRef.current) return;
@@ -177,24 +314,26 @@ export function MorganView() {
         await client.connect();
         setVoiceConnected(true);
       }
-      // Pre-seed a pending Morgan bubble so deltas stream into the same turn.
-      startPendingMorgan();
+      setVoiceError(null);
+      setVoiceTranscript(null);
+      setVoiceReply(null);
       await client.startUtterance();
     } catch (err) {
       setVoiceError(err instanceof Error ? err.message : String(err));
     } finally {
       startingUtteranceRef.current = false;
     }
-  }, [ensureClient, voiceConnected, startPendingMorgan]);
+  }, [ensureClient, voiceConnected]);
 
   const endUtterance = useCallback(async () => {
     try {
+      startPendingMorgan();
       await clientRef.current?.endUtterance(textDraft);
       setTextDraft("");
     } catch (err) {
       setVoiceError(err instanceof Error ? err.message : String(err));
     }
-  }, [textDraft]);
+  }, [startPendingMorgan, textDraft]);
   // Stable reference so VAD doesn't tear down on every textDraft keystroke.
   const endUtteranceRef = useRef(endUtterance);
   endUtteranceRef.current = endUtterance;
@@ -214,6 +353,7 @@ export function MorganView() {
     }
     appendUser(draft);
     startPendingMorgan();
+    textEchoToIgnoreRef.current = draft;
     client.sendText(draft);
     setTextDraft("");
   }, [ensureClient, textDraft, voiceConnected, appendUser, startPendingMorgan]);
@@ -255,35 +395,106 @@ export function MorganView() {
     [appendSystem, startPendingMorgan],
   );
 
-  // Connect on entering voice; disconnect on leaving (any mode other than
-  // voice) so the mic stops listening. Text sends will transparently reconnect
-  // on demand via `ensureClient()` in `sendTextTurn`.
-  useEffect(() => {
-    if (mode === "voice") {
-      void connectVoice();
-    } else if (clientRef.current) {
-      disconnectVoice();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode]);
+  const switchActiveProject = useCallback(
+    async (name: string | null) => {
+      await setActive(name);
+      if (name) handleProjectSwitched(name);
+    },
+    [handleProjectSwitched, setActive],
+  );
 
-  // Always-listening loop: whenever we're in voice mode, connected, and the
-  // bridge is idle (no utterance, no reply in flight, no TTS playing), kick
-  // off a fresh utterance. Waiting for `idle` instead of firing straight off
-  // `turn_done` ensures TTS playback has actually finished before the mic
-  // re-opens — otherwise VAD can trip on its own output and the bridge sees
-  // an empty utterance before any encoded audio reaches it.
+  const openWorkspace = useCallback(async () => {
+    if (!activeProject) return;
+    setWorkspaceBusy(true);
+    try {
+      await verifyProject(activeProject);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      appendSystem(`Workspace verify failed for "${activeProject}": ${message}`);
+    } finally {
+      setWorkspaceBusy(false);
+    }
+    window.open(buildCoderUrl({ repo: activeProject }), "_blank", "noreferrer");
+  }, [activeProject, appendSystem, verifyProject]);
+
+  const refreshWebView = useCallback(() => {
+    window.location.reload();
+  }, []);
+  const voicePresenceActive = mode === "video" || mode === "voice";
+
+  // Warm the bridge immediately. This opens the socket and checks readiness,
+  // but does not start microphone capture until the Voice tab is active.
   useEffect(() => {
-    if (mode !== "voice") return;
-    if (!voiceConnected) return;
-    if (voiceStatus !== "idle" && voiceStatus !== "listening") return;
-    if (startingUtteranceRef.current) return;
-    // Small debounce lets the WebRTC graph settle before we re-open the mic.
-    const t = window.setTimeout(() => {
-      if (modeRef.current === "voice") void startUtterance();
-    }, 120);
-    return () => window.clearTimeout(t);
-  }, [mode, voiceConnected, voiceStatus, startUtterance]);
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        try {
+          await fetch(VOICE_READYZ_URL, { cache: "no-store" });
+        } catch {
+          /* bridge readiness is surfaced through the WebSocket path below */
+        }
+        if (cancelled) return;
+        try {
+          await ensureClient().connect();
+          if (cancelled) return;
+          setVoiceConnected(true);
+          if (!introPlayedRef.current && reserveIntroCue()) {
+            introPlayedRef.current = true;
+            await speakCue(introCue(activeProject), "intro");
+          }
+        } catch (err) {
+          if (!cancelled) setVoiceError(err instanceof Error ? err.message : String(err));
+        }
+      })();
+    }, 450);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [activeProject, ensureClient, speakCue]);
+
+  useEffect(() => {
+    if (voicePresenceActive) {
+      if (!voiceConnected && voiceStatus !== "connecting") void connectVoice();
+      return;
+    }
+    if (voiceStatus === "streaming_user") {
+      void clientRef.current?.endUtterance();
+    }
+  }, [connectVoice, voiceConnected, voicePresenceActive, voiceStatus]);
+
+  useEffect(() => {
+    if (!voicePresenceActive) return;
+    if (!voiceConnected || voiceStatus !== "listening") return;
+    const waitMs = Math.max(180, listenPausedUntilRef.current - performance.now());
+    const timer = window.setTimeout(() => void startUtterance(), waitMs);
+    return () => window.clearTimeout(timer);
+  }, [startUtterance, voiceConnected, voicePresenceActive, voiceStatus]);
+
+  useEffect(() => {
+    if (voiceStatus !== "awaiting_reply") return;
+    let cancelled = false;
+    let timer = 0;
+    const schedule = (delay: number) => {
+      timer = window.setTimeout(() => {
+        if (cancelled || voiceStatus !== "awaiting_reply") return;
+        const cue = workingCue(
+          workingCueIndexRef.current++,
+          activeProject,
+          voiceTranscript ?? textDraft,
+        );
+        void speakCue(cue, "working").finally(() => {
+          if (!cancelled) schedule(11000);
+        });
+      }, delay);
+    };
+    schedule(5500);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [activeProject, speakCue, textDraft, voiceStatus, voiceTranscript]);
 
   useEffect(
     () => () => {
@@ -298,6 +509,45 @@ export function MorganView() {
     if (mode !== "text") return;
     chatEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages, mode]);
+
+  useEffect(() => {
+    const stage = stageRef.current;
+    if (!stage) return;
+
+    const updateScale = () => {
+      const rect = stage.getBoundingClientRect();
+      const width = stage.clientWidth || rect.width;
+      const height = stage.clientHeight || rect.height;
+      const availableHeight = Math.max(1, height);
+      const scale = Math.min(1, availableHeight / MORGAN_EMBED_MIN_HEIGHT);
+      const frameHeight = height / scale;
+      const frameWidth = Math.min(width / scale, frameHeight * MORGAN_EMBED_VIDEO_ASPECT);
+      const next = {
+        scale: Number(scale.toFixed(4)),
+        width: Math.round(frameWidth),
+        height: Math.round(frameHeight),
+      };
+      setAvatarEmbedLayout((current) =>
+        Math.abs(current.scale - next.scale) < 0.01 &&
+        Math.abs(current.width - next.width) < 1 &&
+        Math.abs(current.height - next.height) < 1
+          ? current
+          : next,
+      );
+    };
+
+    updateScale();
+
+    const observer =
+      typeof ResizeObserver === "undefined" ? null : new ResizeObserver(updateScale);
+    observer?.observe(stage);
+    window.addEventListener("resize", updateScale);
+
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", updateScale);
+    };
+  }, []);
 
   // Voice activity detection — auto-end the utterance once the user has been
   // silent for ~1.2s after speaking. Runs only while the mic is actively
@@ -436,207 +686,304 @@ export function MorganView() {
     [messages],
   );
 
+  const stageStyle =
+    mode === "video"
+      ? ({
+          "--morgan-embed-scale": avatarEmbedLayout.scale,
+          "--morgan-frame-width": avatarEmbedLayout.width
+            ? `${avatarEmbedLayout.width}px`
+            : "100%",
+          "--morgan-frame-height": avatarEmbedLayout.height
+            ? `${avatarEmbedLayout.height}px`
+            : "100%",
+        } as CSSProperties)
+      : undefined;
+
   return (
-    <div className="section">
-      <div className="debate" style={{ minHeight: 520 }}>
-        <div className="debate__stage">
-          <div className="debate__grid" />
-          <div className="debate__live">LIVE · {mode}</div>
-          <div
-            className="debate__committee"
-            style={{
-              gridTemplateColumns: "1fr",
-              gridTemplateRows: "1fr",
-              placeItems: "stretch",
-              minHeight: 460,
-              inset: mode === "text" ? "40px 20px 70px" : "40px 30px 70px",
-            }}
+    <div className="morgan-surface">
+      <div className="morgan-composer">
+        <input
+          className="field__input morgan-composer__input"
+          placeholder="Message Morgan"
+          value={textDraft}
+          onChange={(e) => setTextDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              void sendTextTurn();
+            }
+          }}
+        />
+        <button type="button" className="primary-btn" onClick={() => void sendTextTurn()}>
+          <IconSend size={12} /> Send
+        </button>
+        <select
+          className="morgan-project-select"
+          value={activeProject ?? ""}
+          onChange={(e) => void switchActiveProject(e.currentTarget.value || null)}
+          title="Active project"
+        >
+          <option value="">No project</option>
+          {projects.map((project) => (
+            <option key={project.name} value={project.name}>
+              {project.name}
+            </option>
+          ))}
+        </select>
+        {activeDescriptor ? (
+          <div className="morgan-project-badges" title={activeDescriptor.path}>
+            <span
+              className={`morgan-project-chip ${
+                activeDescriptor.hasPrd
+                  ? activeDescriptor.state === "ready"
+                    ? "morgan-project-chip--success"
+                    : "morgan-project-chip--warn"
+                  : "morgan-project-chip--muted"
+              }`}
+            >
+              {activeDescriptor.hasPrd ? activeDescriptor.state : "no PRD"}
+            </span>
+            {activeDescriptor.hasArchitecture ? (
+              <span className="morgan-project-chip morgan-project-chip--success">arch</span>
+            ) : null}
+            {activeDescriptor.status?.phase ? (
+              <span className="morgan-project-chip">{activeDescriptor.status.phase}</span>
+            ) : null}
+          </div>
+        ) : source === "stub" && projectError ? (
+          <span className="morgan-project-chip morgan-project-chip--warn" title={projectError}>
+            offline
+          </span>
+        ) : null}
+        {activeProject ? (
+          <button
+            type="button"
+            className="session-full__icon-btn"
+            title="Open workspace"
+            aria-label="Open workspace"
+            disabled={workspaceBusy}
+            onClick={() => void openWorkspace()}
           >
-            {mode === "video" ? (
-              <div
-                style={{
-                  width: "100%",
-                  height: "100%",
-                  minHeight: 440,
-                  display: "flex",
-                  justifyContent: "center",
-                }}
-              >
-                <LemonSliceWidget agentId={PRODUCT_MORGAN_AGENT_ID} autoStartConversation={false} />
-              </div>
-            ) : mode === "voice" ? (
-              <div
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: 18,
-                  padding: "24px 0",
-                }}
-              >
+            <IconExternal size={12} />
+          </button>
+        ) : null}
+        <button
+          type="button"
+          className="session-full__icon-btn"
+          title="New project"
+          aria-label="New project"
+          onClick={() => setShowNewProject(true)}
+        >
+          <IconPlus size={12} />
+        </button>
+        <button
+          type="button"
+          className="session-full__icon-btn"
+          title="Refresh projects"
+          aria-label="Refresh projects"
+          onClick={() => void refresh()}
+        >
+          <IconRefresh size={12} style={refreshing ? { opacity: 0.55 } : undefined} />
+        </button>
+        <button
+          type="button"
+          className="session-full__icon-btn"
+          title="Refresh WebView"
+          aria-label="Refresh WebView"
+          onClick={refreshWebView}
+        >
+          <IconRefresh size={12} />
+        </button>
+      </div>
+
+      <div className="morgan-mode-tabs" aria-label="Morgan mode">
+        <button
+          type="button"
+          className={`debate__mode-btn${mode === "video" ? " debate__mode-btn--active" : ""}`}
+          onClick={() => setMode("video")}
+        >
+          <IconVideo size={13} /> Video
+        </button>
+        <button
+          type="button"
+          className={`debate__mode-btn${mode === "voice" ? " debate__mode-btn--active" : ""}`}
+          onClick={() => setMode("voice")}
+        >
+          <IconMic size={13} /> Voice
+        </button>
+        <button
+          type="button"
+          className={`debate__mode-btn${mode === "text" ? " debate__mode-btn--active" : ""}`}
+          onClick={() => setMode("text")}
+        >
+          <IconChat size={13} /> Text
+        </button>
+      </div>
+
+      <div className="morgan-stage" data-mode={mode} ref={stageRef} style={stageStyle}>
+        <div className="debate__grid" />
+        {mode === "video" ? (
+          <div className="morgan-video-frame">
+            {CONFIGURED_MORGAN_AVATAR_EMBED_URL ? (
+              <iframe
+                className="morgan-livekit-frame"
+                src={CONFIGURED_MORGAN_AVATAR_EMBED_URL}
+                title="Morgan LemonSlice LiveKit avatar"
+                allow="camera; microphone; autoplay; fullscreen; clipboard-read; clipboard-write"
+                referrerPolicy="strict-origin-when-cross-origin"
+                loading="eager"
+                onLoad={() => setAvatarLoaded(true)}
+              />
+            ) : CONFIGURED_PRODUCT_MORGAN_AGENT_ID ? (
+              <LemonSliceWidget
+                agentId={CONFIGURED_PRODUCT_MORGAN_AGENT_ID}
+                autoStartConversation={false}
+              />
+            ) : (
+              <div className="morgan-local-video">
                 <MorganAvatar
-                  src={MORGAN_PORTRAIT}
                   inputAnalyser={inputAnalyser}
                   outputAnalyser={outputAnalyser}
                   state={avatarState}
-                  size={360}
+                  size={420}
                 />
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 10,
-                    fontSize: 11,
-                    letterSpacing: 0.8,
-                  }}
-                >
-                  <span style={{ opacity: 0.7 }}>Morgan</span>
-                  <span className="debate__tile-speaking">● {statusLabel(voiceStatus, voiceConnected)}</span>
-                </div>
-                <div style={{ display: "flex", gap: 8 }}>
-                  {voiceStatus === "streaming_user" ? (
-                    <button
-                      type="button"
-                      className="primary-btn"
-                      onClick={() => void endUtterance()}
-                    >
-                      <IconMic size={12} /> Stop & send
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      className="primary-btn"
-                      onClick={() => void startUtterance()}
-                      disabled={voiceStatus === "awaiting_reply" || voiceStatus === "speaking"}
-                    >
-                      <IconMic size={12} /> Hold to talk
-                    </button>
-                  )}
-                  {voiceConnected ? (
-                    <button type="button" className="debate__mode-btn" onClick={disconnectVoice}>
-                      Disconnect
-                    </button>
-                  ) : (
-                    <button type="button" className="debate__mode-btn" onClick={() => void connectVoice()}>
-                      Connect
-                    </button>
-                  )}
-                </div>
-                {voiceError ? (
-                  <div style={{ color: "#f87171", fontSize: 11.5 }}>voice-bridge: {voiceError}</div>
-                ) : null}
+                <span>Local Morgan</span>
               </div>
-            ) : (
-              <MorganChatPanel
-                messages={messages}
-                typing={morganTyping}
-                portrait={MORGAN_PORTRAIT}
-                endRef={chatEndRef}
-                error={voiceError}
-                activeProject={activeProject}
-              />
             )}
+            {CONFIGURED_MORGAN_AVATAR_EMBED_URL && !avatarLoaded ? (
+              <div className="morgan-video-preroll">
+                <MorganAvatar
+                  inputAnalyser={inputAnalyser}
+                  outputAnalyser={outputAnalyser}
+                  state={avatarState}
+                  size={300}
+                />
+              </div>
+            ) : null}
+            <MorganPresence
+              variant="video"
+              status={voiceStatus}
+              connected={voiceConnected}
+              error={voiceError}
+              transcript={voiceTranscript}
+              reply={voiceReply}
+              cue={voiceCue ?? (!avatarLoaded ? introCue(activeProject) : null)}
+              inputAnalyser={inputAnalyser}
+              outputAnalyser={outputAnalyser}
+              avatarState={avatarState}
+            />
           </div>
-          <div className="debate__mode">
-            <button
-              type="button"
-              className={`debate__mode-btn${mode === "video" ? " debate__mode-btn--active" : ""}`}
-              onClick={() => setMode("video")}
-            >
-              <IconVideo size={13} /> Video
-            </button>
-            <button
-              type="button"
-              className={`debate__mode-btn${mode === "voice" ? " debate__mode-btn--active" : ""}`}
-              onClick={() => setMode("voice")}
-            >
-              <IconMic size={13} /> Voice
-            </button>
-            <button
-              type="button"
-              className={`debate__mode-btn${mode === "text" ? " debate__mode-btn--active" : ""}`}
-              onClick={() => setMode("text")}
-            >
-              <IconChat size={13} /> Text
-            </button>
-          </div>
-        </div>
-
-        <aside className="debate__aside">
-          <ProjectContextPanel
-            onProjectCreated={handleProjectCreated}
-            onProjectSwitched={handleProjectSwitched}
+        ) : mode === "voice" ? (
+          <MorganPresence
+            variant="voice"
+            status={voiceStatus}
+            connected={voiceConnected}
+            error={voiceError}
+            transcript={voiceTranscript}
+            reply={voiceReply}
+            cue={voiceCue}
+            inputAnalyser={inputAnalyser}
+            outputAnalyser={outputAnalyser}
+            avatarState={avatarState}
           />
-          <div className="chart-card">
-            <div className="section__head">
-              <div>
-                <div className="section__eyebrow">Last 24h</div>
-                <div className="section__title">Operations</div>
-              </div>
-            </div>
-            <div className="chart-row">
-              <div>
-                <div className="chart-label">Agent runs</div>
-                <div className="chart-number">1,284</div>
-                <div className="chart-delta">+12.4%</div>
-              </div>
-              <div>
-                <div className="chart-label">Ships</div>
-                <div className="chart-number">37</div>
-                <div className="chart-delta">+4</div>
-              </div>
-              <div>
-                <div className="chart-label">LLM spend</div>
-                <div className="chart-number">$214</div>
-                <div className="chart-delta chart-delta--down">−3.1%</div>
-              </div>
-            </div>
-          </div>
-          <div className="chart-card">
-            <div className="section__head">
-              <div>
-                <div className="section__eyebrow">Shortcuts</div>
-                <div className="section__title">Say it, I'll route it</div>
-              </div>
-            </div>
-            <div className="row row--wrap">
-              <span className="chip">
-                <IconRefresh size={11} /> Re-sync GitLab
-              </span>
-              <span className="chip">
-                <IconSparkles size={11} /> Queue intake
-              </span>
-              <span className="chip">
-                <IconExternal size={11} /> Open Grafana
-              </span>
-            </div>
-          </div>
-        </aside>
+        ) : (
+          <MorganChatPanel
+            messages={messages}
+            typing={morganTyping}
+            endRef={chatEndRef}
+            error={voiceError}
+            activeProject={activeProject}
+          />
+        )}
       </div>
 
-      <div className="chart-card">
-        <div className="row" style={{ gap: 8 }}>
-          <input
-            className="field__input"
-            placeholder={
-              mode === "voice"
-                ? "Type to merge with your voice turn — press Send to mix in"
-                : "Message Morgan — she'll route to the right agent"
-            }
-            value={textDraft}
-            onChange={(e) => setTextDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                void sendTextTurn();
-              }
-            }}
-          />
-          <button type="button" className="primary-btn" onClick={() => void sendTextTurn()}>
-            <IconSend size={12} /> Send
-          </button>
+      <NewProjectModal
+        open={showNewProject}
+        onClose={() => setShowNewProject(false)}
+        onCreated={(project) => {
+          handleProjectCreated(project.name);
+          handleProjectSwitched(project.name);
+        }}
+      />
+    </div>
+  );
+}
+
+interface MorganPresenceProps {
+  variant: "video" | "voice";
+  status: VoiceStatus;
+  connected: boolean;
+  error: string | null;
+  transcript: string | null;
+  reply: string | null;
+  cue: string | null;
+  inputAnalyser: AnalyserNode | null;
+  outputAnalyser: AnalyserNode | null;
+  avatarState: "idle" | "listening" | "thinking" | "speaking";
+}
+
+function presenceHint(status: VoiceStatus, variant: "video" | "voice"): string {
+  if (status === "streaming_user") return "Speak normally. Morgan will stop listening when you pause.";
+  if (status === "awaiting_reply") return "Morgan heard you and is working.";
+  if (status === "speaking") return "Morgan is speaking.";
+  if (status === "connecting") return "Connecting Morgan voice.";
+  return variant === "video"
+    ? "Live video and hands-free voice share the same Morgan state."
+    : "Hands-free voice starts automatically on this tab.";
+}
+
+function MorganPresence({
+  variant,
+  status,
+  connected,
+  error,
+  transcript,
+  reply,
+  cue,
+  inputAnalyser,
+  outputAnalyser,
+  avatarState,
+}: MorganPresenceProps) {
+  const hasExchange = Boolean(transcript || reply || cue);
+  return (
+    <div className={`morgan-presence morgan-presence--${variant}`}>
+      {variant === "voice" ? (
+        <MorganAvatar
+          inputAnalyser={inputAnalyser}
+          outputAnalyser={outputAnalyser}
+          state={avatarState}
+          size={360}
+        />
+      ) : null}
+      <div className="morgan-presence__panel">
+        <div className="morgan-presence__status">
+          <span>Morgan</span>
+          <span className="debate__tile-speaking">● {statusLabel(status, connected)}</span>
         </div>
+        <div className="morgan-presence__hint">{presenceHint(status, variant)}</div>
+        {error ? <div className="morgan-presence__error">voice-bridge: {error}</div> : null}
+        {hasExchange ? (
+          <div className="morgan-presence__exchange">
+            {transcript ? (
+              <div>
+                <span>You</span>
+                <p>{transcript}</p>
+              </div>
+            ) : null}
+            {reply ? (
+              <div>
+                <span>Morgan</span>
+                <p>{reply}</p>
+              </div>
+            ) : null}
+            {cue ? (
+              <div>
+                <span>Morgan cue</span>
+                <p>{cue}</p>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -645,7 +992,6 @@ export function MorganView() {
 interface MorganChatPanelProps {
   messages: ChatMessage[];
   typing: boolean;
-  portrait: string;
   endRef: React.MutableRefObject<HTMLDivElement | null>;
   error: string | null;
   activeProject: string | null;
@@ -654,36 +1000,20 @@ interface MorganChatPanelProps {
 function MorganChatPanel({
   messages,
   typing,
-  portrait,
   endRef,
   error,
   activeProject,
 }: MorganChatPanelProps) {
   return (
     <div className="morgan-chat-panel">
-      <div className="morgan-chat-panel__head">
-        <img className="morgan-chat-panel__avatar" src={portrait} alt="Morgan" />
-        <div className="morgan-chat-panel__head-text">
-          <div className="morgan-chat-panel__name">Morgan</div>
-          <div className="morgan-chat-panel__status">
-            {typing ? "typing…" : "intake · on call"}
-            {activeProject ? (
-              <span className="morgan-chat-panel__project" title={`/workspace/repos/${activeProject}`}>
-                · in <span className="mono">{activeProject}</span>
-              </span>
-            ) : null}
-          </div>
-        </div>
-      </div>
-
       <div className="morgan-chat">
         {messages.length === 0 ? (
           <div className="morgan-chat__empty">
-            <img className="morgan-chat__empty-avatar" src={portrait} alt="" />
-            <div className="morgan-chat__empty-title">Say hi to Morgan</div>
-            <div className="morgan-chat__empty-sub">
-              Ask a question, route a task, or request a briefing. She'll hand off to the
-              right agent from here.
+            <div className="morgan-chat__empty-avatar morgan-mark" aria-hidden>
+              M
+            </div>
+            <div className="morgan-chat__empty-title">
+              {activeProject ? `In ${activeProject}` : "No messages yet"}
             </div>
           </div>
         ) : (
@@ -694,7 +1024,9 @@ function MorganChatPanel({
               </div>
             ) : m.role === "morgan" ? (
               <div className="chat-row chat-row--morgan" key={m.id}>
-                <img className="chat-row__avatar" src={portrait} alt="" aria-hidden />
+                <div className="chat-row__avatar morgan-mark" aria-hidden>
+                  M
+                </div>
                 <div className={`chat-bubble morgan${m.pending && !m.text ? " is-typing" : ""}`}>
                   {m.text || (
                     <span className="chat-bubble__dots" aria-label="Morgan is typing">
@@ -712,6 +1044,7 @@ function MorganChatPanel({
             ),
           )
         )}
+        {typing ? null : null}
         {error ? (
           <div className="chat-row chat-row--morgan">
             <div className="chat-bubble morgan" style={{ color: "#f87171" }}>

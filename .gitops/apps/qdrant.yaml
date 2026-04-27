@@ -22,7 +22,7 @@ spec:
   source:
     repoURL: ghcr.io/5dlabs/helm-charts
     chart: qdrant
-    targetRevision: 0.1.0
+    targetRevision: 0.1.3
     helm:
       releaseName: qdrant
       valuesObject:
@@ -36,6 +36,37 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: cto-system
+
+  ignoreDifferences:
+    - group: apps
+      kind: StatefulSet
+      name: qdrant
+      namespace: cto-system
+      jqPathExpressions:
+        # Kubernetes defaults these fields on StatefulSets and pod templates.
+        - .spec.persistentVolumeClaimRetentionPolicy
+        - .spec.podManagementPolicy
+        - .spec.revisionHistoryLimit
+        - .spec.updateStrategy
+        - .spec.template.spec.dnsPolicy
+        - .spec.template.spec.restartPolicy
+        - .spec.template.spec.schedulerName
+        - .spec.template.spec.serviceAccount
+        - .spec.template.spec.terminationGracePeriodSeconds
+        - .spec.template.spec.containers[]?.livenessProbe.httpGet.scheme
+        - .spec.template.spec.containers[]?.livenessProbe.successThreshold
+        - .spec.template.spec.containers[]?.readinessProbe.httpGet.scheme
+        - .spec.template.spec.containers[]?.readinessProbe.successThreshold
+        - .spec.template.spec.containers[]?.startupProbe.httpGet.scheme
+        - .spec.template.spec.containers[]?.startupProbe.successThreshold
+        - .spec.template.spec.containers[]?.terminationMessagePath
+        - .spec.template.spec.containers[]?.terminationMessagePolicy
+        - .spec.template.spec.initContainers[]?.resources
+        - .spec.template.spec.initContainers[]?.terminationMessagePath
+        - .spec.template.spec.initContainers[]?.terminationMessagePolicy
+        - .spec.volumeClaimTemplates[]?.apiVersion
+        - .spec.volumeClaimTemplates[]?.kind
+        - .spec.volumeClaimTemplates[]?.status
 
   syncPolicy:
     automated:

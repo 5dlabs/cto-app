@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   deleteScmConnection,
+  exchangeGithubManifestCode,
   listScmConnections,
   prepareScmProvisioning,
   saveScmConnection,
   slugifyConnectionId,
+  type GitHubManifestExchangeResult,
   type ScmConnection,
   type ScmProvider,
   type ScmProvisioningPlan,
@@ -37,6 +39,9 @@ export function SourceControlSettings() {
   const [baseUrl, setBaseUrl] = useState(PROVIDER_DEFAULTS.github.baseUrl);
   const [callbackBaseUrl, setCallbackBaseUrl] = useState("http://localhost:8080");
   const [plan, setPlan] = useState<ScmProvisioningPlan | null>(null);
+  const [manifestCode, setManifestCode] = useState("");
+  const [exchangeResult, setExchangeResult] =
+    useState<GitHubManifestExchangeResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -65,6 +70,8 @@ export function SourceControlSettings() {
     setProvider(next);
     setBaseUrl(PROVIDER_DEFAULTS[next].baseUrl);
     setPlan(null);
+    setManifestCode("");
+    setExchangeResult(null);
     setMessage(null);
   }
 
@@ -84,6 +91,8 @@ export function SourceControlSettings() {
       });
       setConnectionId(prepared.connection.connectionId);
       setPlan(prepared);
+      setManifestCode("");
+      setExchangeResult(null);
       setMessage("Provisioning plan generated. No external app was created.");
     } catch (err) {
       setError(formatError(err));
@@ -100,6 +109,42 @@ export function SourceControlSettings() {
       const items = await saveScmConnection(plan.connection);
       setConnections(items);
       setMessage("Local draft saved without storing provider secrets.");
+    } catch (err) {
+      setError(formatError(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleExchangeGithubManifest() {
+    if (!plan) return;
+    const code = manifestCode.trim();
+    if (!code) {
+      setError("GitHub manifest code is required.");
+      return;
+    }
+
+    setBusy(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const result = await exchangeGithubManifestCode({
+        connection: plan.connection,
+        code,
+      });
+      setPlan({ ...plan, connection: result.connection });
+      setExchangeResult(result);
+      setManifestCode("");
+      await refreshConnections();
+      if (result.localMetadataSaved) {
+        setMessage(
+          "GitHub App manifest exchanged. Copy/apply the Secret manifest; credential values were not stored locally.",
+        );
+      } else {
+        setMessage(
+          `GitHub App manifest exchanged, but local metadata was not saved: ${result.localMetadataError ?? "unknown error"}. Copy/apply the Secret manifest now.`,
+        );
+      }
     } catch (err) {
       setError(formatError(err));
     } finally {
@@ -306,8 +351,12 @@ export function SourceControlSettings() {
         <ProvisioningPlanCard
           plan={plan}
           manifestJson={manifestJson}
+          manifestCode={manifestCode}
+          exchangeResult={exchangeResult}
           busy={busy}
           onSave={() => void handleSaveDraft()}
+          onManifestCodeChange={setManifestCode}
+          onExchangeGithubManifest={() => void handleExchangeGithubManifest()}
           onCopy={copy}
         />
       ) : null}
@@ -325,14 +374,22 @@ export function SourceControlSettings() {
 function ProvisioningPlanCard({
   plan,
   manifestJson,
+  manifestCode,
+  exchangeResult,
   busy,
   onSave,
+  onManifestCodeChange,
+  onExchangeGithubManifest,
   onCopy,
 }: {
   plan: ScmProvisioningPlan;
   manifestJson: string;
+  manifestCode: string;
+  exchangeResult: GitHubManifestExchangeResult | null;
   busy: boolean;
   onSave: () => void;
+  onManifestCodeChange: (value: string) => void;
+  onExchangeGithubManifest: () => void;
   onCopy: (value: string, label: string) => Promise<void>;
 }) {
   return (
@@ -358,6 +415,14 @@ function ProvisioningPlanCard({
           <div className="mem-list-item">
             <span>GitLab admin API</span>
             <span className="count">{plan.gitlabApplicationApiEndpoint}</span>
+          </div>
+        ) : null}
+        {plan.connection.providerAppId ? (
+          <div className="mem-list-item">
+            <span>Provider app</span>
+            <span className="count">
+              {plan.connection.providerAppSlug || plan.connection.providerAppId}
+            </span>
           </div>
         ) : null}
       </div>
@@ -403,6 +468,79 @@ function ProvisioningPlanCard({
               <IconGit size={12} /> Copy manifest
             </button>
           </div>
+        </div>
+      ) : null}
+
+      {plan.connection.provider === "github" ? (
+        <div className="chart-card" style={{ marginTop: 12 }}>
+          <div className="section__eyebrow">GitHub manifest code exchange</div>
+          <div className="section__sub">
+            Paste the one-time code from GitHub after creating the app. CTO
+            updates local app metadata and returns a Secret manifest for you to
+            apply; credential values are not persisted locally.
+          </div>
+          <div className="field" style={{ marginTop: 10 }}>
+            <label className="field__label">Manifest code</label>
+            <input
+              className="field__input"
+              value={manifestCode}
+              onChange={(event) => onManifestCodeChange(event.target.value)}
+              placeholder="temporary code from GitHub redirect"
+              disabled={busy}
+            />
+          </div>
+          <div className="row row--end" style={{ marginTop: 8 }}>
+            <button
+              type="button"
+              className="primary-btn"
+              disabled={busy || !manifestCode.trim()}
+              onClick={onExchangeGithubManifest}
+            >
+              Exchange manifest code
+            </button>
+          </div>
+
+          {exchangeResult ? (
+            <div className="field" style={{ marginTop: 12 }}>
+              <label className="field__label">
+                Kubernetes Secret manifest ({exchangeResult.kubernetesSecretNamespace})
+              </label>
+              <textarea
+                className="field__input"
+                readOnly
+                value={exchangeResult.kubernetesSecretManifest}
+                style={{ minHeight: 260, fontFamily: "ui-monospace, monospace" }}
+              />
+              <div className="section__sub" style={{ marginTop: 8 }}>
+                {exchangeResult.appUrl ? (
+                  <a href={exchangeResult.appUrl} target="_blank" rel="noreferrer">
+                    <IconExternal size={12} /> Open GitHub App
+                  </a>
+                ) : (
+                  <>GitHub App ID {exchangeResult.appId}</>
+                )}
+              </div>
+              <ol className="section__sub" style={{ marginTop: 8 }}>
+                {exchangeResult.nextSteps.map((step) => (
+                  <li key={step}>{step}</li>
+                ))}
+              </ol>
+              <div className="row row--end" style={{ marginTop: 8 }}>
+                <button
+                  type="button"
+                  className="ghost-btn"
+                  onClick={() =>
+                    void onCopy(
+                      exchangeResult.kubernetesSecretManifest,
+                      "Kubernetes Secret manifest",
+                    )
+                  }
+                >
+                  <IconKey size={12} /> Copy Secret manifest
+                </button>
+              </div>
+            </div>
+          ) : null}
         </div>
       ) : null}
 

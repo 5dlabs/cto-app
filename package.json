@@ -9,13 +9,17 @@
   ],
   "scripts": {
     "dev": "npm --workspace ui run dev",
+    "web:dev": "npm --workspace ui run web:dev",
+    "web:preview": "npm --workspace ui run web:preview",
     "build": "npm --workspace ui run build",
     "preview": "npm --workspace ui run preview",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build"
+    "tauri:build": "tauri build",
+    "mcp:tauri": "node ./node_modules/tauri-plugin-mcp-server/build/index.js"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2.1.0"
+    "@tauri-apps/cli": "^2.1.0",
+    "tauri-plugin-mcp-server": "^0.1.0"
   }
 }

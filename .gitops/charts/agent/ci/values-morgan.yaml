@@ -41,6 +41,9 @@ image:
   tag: "latest"
   pullPolicy: IfNotPresent
 
+openclaw:
+  version: "2026.4.23"
+
 # The desktop bootstrap must not require a private pull secret for public images.
 imagePullSecrets: []
 
@@ -56,7 +59,9 @@ resources:
 
 storage:
   size: 10Gi
-  storageClass: "local-path"
+  # Kind exposes its local-path provisioner as the "standard" storage class.
+  # The chart default targets mayastor, which is not available in desktop Kind.
+  storageClass: "standard"
 
 agent:
   id: "morgan"
@@ -179,20 +184,11 @@ mem0:
 mem0Plugin:
   enabled: true
   mode: open-source
-  userId: "local:morgan"
+  userId: "jonathon"
   autoRecall: true
   autoCapture: true
   topK: 5
   searchThreshold: 0.3
-  metadataSource: "desktop"
-  customCategories:
-    - "project"
-    - "decision"
-    - "preference"
-  customInstructions: >-
-    Capture durable Morgan desktop bootstrap context only: project decisions,
-    user preferences, blockers, and validation results. Keep entries concise and
-    avoid secrets or transient log noise.
   oss:
     collectionName: "cto_memory"
     vectorStore:
@@ -201,15 +197,15 @@ mem0Plugin:
         host: "qdrant.cto-system.svc.cluster.local"
         port: 6333
     embedder:
-      provider: "openai"
+      provider: "google"
       config:
-        model: "text-embedding-3-small"
-        apiKeyEnvVar: "PROVIDER_OPENAI_API_KEY"
+        model: "gemini-embedding-001"
+        apiKeyEnvVar: "GOOGLE_API_KEY"
     llm:
-      provider: "openai"
+      provider: "anthropic"
       config:
-        model: "gpt-4.1-nano"
-        apiKeyEnvVar: "PROVIDER_OPENAI_API_KEY"
+        model: "claude-3-5-haiku-latest"
+        apiKeyEnvVar: "ANTHROPIC_API_KEY"
 
 # The optional local observability Application ships Loki at this in-cluster
 # endpoint. Keep telemetry gated off by default so Morgan never requires Loki.
@@ -270,6 +266,13 @@ localIngress:
   host: localhost
   pathBase: /morgan
   pathType: ImplementationSpecific
+  voice:
+    # The local voice-bridge Application owns Morgan voice traffic. Keep this
+    # path in the Morgan ingress so existing server-side-applied ingresses
+    # converge by changing backend instead of needing list-item pruning.
+    enabled: true
+    serviceName: voice-bridge
+    servicePortNumber: 8090
   annotations:
     nginx.ingress.kubernetes.io/use-regex: "true"
     nginx.ingress.kubernetes.io/rewrite-target: /$2
@@ -370,7 +373,7 @@ tools:
 # Existing CTO tools service from the cto chart. The agent chart normalizes this
 # /mcp URL for CLI stdio bridges, while OpenClaw can use it directly.
 toolServer:
-  url: "http://cto-tools.cto-system.svc.cluster.local:8080/mcp"
+  url: "http://cto-tools.cto-system.svc.cluster.local:3000/mcp"
 
 # Claude Code sidecar config is disabled for the local bootstrap to avoid
 # shipping MCP endpoints for services cto-app does not install yet. ACP still
@@ -455,7 +458,7 @@ workspace:
 
       ## Local CTO Tools
 
-      - CTO tools MCP endpoint: `http://cto-tools.cto-system.svc.cluster.local:8080/mcp`
+      - CTO tools MCP endpoint: `http://cto-tools.cto-system.svc.cluster.local:3000/mcp`
       - Root workspace: `/workspace`
       - User projects should live under `/workspace/repos/<slug>` when created.
 
