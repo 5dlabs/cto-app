@@ -400,6 +400,7 @@ toolsConfig:
   remoteTools:
     - "argocd_*"
     - "exa_*"
+    - "web_*_exa"
     - "filesystem_*"
     - "firecrawl_*"
     - "github_*"

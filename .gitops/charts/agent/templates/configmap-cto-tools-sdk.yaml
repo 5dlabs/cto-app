@@ -1,0 +1,34 @@
+{{- if and .Values.toolsConfig .Values.toolServer.url }}
+# =============================================================================
+# CTO Tools SDK
+# =============================================================================
+# Mounted during workspace init and copied to /workspace/.cto-tools so code
+# execution flows can call MCP tools through the central cto-tools service.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "agent.fullname" . }}-cto-tools-sdk
+  namespace: {{ .Values.namespace | default .Release.Namespace }}
+  labels:
+    {{- include "agent.labels" . | nindent 4 }}
+    app.kubernetes.io/component: cto-tools-sdk
+data:
+  mcp.mjs: |-
+{{ .Files.Get "files/cto-tools/mcp.mjs" | nindent 4 }}
+  mcp.ts: |-
+{{ .Files.Get "files/cto-tools/mcp.mjs" | nindent 4 }}
+  package.json: |-
+    {"type":"module"}
+  README.md: |-
+    # CTO Tools SDK
+
+    Import `/workspace/.cto-tools/mcp.mjs` from Node code-execution tasks to call
+    MCP tools through the local `cto-tools` service:
+
+    ```js
+    import { callTool, listTools, describeTool, escalate } from "/workspace/.cto-tools/mcp.mjs";
+
+    const catalog = await listTools();
+    const result = await callTool("firecrawl_search", { query: "5D Labs" });
+    ```
+{{- end }}

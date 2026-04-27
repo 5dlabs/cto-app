@@ -260,10 +260,16 @@ spec:
 
               {{- if .Values.toolsConfig }}
               # ---------------------------------------------------------------
-              # 4b. Tools config (MCP tools for CLI backends)
+              # 4b. Tools config and SDK (MCP tools for CLI/code backends)
               # ---------------------------------------------------------------
               cp /tools-config-template/tools-config.json /workspace/tools-config.json
               echo "[tools] tools-config.json written"
+              {{- end }}
+              {{- if and .Values.toolsConfig .Values.toolServer.url }}
+              mkdir -p /workspace/.cto-tools
+              cp /cto-tools-sdk-template/* /workspace/.cto-tools/
+              chmod 644 /workspace/.cto-tools/*
+              echo "[tools] CTO tools SDK ready"
               {{- end }}
 
               {{- if .Values.toolServer.url }}
@@ -666,6 +672,10 @@ spec:
             - name: tools-config-template
               mountPath: /tools-config-template
             {{- end }}
+            {{- if and .Values.toolsConfig .Values.toolServer.url }}
+            - name: cto-tools-sdk-template
+              mountPath: /cto-tools-sdk-template
+            {{- end }}
             {{- if .Values.tools.acp.enabled }}
             - name: acpx-node-modules
               mountPath: /usr/local/share/npm-global/lib/node_modules/openclaw/extensions/acpx/node_modules
@@ -814,6 +824,16 @@ spec:
             {{- if .Values.toolServer.url }}
             - name: TOOL_SERVER_URL
               value: {{ .Values.toolServer.url | quote }}
+            - name: TOOLS_SERVER_URL
+              value: {{ .Values.toolServer.url | quote }}
+            - name: CLIENT_CONFIG_PATH
+              value: "/workspace/tools-config.json"
+            - name: CTO_AGENT_ID
+              value: {{ .Values.agent.id | default .Release.Name | quote }}
+            {{- if .Values.toolsConfig.remoteTools }}
+            - name: CTO_AGENT_PREWARM
+              value: {{ join "," .Values.toolsConfig.remoteTools | quote }}
+            {{- end }}
             {{- end }}
             - name: NODE_ENV
               value: production
@@ -1677,6 +1697,11 @@ spec:
         - name: tools-config-template
           configMap:
             name: {{ include "agent.fullname" . }}-tools-config
+        {{- end }}
+        {{- if and .Values.toolsConfig .Values.toolServer.url }}
+        - name: cto-tools-sdk-template
+          configMap:
+            name: {{ include "agent.fullname" . }}-cto-tools-sdk
         {{- end }}
         {{- if .Values.tools.acp.enabled }}
         - name: acpx-node-modules

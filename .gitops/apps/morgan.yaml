@@ -21,7 +21,7 @@ spec:
   source:
     repoURL: ghcr.io/5dlabs/helm-charts
     chart: agent
-    targetRevision: 0.1.12
+    targetRevision: 0.1.13
     helm:
       releaseName: morgan
       valueFiles:
