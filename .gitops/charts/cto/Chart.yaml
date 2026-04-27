@@ -2,7 +2,7 @@ apiVersion: v2
 name: cto
 description: CTO local platform — controller + tools for kind-based desktop install
 type: application
-version: 0.1.8
+version: 0.1.9
 appVersion: "0.1.0"
 keywords:
   - cto

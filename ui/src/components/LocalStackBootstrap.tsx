@@ -25,9 +25,11 @@ import {
   IconDatabase,
   IconGit,
   IconGlobe,
+  IconKey,
   IconPackage,
   IconPuzzle,
   IconRadio,
+  IconSearch,
   IconShield,
   IconSparkles,
   IconTerminal,
@@ -42,7 +44,7 @@ type BootstrapProgress = {
 
 type BootstrapState = "credentials" | "checking" | "ready" | "failed";
 type SourceHostMode = "hosted" | "self-hosted";
-type SetupScreen = "intro" | "profiles" | "harness";
+type SetupScreen = "intro" | "profiles" | "tools" | "harness";
 type HarnessId = "openclaw" | "hermes";
 type AiCliId =
   | "openclaw"
@@ -54,6 +56,13 @@ type AiCliId =
   | "githubCli"
   | "gitlabCli";
 type AiProviderId = string;
+type ToolApiKeyName =
+  | "EXA_API_KEY"
+  | "FIRECRAWL_API_KEY"
+  | "TAVILY_API_KEY"
+  | "BRAVE_API_KEY"
+  | "CONTEXT7_API_KEY"
+  | "PERPLEXITY_API_KEY";
 
 type BootstrapGithubDefaults = {
   token: string;
@@ -64,6 +73,12 @@ type BootstrapGithubDefaults = {
 
 type LocalStackBootstrapDefaults = {
   github: BootstrapGithubDefaults;
+  toolKeys?: Partial<Record<ToolApiKeyName, BootstrapToolKeyDefault>>;
+};
+
+type BootstrapToolKeyDefault = {
+  value: string;
+  valueSource?: string | null;
 };
 
 type BootstrapGithubForm = {
@@ -79,6 +94,12 @@ type BootstrapLocalStackRequest = {
     enabled: boolean;
     token?: string;
     owner?: string;
+  };
+  tools?: {
+    apiKeys: Array<{
+      name: ToolApiKeyName;
+      value: string;
+    }>;
   };
   setup?: BootstrapSetupProfile;
 };
@@ -120,6 +141,14 @@ type AiProviderOption = {
   auth: "oauth" | "api-key" | "cloud" | "local";
   cliIds: AiCliId[];
   models: string[];
+};
+
+type ToolApiKeyOption = {
+  name: ToolApiKeyName;
+  label: string;
+  icon: ChoiceIcon;
+  summary: string;
+  placeholder: string;
 };
 
 type RuntimeAllocation = {
@@ -216,6 +245,51 @@ const HARNESSES: Array<{
     name: "Hermes",
     icon: IconRadio,
     summary: "Hermes harness agent for the selected CLI/provider profiles.",
+  },
+];
+
+const TOOL_API_KEYS: ToolApiKeyOption[] = [
+  {
+    name: "EXA_API_KEY",
+    label: "Exa",
+    icon: IconSearch,
+    summary: "Neural web search and fetch tools exposed through cto-tools.",
+    placeholder: "exa_...",
+  },
+  {
+    name: "FIRECRAWL_API_KEY",
+    label: "Firecrawl",
+    icon: IconGlobe,
+    summary: "Scrape, crawl, map, and search fallback for blocked or JS-heavy pages.",
+    placeholder: "fc-...",
+  },
+  {
+    name: "TAVILY_API_KEY",
+    label: "Tavily",
+    icon: IconSearch,
+    summary: "Search, extract, map, crawl, and research MCP tools.",
+    placeholder: "tvly-...",
+  },
+  {
+    name: "BRAVE_API_KEY",
+    label: "Brave Search",
+    icon: IconGlobe,
+    summary: "OpenCLAW web search provider key for grounded search.",
+    placeholder: "BSA...",
+  },
+  {
+    name: "PERPLEXITY_API_KEY",
+    label: "Perplexity",
+    icon: IconSparkles,
+    summary: "OpenCLAW Perplexity/Sonar search provider key.",
+    placeholder: "pplx-...",
+  },
+  {
+    name: "CONTEXT7_API_KEY",
+    label: "Context7",
+    icon: IconKey,
+    summary: "Documentation lookup provider key for library research.",
+    placeholder: "ctx7-...",
   },
 ];
 
@@ -483,10 +557,18 @@ function buildBootstrapRequest(
   sourceProvider: ScmProvider,
   sourceOwner: string,
   githubToken: string,
+  toolApiKeys: Partial<Record<ToolApiKeyName, string>>,
   setup: BootstrapSetupProfile,
 ): BootstrapLocalStackRequest {
+  const tools = {
+    apiKeys: TOOL_API_KEYS.map((tool) => ({
+      name: tool.name,
+      value: toolApiKeys[tool.name]?.trim() ?? "",
+    })).filter((key) => key.value.length > 0),
+  };
+
   if (sourceProvider !== "github") {
-    return { github: { enabled: false }, setup };
+    return { github: { enabled: false }, tools, setup };
   }
 
   return {
@@ -495,6 +577,7 @@ function buildBootstrapRequest(
       token: githubToken.trim() || undefined,
       owner: sourceOwner.trim() || undefined,
     },
+    tools,
     setup,
   };
 }
@@ -575,6 +658,7 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
   const [selectedProviderIds, setSelectedProviderIds] =
     useState<Partial<Record<AiProviderId, true>>>({});
   const [selectedModels, setSelectedModels] = useState<Partial<Record<AiProviderId, string[]>>>({});
+  const [toolApiKeys, setToolApiKeys] = useState<Partial<Record<ToolApiKeyName, string>>>({});
   const [progress, setProgress] = useState<BootstrapProgress>({
     stage: "credentials",
     message: "Preparing setup...",
@@ -591,6 +675,7 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
   });
   const loadedDefaults = useRef(false);
   const sourceOwnerTouched = useRef(false);
+  const toolKeyTouched = useRef<Partial<Record<ToolApiKeyName, true>>>({});
   const metricsInFlight = useRef(false);
   const lastMetricsProgress = useRef(0);
   const selectedAiCliIds = useMemo(
@@ -658,6 +743,11 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
       })),
     [selectedModels, selectedProviders],
   );
+  const configuredToolKeyCount = useMemo(
+    () =>
+      TOOL_API_KEYS.filter((tool) => (toolApiKeys[tool.name] ?? "").trim().length > 0).length,
+    [toolApiKeys],
+  );
 
   const refreshMetrics = useCallback(async () => {
     if (metricsInFlight.current) return;
@@ -715,7 +805,13 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
         progress: 8,
       });
       await invoke("bootstrap_local_stack", {
-        request: buildBootstrapRequest(sourceProvider, sourceOwner, githubForm.token, setupProfile),
+        request: buildBootstrapRequest(
+          sourceProvider,
+          sourceOwner,
+          githubForm.token,
+          toolApiKeys,
+          setupProfile,
+        ),
       });
       void refreshMetrics();
       setProgress({
@@ -735,6 +831,7 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
     setupProfile,
     sourceOwner,
     sourceProvider,
+    toolApiKeys,
   ]);
 
   useEffect(() => {
@@ -771,6 +868,14 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
         if (!sourceOwnerTouched.current) {
           setSourceOwner(defaults.github.owner || "5dlabs");
         }
+        setToolApiKeys((current) => {
+          const next = { ...current };
+          for (const tool of TOOL_API_KEYS) {
+            if (toolKeyTouched.current[tool.name]) continue;
+            next[tool.name] = defaults.toolKeys?.[tool.name]?.value ?? "";
+          }
+          return next;
+        });
       })
       .catch((err) => {
         if (!cancelled) {
@@ -873,7 +978,9 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
                 ? "Local stack"
                 : setupScreen === "profiles"
                   ? "Setup"
-                  : "Harness"
+                  : setupScreen === "tools"
+                    ? "Tool keys"
+                    : "Harness"
               : "Installing"}
           </h1>
 
@@ -1114,6 +1221,95 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
                     <button
                       className="primary-btn"
                       type="button"
+                      title="Configure tool API keys"
+                      disabled={!canContinue}
+                      onClick={() => setSetupScreen("tools")}
+                    >
+                      Continue
+                    </button>
+                  </div>
+                </div>
+              ) : setupScreen === "tools" ? (
+                <div className="local-bootstrap__wizard local-bootstrap__wizard--tools">
+                  <section className="local-bootstrap__panel" title="Common MCP tool API keys">
+                    <div className="local-bootstrap__panel-title">Tool API keys</div>
+                    <div className="local-bootstrap__tool-key-list">
+                      {TOOL_API_KEYS.map((tool) => {
+                        const ToolIcon = tool.icon;
+                        const value = toolApiKeys[tool.name] ?? "";
+                        return (
+                          <label
+                            key={tool.name}
+                            className="local-bootstrap__tool-key"
+                            title={tool.summary}
+                          >
+                            <span className="local-bootstrap__tool-key-heading">
+                              <span className="local-bootstrap__brand-mark">
+                                <ToolIcon size={16} />
+                              </span>
+                              <span>
+                                <strong>{tool.label}</strong>
+                                <em>{tool.name}</em>
+                              </span>
+                            </span>
+                            <input
+                              className="field__input"
+                              type="password"
+                              autoComplete="off"
+                              placeholder={tool.placeholder}
+                              value={value}
+                              onChange={(event) => {
+                                toolKeyTouched.current[tool.name] = true;
+                                setToolApiKeys((current) => ({
+                                  ...current,
+                                  [tool.name]: event.target.value,
+                                }));
+                              }}
+                            />
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </section>
+
+                  <section className="local-bootstrap__panel" title="Kind secret routing">
+                    <div className="local-bootstrap__panel-title">Kind routing</div>
+                    <div className="local-bootstrap__summary-list">
+                      <div>
+                        <span>Secret</span>
+                        <strong>cto-system/cto-agent-keys</strong>
+                      </div>
+                      <div>
+                        <span>MCP route</span>
+                        <strong>cto-tools /mcp</strong>
+                      </div>
+                      <div>
+                        <span>Configured</span>
+                        <strong>
+                          {configuredToolKeyCount} of {TOOL_API_KEYS.length}
+                        </strong>
+                      </div>
+                    </div>
+                    <div className="local-bootstrap__hint-row">
+                      These stay in the local Kind cluster and feed cto-tools plus OpenCLAW web
+                      research providers. Leave a key blank to add it later.
+                    </div>
+                  </section>
+
+                  {error ? <div className="local-bootstrap__inline-error">{error}</div> : null}
+
+                  <div className="local-bootstrap__actions local-bootstrap__actions--onepage">
+                    <button
+                      className="ghost-btn"
+                      type="button"
+                      title="Back to profiles"
+                      onClick={() => setSetupScreen("profiles")}
+                    >
+                      Back
+                    </button>
+                    <button
+                      className="primary-btn"
+                      type="button"
                       title="Choose harness"
                       disabled={!canContinue}
                       onClick={() => setSetupScreen("harness")}
@@ -1135,6 +1331,12 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
                         <span>Providers</span>
                         <strong>
                           {selectedProviderSummaries.map((item) => item.label).join(", ")}
+                        </strong>
+                      </div>
+                      <div>
+                        <span>Tool keys</span>
+                        <strong>
+                          {configuredToolKeyCount} of {TOOL_API_KEYS.length}
                         </strong>
                       </div>
                     </div>
@@ -1171,8 +1373,8 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
                     <button
                       className="ghost-btn"
                       type="button"
-                      title="Back to profiles"
-                      onClick={() => setSetupScreen("profiles")}
+                      title="Back to tool keys"
+                      onClick={() => setSetupScreen("tools")}
                     >
                       Back
                     </button>

@@ -106,6 +106,10 @@ jobs:
           rm -rf "${render_dir}"
           mkdir -p "${render_dir}"
 
+          cto_chart_version="$(awk '/^version:/ {print $2; exit}' .gitops/charts/cto/Chart.yaml)"
+          grep -q 'chart: cto' .gitops/apps/cto.yaml
+          grep -q "targetRevision: ${cto_chart_version}" .gitops/apps/cto.yaml
+          grep -q 'namespace: cto-system' .gitops/apps/cto.yaml
           helm template check .gitops/charts/cto \
             --set tools.dockerInDocker.enabled=false \
             > "${render_dir}/cto-nodind.yaml"
@@ -114,6 +118,12 @@ jobs:
             exit 1
           fi
           grep -q 'TOOLS_SERVER_URL: "http://cto-tools.cto-system.svc.cluster.local:3000/mcp"' "${render_dir}/cto-nodind.yaml"
+          grep -q '"exa": {' "${render_dir}/cto-nodind.yaml"
+          grep -q '"tavily": {' "${render_dir}/cto-nodind.yaml"
+          grep -q '"firecrawl": {' "${render_dir}/cto-nodind.yaml"
+          grep -q '"EXA_API_KEY":"${EXA_API_KEY}"' "${render_dir}/cto-nodind.yaml"
+          grep -q '"TAVILY_API_KEY":"${TAVILY_API_KEY}"' "${render_dir}/cto-nodind.yaml"
+          grep -q '"FIRECRAWL_API_KEY":"${FIRECRAWL_API_KEY}"' "${render_dir}/cto-nodind.yaml"
 
           helm template check .gitops/charts/cto \
             --set tools.dockerInDocker.enabled=true \
@@ -230,6 +240,9 @@ jobs:
           grep -q '"backend": "acpx"' "${render_dir}/agent-morgan.yaml"
           grep -q '"allowedAgents":' "${render_dir}/agent-morgan.yaml"
           grep -q '"claude"' "${render_dir}/agent-morgan.yaml"
+          grep -q '"exa_\*"' "${render_dir}/agent-morgan.yaml"
+          grep -q '"firecrawl_\*"' "${render_dir}/agent-morgan.yaml"
+          grep -q '"tavily_\*"' "${render_dir}/agent-morgan.yaml"
           grep -q '"diagnostics": {' "${render_dir}/agent-morgan.yaml"
           grep -q '"logging": {' "${render_dir}/agent-morgan.yaml"
           grep -q 'OPENCLAW_RAW_STREAM_PATH' "${render_dir}/agent-morgan.yaml"

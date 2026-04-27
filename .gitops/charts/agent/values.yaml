@@ -585,7 +585,9 @@ claudeCode:
 # backends (Claude Code, Codex, Droid).
 toolsConfig:
   remoteTools:
+    - "exa_*"
     - "firecrawl_*"
+    - "tavily_*"
   localServers:
     memory:
       command: "npx"
