@@ -2805,22 +2805,7 @@ fn patch_bootstrap_cto_agent_keys(agent_keys: &[BootstrapAgentKey]) -> Bootstrap
     }
 
     tracing::info!("Configuring CTO chart agentKeys from setup API keys");
-    let agent_keys = agent_keys
-        .iter()
-        .map(|key| (key.name.clone(), json!(key.value)))
-        .collect::<serde_json::Map<_, _>>();
-    let patch = json!({
-        "spec": {
-            "source": {
-                "helm": {
-                    "valuesObject": {
-                        "agentKeys": agent_keys
-                    }
-                }
-            }
-        }
-    })
-    .to_string();
+    let patch = cto_agent_keys_values_patch(agent_keys);
     run_kubectl(&[
         "-n",
         ARGOCD_NAMESPACE,
@@ -2834,6 +2819,25 @@ fn patch_bootstrap_cto_agent_keys(agent_keys: &[BootstrapAgentKey]) -> Bootstrap
     ])
     .map(|_| ())
     .map_err(|error| format!("Failed to configure CTO API keys: {error}"))
+}
+
+fn cto_agent_keys_values_patch(agent_keys: &[BootstrapAgentKey]) -> String {
+    let agent_keys = agent_keys
+        .iter()
+        .map(|key| (key.name.clone(), json!(key.value)))
+        .collect::<serde_json::Map<_, _>>();
+    json!({
+        "spec": {
+            "source": {
+                "helm": {
+                    "valuesObject": {
+                        "agentKeys": agent_keys
+                    }
+                }
+            }
+        }
+    })
+    .to_string()
 }
 
 fn patch_bootstrap_github_owner(
@@ -3406,12 +3410,12 @@ fn ensure_runtime_tool_paths_on_process() {
 mod tests {
     use super::{
         agent_keys_secret_manifest, aggregate_resource_metrics, apply_summary_usage,
-        metrics_server_kind_patch, normalize_bootstrap_github_credentials,
-        normalize_bootstrap_tool_api_keys, parse_cpu_quantity_to_milli,
-        parse_kind_node_container_states, parse_kubelet_summary_usage, parse_kubernetes_nodes,
-        parse_kubernetes_pods, parse_memory_quantity_to_bytes, parse_runtime_stats_lines,
-        validate_bootstrap_setup, BootstrapAgentKey, BootstrapAiCli, BootstrapAppMode,
-        BootstrapGithubRequest, BootstrapHarnessMode, BootstrapLocalStackRequest,
+        cto_agent_keys_values_patch, metrics_server_kind_patch,
+        normalize_bootstrap_github_credentials, normalize_bootstrap_tool_api_keys,
+        parse_cpu_quantity_to_milli, parse_kind_node_container_states, parse_kubelet_summary_usage,
+        parse_kubernetes_nodes, parse_kubernetes_pods, parse_memory_quantity_to_bytes,
+        parse_runtime_stats_lines, validate_bootstrap_setup, BootstrapAgentKey, BootstrapAiCli,
+        BootstrapAppMode, BootstrapGithubRequest, BootstrapHarnessMode, BootstrapLocalStackRequest,
         BootstrapProviderAuth, BootstrapProviderSelection, BootstrapSetupHarness,
         BootstrapSetupProfile, BootstrapSetupSource, BootstrapSourceProvider,
         BootstrapToolApiKeyRequest, BootstrapToolsRequest, KindNodeContainerState,
@@ -3969,5 +3973,24 @@ not-json
 
         assert!(manifest.contains("GITHUB_TOKEN: \"github_pat_example\""));
         assert!(manifest.contains("FIRECRAWL_API_KEY: \"fc_example\""));
+    }
+
+    #[test]
+    fn renders_cto_agent_keys_values_patch() {
+        let patch = cto_agent_keys_values_patch(&[
+            BootstrapAgentKey {
+                name: "EXA_API_KEY".to_string(),
+                value: "exa_example".to_string(),
+            },
+            BootstrapAgentKey {
+                name: "TAVILY_API_KEY".to_string(),
+                value: "tvly_example".to_string(),
+            },
+        ]);
+        let patch = serde_json::from_str::<serde_json::Value>(&patch).expect("patch json");
+
+        let agent_keys = &patch["spec"]["source"]["helm"]["valuesObject"]["agentKeys"];
+        assert_eq!(agent_keys["EXA_API_KEY"], "exa_example");
+        assert_eq!(agent_keys["TAVILY_API_KEY"], "tvly_example");
     }
 }
