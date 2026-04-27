@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashMap};
 use std::ffi::OsString;
+use std::fmt::Write as _;
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Command, Output, Stdio};
@@ -57,6 +58,14 @@ const CTO_AGENT_KEYS_SECRET: &str = "cto-agent-keys";
 const GITHUB_TOKEN_SECRET_KEY: &str = "GITHUB_TOKEN";
 const BOOTSTRAP_GITHUB_PAT_ENV: &str = "CTO_GITHUB_PAT";
 const BOOTSTRAP_GITHUB_OWNER_ENV: &str = "CTO_GITHUB_OWNER";
+const BOOTSTRAP_TOOL_API_KEY_ENV_NAMES: &[&str] = &[
+    "EXA_API_KEY",
+    "FIRECRAWL_API_KEY",
+    "TAVILY_API_KEY",
+    "BRAVE_API_KEY",
+    "CONTEXT7_API_KEY",
+    "PERPLEXITY_API_KEY",
+];
 
 // CTO platform + Qdrant + Morgan Argo Applications, published by
 // .github/workflows/publish-chart.yml to ghcr.io.
@@ -173,6 +182,7 @@ pub struct BootstrapReport {
 #[serde(rename_all = "camelCase")]
 pub struct BootstrapLocalStackRequest {
     github: Option<BootstrapGithubRequest>,
+    tools: Option<BootstrapToolsRequest>,
     setup: Option<BootstrapSetupProfile>,
 }
 
@@ -183,6 +193,20 @@ pub struct BootstrapGithubRequest {
     enabled: Option<bool>,
     token: Option<String>,
     owner: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BootstrapToolsRequest {
+    #[serde(default)]
+    api_keys: Vec<BootstrapToolApiKeyRequest>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BootstrapToolApiKeyRequest {
+    name: String,
+    value: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -271,6 +295,7 @@ pub enum BootstrapProviderAuth {
 #[serde(rename_all = "camelCase")]
 pub struct BootstrapLocalStackDefaults {
     github: BootstrapGithubDefaults,
+    tool_keys: BTreeMap<String, BootstrapToolKeyDefaults>,
 }
 
 #[derive(Serialize)]
@@ -282,10 +307,23 @@ pub struct BootstrapGithubDefaults {
     owner_source: Option<String>,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BootstrapToolKeyDefaults {
+    value: String,
+    value_source: Option<String>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct BootstrapGithubCredentials {
     token: Option<String>,
     owner: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct BootstrapAgentKey {
+    name: String,
+    value: String,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize)]
@@ -465,6 +503,7 @@ pub fn local_stack_bootstrap_defaults() -> BootstrapLocalStackDefaults {
             owner_source: env_var_source(BOOTSTRAP_GITHUB_OWNER_ENV)
                 .or_else(|| env_var_source("GITHUB_ORG")),
         },
+        tool_keys: bootstrap_tool_key_defaults(),
     }
 }
 
@@ -476,6 +515,8 @@ pub async fn bootstrap_local_stack(
     tracing::info!("bootstrap_local_stack invoked");
     let app_mode = BootstrapAppMode::from_env()?;
     let github_credentials = normalize_bootstrap_github_credentials(request.as_ref())?;
+    let tool_api_keys = normalize_bootstrap_tool_api_keys(request.as_ref())?;
+    let agent_keys = bootstrap_agent_keys(github_credentials.as_ref(), &tool_api_keys);
     persist_bootstrap_setup(
         &window,
         request.as_ref().and_then(|request| request.setup.as_ref()),
@@ -529,9 +570,9 @@ pub async fn bootstrap_local_stack(
         "300s",
     )?;
 
-    emit(&window, "credentials", "Configuring GitHub access...", 82);
+    emit(&window, "credentials", "Configuring local API keys...", 82);
     ensure_namespace(CTO_NAMESPACE)?;
-    apply_bootstrap_github_credentials(github_credentials.as_ref())?;
+    apply_bootstrap_agent_keys(&agent_keys)?;
 
     let app_message = if app_mode.skips_layered_apps() {
         "Registering CTO app (test mode)..."
@@ -540,6 +581,7 @@ pub async fn bootstrap_local_stack(
     };
     emit(&window, "tools", app_message, 86);
     apply_bootstrap_apps(app_mode)?;
+    patch_bootstrap_cto_agent_keys(&agent_keys)?;
     patch_bootstrap_github_owner(app_mode, github_credentials.as_ref())?;
 
     emit(&window, "ready", "Launching Codex App...", 100);
@@ -1927,6 +1969,21 @@ fn env_var_source(name: &str) -> Option<String> {
     env_var_trimmed(name).map(|_| name.to_string())
 }
 
+fn bootstrap_tool_key_defaults() -> BTreeMap<String, BootstrapToolKeyDefaults> {
+    BOOTSTRAP_TOOL_API_KEY_ENV_NAMES
+        .iter()
+        .map(|name| {
+            (
+                (*name).to_string(),
+                BootstrapToolKeyDefaults {
+                    value: env_var_trimmed(name).unwrap_or_default(),
+                    value_source: env_var_source(name),
+                },
+            )
+        })
+        .collect()
+}
+
 fn normalize_bootstrap_github_credentials(
     request: Option<&BootstrapLocalStackRequest>,
 ) -> BootstrapResult<Option<BootstrapGithubCredentials>> {
@@ -1968,6 +2025,81 @@ fn normalize_bootstrap_github_credentials(
     }
 
     Ok(Some(BootstrapGithubCredentials { token, owner }))
+}
+
+fn normalize_bootstrap_tool_api_keys(
+    request: Option<&BootstrapLocalStackRequest>,
+) -> BootstrapResult<Vec<BootstrapAgentKey>> {
+    let requested_keys = request
+        .and_then(|request| request.tools.as_ref())
+        .map_or_else(default_bootstrap_tool_api_key_requests, |tools| {
+            tools.api_keys.clone()
+        });
+
+    let mut normalized = BTreeMap::new();
+    for key in requested_keys {
+        let name = validate_bootstrap_tool_api_key_name(&key.name)?;
+        let value = key.value.trim();
+        if value.is_empty() {
+            continue;
+        }
+        validate_bootstrap_secret_value(value, &name)?;
+        if normalized.contains_key(&name) {
+            return Err(format!("duplicate tool API key entry for {name}"));
+        }
+        normalized.insert(name, value.to_string());
+    }
+
+    Ok(normalized
+        .into_iter()
+        .map(|(name, value)| BootstrapAgentKey { name, value })
+        .collect())
+}
+
+fn default_bootstrap_tool_api_key_requests() -> Vec<BootstrapToolApiKeyRequest> {
+    BOOTSTRAP_TOOL_API_KEY_ENV_NAMES
+        .iter()
+        .filter_map(|name| {
+            env_var_trimmed(name).map(|value| BootstrapToolApiKeyRequest {
+                name: (*name).to_string(),
+                value,
+            })
+        })
+        .collect()
+}
+
+fn validate_bootstrap_tool_api_key_name(raw: &str) -> BootstrapResult<String> {
+    let name = raw.trim().to_ascii_uppercase();
+    if BOOTSTRAP_TOOL_API_KEY_ENV_NAMES
+        .iter()
+        .any(|allowed| *allowed == name)
+    {
+        Ok(name)
+    } else {
+        Err(format!("unsupported tool API key: {raw}"))
+    }
+}
+
+fn validate_bootstrap_secret_value(value: &str, label: &str) -> BootstrapResult<()> {
+    if value.chars().any(char::is_control) {
+        return Err(format!("{label} must not contain control characters"));
+    }
+    Ok(())
+}
+
+fn bootstrap_agent_keys(
+    github_credentials: Option<&BootstrapGithubCredentials>,
+    tool_api_keys: &[BootstrapAgentKey],
+) -> Vec<BootstrapAgentKey> {
+    let mut keys = Vec::new();
+    if let Some(token) = github_credentials.and_then(|credentials| credentials.token.as_ref()) {
+        keys.push(BootstrapAgentKey {
+            name: GITHUB_TOKEN_SECRET_KEY.to_string(),
+            value: token.clone(),
+        });
+    }
+    keys.extend(tool_api_keys.iter().cloned());
+    keys
 }
 
 fn persist_bootstrap_setup(
@@ -2650,19 +2782,62 @@ fn apply_bootstrap_apps(mode: BootstrapAppMode) -> BootstrapResult<()> {
     Ok(())
 }
 
-fn apply_bootstrap_github_credentials(
-    credentials: Option<&BootstrapGithubCredentials>,
-) -> BootstrapResult<()> {
-    let Some(token) = credentials.and_then(|credentials| credentials.token.as_deref()) else {
+fn apply_bootstrap_agent_keys(agent_keys: &[BootstrapAgentKey]) -> BootstrapResult<()> {
+    if agent_keys.is_empty() {
         tracing::warn!(
-            "No GitHub PAT configured for local bootstrap; Morgan/project-api private repo access will stay disabled"
+            "No local API keys configured for bootstrap; cto-tools providers that require keys will stay unavailable"
         );
         return Ok(());
-    };
+    }
 
-    tracing::info!("Applying local GitHub PAT secret for Morgan/project-api");
-    apply_manifest(&github_token_secret_manifest(token)?)
-        .map_err(|error| format!("Failed to apply local GitHub PAT Secret: {error}"))
+    tracing::info!(
+        "Applying {} local API key(s) to {}",
+        agent_keys.len(),
+        CTO_AGENT_KEYS_SECRET
+    );
+    apply_manifest(&agent_keys_secret_manifest(agent_keys)?)
+        .map_err(|error| format!("Failed to apply local API key Secret: {error}"))
+}
+
+fn patch_bootstrap_cto_agent_keys(agent_keys: &[BootstrapAgentKey]) -> BootstrapResult<()> {
+    if agent_keys.is_empty() {
+        return Ok(());
+    }
+
+    tracing::info!("Configuring CTO chart agentKeys from setup API keys");
+    let patch = cto_agent_keys_values_patch(agent_keys);
+    run_kubectl(&[
+        "-n",
+        ARGOCD_NAMESPACE,
+        "patch",
+        "application",
+        "cto",
+        "--type",
+        "merge",
+        "-p",
+        &patch,
+    ])
+    .map(|_| ())
+    .map_err(|error| format!("Failed to configure CTO API keys: {error}"))
+}
+
+fn cto_agent_keys_values_patch(agent_keys: &[BootstrapAgentKey]) -> String {
+    let agent_keys = agent_keys
+        .iter()
+        .map(|key| (key.name.clone(), json!(key.value)))
+        .collect::<serde_json::Map<_, _>>();
+    json!({
+        "spec": {
+            "source": {
+                "helm": {
+                    "valuesObject": {
+                        "agentKeys": agent_keys
+                    }
+                }
+            }
+        }
+    })
+    .to_string()
 }
 
 fn patch_bootstrap_github_owner(
@@ -2706,9 +2881,15 @@ fn patch_bootstrap_github_owner(
     .map_err(|error| format!("Failed to configure Morgan GitHub owner: {error}"))
 }
 
-fn github_token_secret_manifest(token: &str) -> BootstrapResult<String> {
-    let quoted_token = serde_json::to_string(token)
-        .map_err(|error| format!("Failed to render GitHub PAT Secret: {error}"))?;
+fn agent_keys_secret_manifest(agent_keys: &[BootstrapAgentKey]) -> BootstrapResult<String> {
+    let mut secret_entries = String::new();
+    for key in agent_keys {
+        let quoted_value = serde_json::to_string(&key.value)
+            .map_err(|error| format!("Failed to render {} Secret value: {error}", key.name))?;
+        writeln!(secret_entries, "  {}: {quoted_value}", key.name)
+            .map_err(|error| format!("Failed to render {} Secret value: {error}", key.name))?;
+    }
+
     Ok(format!(
         r"apiVersion: v1
 kind: Secret
@@ -2721,7 +2902,7 @@ metadata:
     app.kubernetes.io/managed-by: cto-desktop
 type: Opaque
 stringData:
-  {GITHUB_TOKEN_SECRET_KEY}: {quoted_token}
+{secret_entries}
 "
     ))
 }
@@ -3228,15 +3409,17 @@ fn ensure_runtime_tool_paths_on_process() {
 #[cfg(test)]
 mod tests {
     use super::{
-        aggregate_resource_metrics, apply_summary_usage, github_token_secret_manifest,
-        metrics_server_kind_patch, normalize_bootstrap_github_credentials,
+        agent_keys_secret_manifest, aggregate_resource_metrics, apply_summary_usage,
+        cto_agent_keys_values_patch, metrics_server_kind_patch,
+        normalize_bootstrap_github_credentials, normalize_bootstrap_tool_api_keys,
         parse_cpu_quantity_to_milli, parse_kind_node_container_states, parse_kubelet_summary_usage,
         parse_kubernetes_nodes, parse_kubernetes_pods, parse_memory_quantity_to_bytes,
-        parse_runtime_stats_lines, validate_bootstrap_setup, BootstrapAiCli, BootstrapAppMode,
-        BootstrapGithubRequest, BootstrapHarnessMode, BootstrapLocalStackRequest,
+        parse_runtime_stats_lines, validate_bootstrap_setup, BootstrapAgentKey, BootstrapAiCli,
+        BootstrapAppMode, BootstrapGithubRequest, BootstrapHarnessMode, BootstrapLocalStackRequest,
         BootstrapProviderAuth, BootstrapProviderSelection, BootstrapSetupHarness,
         BootstrapSetupProfile, BootstrapSetupSource, BootstrapSourceProvider,
-        KindNodeContainerState, BOOTSTRAP_TEST_MODE_ENV, METRICS_SERVER_KUBELET_INSECURE_TLS_ARG,
+        BootstrapToolApiKeyRequest, BootstrapToolsRequest, KindNodeContainerState,
+        BOOTSTRAP_TEST_MODE_ENV, GITHUB_TOKEN_SECRET_KEY, METRICS_SERVER_KUBELET_INSECURE_TLS_ARG,
         METRICS_SERVER_KUBELET_PREFERRED_ADDRESS_TYPES_ARG,
     };
     use serde_json::json;
@@ -3623,6 +3806,7 @@ not-json
                     token: Some("  github_pat_example  ".to_string()),
                     owner: Some("acme-dev".to_string()),
                 }),
+                tools: None,
                 setup: None,
             }))
             .expect("credentials")
@@ -3641,6 +3825,7 @@ not-json
                     token: Some("github_pat_example".to_string()),
                     owner: Some("acme-dev".to_string()),
                 }),
+                tools: None,
                 setup: None,
             }))
             .expect("credentials");
@@ -3656,11 +3841,58 @@ not-json
                 token: Some("github_pat_example\nextra".to_string()),
                 owner: Some("acme-dev".to_string()),
             }),
+            tools: None,
             setup: None,
         }))
         .expect_err("multiline token rejected");
 
         assert!(error.contains("GitHub PAT"));
+    }
+
+    #[test]
+    fn normalizes_bootstrap_tool_api_keys() {
+        let keys = normalize_bootstrap_tool_api_keys(Some(&BootstrapLocalStackRequest {
+            github: None,
+            tools: Some(BootstrapToolsRequest {
+                api_keys: vec![
+                    BootstrapToolApiKeyRequest {
+                        name: "exa_api_key".to_string(),
+                        value: "  exa_example  ".to_string(),
+                    },
+                    BootstrapToolApiKeyRequest {
+                        name: "TAVILY_API_KEY".to_string(),
+                        value: String::new(),
+                    },
+                ],
+            }),
+            setup: None,
+        }))
+        .expect("tool keys");
+
+        assert_eq!(
+            keys,
+            vec![BootstrapAgentKey {
+                name: "EXA_API_KEY".to_string(),
+                value: "exa_example".to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_bootstrap_tool_api_key() {
+        let error = normalize_bootstrap_tool_api_keys(Some(&BootstrapLocalStackRequest {
+            github: None,
+            tools: Some(BootstrapToolsRequest {
+                api_keys: vec![BootstrapToolApiKeyRequest {
+                    name: "UNKNOWN_API_KEY".to_string(),
+                    value: "secret".to_string(),
+                }],
+            }),
+            setup: None,
+        }))
+        .expect_err("unknown key rejected");
+
+        assert!(error.contains("unsupported tool API key"));
     }
 
     #[test]
@@ -3714,10 +3946,51 @@ not-json
 
     #[test]
     fn renders_bootstrap_github_secret_manifest() {
-        let manifest = github_token_secret_manifest("github_pat_example").expect("manifest");
+        let manifest = agent_keys_secret_manifest(&[BootstrapAgentKey {
+            name: GITHUB_TOKEN_SECRET_KEY.to_string(),
+            value: "github_pat_example".to_string(),
+        }])
+        .expect("manifest");
 
         assert!(manifest.contains("name: cto-agent-keys"));
         assert!(manifest.contains("namespace: cto-system"));
         assert!(manifest.contains("GITHUB_TOKEN: \"github_pat_example\""));
+    }
+
+    #[test]
+    fn renders_bootstrap_agent_keys_secret_manifest() {
+        let manifest = agent_keys_secret_manifest(&[
+            BootstrapAgentKey {
+                name: GITHUB_TOKEN_SECRET_KEY.to_string(),
+                value: "github_pat_example".to_string(),
+            },
+            BootstrapAgentKey {
+                name: "FIRECRAWL_API_KEY".to_string(),
+                value: "fc_example".to_string(),
+            },
+        ])
+        .expect("manifest");
+
+        assert!(manifest.contains("GITHUB_TOKEN: \"github_pat_example\""));
+        assert!(manifest.contains("FIRECRAWL_API_KEY: \"fc_example\""));
+    }
+
+    #[test]
+    fn renders_cto_agent_keys_values_patch() {
+        let patch = cto_agent_keys_values_patch(&[
+            BootstrapAgentKey {
+                name: "EXA_API_KEY".to_string(),
+                value: "exa_example".to_string(),
+            },
+            BootstrapAgentKey {
+                name: "TAVILY_API_KEY".to_string(),
+                value: "tvly_example".to_string(),
+            },
+        ]);
+        let patch = serde_json::from_str::<serde_json::Value>(&patch).expect("patch json");
+
+        let agent_keys = &patch["spec"]["source"]["helm"]["valuesObject"]["agentKeys"];
+        assert_eq!(agent_keys["EXA_API_KEY"], "exa_example");
+        assert_eq!(agent_keys["TAVILY_API_KEY"], "tvly_example");
     }
 }

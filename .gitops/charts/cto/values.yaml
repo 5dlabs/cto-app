@@ -10,6 +10,7 @@ global:
 # named `cto-agent-keys`. The desktop app prompts the user for these on first run
 # and writes them here before `helm install`.
 agentKeys:
+  GITHUB_TOKEN: ""
   ANTHROPIC_API_KEY: ""
   OPENAI_API_KEY: ""
   OPENROUTER_API_KEY: ""
@@ -18,6 +19,9 @@ agentKeys:
   GOOGLE_API_KEY: ""
   XAI_API_KEY: ""
   PERPLEXITY_API_KEY: ""
+  FIRECRAWL_API_KEY: ""
+  TAVILY_API_KEY: ""
+  EXA_API_KEY: ""
   CURSOR_API_KEY: ""
   CONTEXT7_API_KEY: ""
   BRAVE_API_KEY: ""
@@ -193,9 +197,50 @@ tools:
         # keys: KUBECONFIG (base64)
         KUBECONFIG: ""
     firecrawl:
-      enabled: false
+      enabled: true
+      name: "Firecrawl"
+      description: "Web scraping, crawling, mapping, extraction, and search for research workflows"
+      transport: "stdio"
+      command: "npx"
+      args:
+        - "-y"
+        - "firecrawl-mcp"
+      workingDirectory: "/tmp"
+      env:
+        FIRECRAWL_API_KEY: "${FIRECRAWL_API_KEY}"
+        # Keeps the MCP server bootable before a key is provisioned; calls still
+        # fail explicitly until FIRECRAWL_API_KEY is present.
+        FIRECRAWL_API_URL: "https://api.firecrawl.dev"
       secret:
         FIRECRAWL_API_KEY: ""
+    tavily:
+      enabled: true
+      name: "Tavily"
+      description: "Search, extract, crawl, map, and research tools for current web context"
+      transport: "stdio"
+      command: "npx"
+      args:
+        - "-y"
+        - "tavily-mcp@latest"
+      workingDirectory: "/tmp"
+      env:
+        TAVILY_API_KEY: "${TAVILY_API_KEY}"
+      secret:
+        TAVILY_API_KEY: ""
+    exa:
+      enabled: true
+      name: "Exa"
+      description: "Neural web search and page fetch tools for research workflows"
+      transport: "stdio"
+      command: "npx"
+      args:
+        - "-y"
+        - "exa-mcp-server"
+      workingDirectory: "/tmp"
+      env:
+        EXA_API_KEY: "${EXA_API_KEY}"
+      secret:
+        EXA_API_KEY: ""
     s3:
       enabled: false
       secret:

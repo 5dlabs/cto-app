@@ -11,6 +11,9 @@ This branch moves CTO Desktop from a desktop-only bootstrap flow toward a design
 - **Provider/model stress case:** OpenRouter has a larger hardcoded model list for layout stress testing. Provider cards support multiple selected models and scroll internally so large catalogs do not push actions off-screen.
 - **Browser-only design mode:** `npm run web:dev` serves the React UI directly in a browser and skips the Rust/Kind bootstrap gate outside Tauri. The same bypass can be forced with `VITE_CTO_SKIP_LOCAL_STACK_BOOTSTRAP=1`.
 - **Morgan/voice UI:** Morgan has local avatar/voice bridge integration work in progress, with a new voice-bridge chart and local ingress paths under `/morgan`.
+- **Research MCP routing:** Local Morgan routes research MCP tools through the central `cto-tools` service. The `cto` chart now starts Exa, Firecrawl, and Tavily MCP servers there, and Morgan requests them through `remoteTools` globs instead of per-agent local MCP entries.
+- **Tools SDK path:** Morgan now renders `/workspace/.cto-tools/mcp.mjs`/`mcp.ts` from the agent chart. Code-execution tasks can import `callTool`, `listTools`, `describeTool`, and `escalate` to call the central `cto-tools` service without relying on native tool-call plumbing. The SDK is Node-compatible because the desktop agent image has Node 22 but not Deno.
+- **Tool API keys:** The setup wizard includes common tool keys for Exa, Firecrawl, Tavily, Brave Search, Perplexity, and Context7. Non-empty values are applied to the local `cto-system/cto-agent-keys` Secret and patched into the local `cto` Argo Application values so Kind desired state owns the same keys.
 
 ## How to run
 
@@ -40,6 +43,8 @@ PATH="$(/opt/homebrew/bin/rustup which cargo | xargs dirname):$PATH" cargo test 
 ## Known caveats
 
 - Brandfetch MCP is configured in the user-level Copilot MCP config, not this repository. It still needs `BRANDFETCH_API_KEY` and `BRANDFETCH_CLIENT_ID` before brand assets can be fetched.
+- Exa, Firecrawl, and Tavily MCP tools need `EXA_API_KEY`, `FIRECRAWL_API_KEY`, and `TAVILY_API_KEY` in the local `cto-agent-keys` Secret before provider calls succeed. The wizard can also collect `BRAVE_API_KEY`, `PERPLEXITY_API_KEY`, and `CONTEXT7_API_KEY` for OpenCLAW web/docs research providers.
+- Exa's MCP server currently exposes `web_search_exa` and `web_fetch_exa`, so the Morgan `remoteTools` allowlist includes `web_*_exa` in addition to the compatibility `exa_*` glob.
 - The current provider/model catalog is intentionally hardcoded for review. Long term, OpenRouter and other broad catalogs should be dynamically fetched or summarized instead of maintained inline.
 - Tauri/browser automation was flaky in this environment, so visual layout review should continue in the browser-only mode.
 - GitHub/GitLab CLI are selected as CLI surfaces for source-control compatibility but should not be treated as AI provider launchers.
