@@ -1,6 +1,8 @@
-use reqwest::Url;
+use reqwest::{Client, StatusCode, Url};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::collections::BTreeMap;
+use std::fmt::Write as _;
 use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -10,6 +12,8 @@ type ScmResult<T> = Result<T, String>;
 
 const CONNECTION_ID_MAX_LEN: usize = 48;
 const LOCAL_CALLBACK_BASE_URL: &str = "http://localhost:8080";
+const DEFAULT_SCM_SECRET_NAMESPACE: &str = "bots";
+const GITHUB_API_VERSION: &str = "2022-11-28";
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum ScmProvider {
@@ -76,6 +80,14 @@ pub struct ScmConnection {
     pub base_url: String,
     pub secret_name: String,
     pub secret_keys: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_app_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_app_slug: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_app_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub credentials_updated_at: Option<String>,
     pub auth_strategy: ScmAuthStrategy,
     pub callback_url: String,
     pub webhook_url: Option<String>,
@@ -120,6 +132,41 @@ pub struct ScmProvisioningPlan {
     pub warnings: Vec<String>,
 }
 
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitHubManifestExchangeRequest {
+    pub connection: ScmConnection,
+    pub code: String,
+    pub secret_namespace: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitHubManifestExchangeResult {
+    pub connection: ScmConnection,
+    pub app_id: u64,
+    pub app_slug: Option<String>,
+    pub app_url: Option<String>,
+    pub kubernetes_secret_name: String,
+    pub kubernetes_secret_namespace: String,
+    pub kubernetes_secret_manifest: String,
+    pub credential_keys: Vec<String>,
+    pub next_steps: Vec<String>,
+    pub local_metadata_saved: bool,
+    pub local_metadata_error: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GitHubManifestConversion {
+    id: u64,
+    slug: Option<String>,
+    html_url: Option<String>,
+    client_id: String,
+    client_secret: String,
+    webhook_secret: String,
+    pem: String,
+}
+
 struct ScmPlanBase {
     connection_id: String,
     display_name: String,
@@ -154,33 +201,33 @@ pub fn save_scm_connection(
     connection: ScmConnection,
 ) -> ScmResult<Vec<ScmConnection>> {
     let app = app;
-    validate_connection(&connection)?;
+    upsert_connection(&app, connection)
+}
 
-    let mut store = read_store(&app)?;
-    let now = now_stamp();
-    let mut next = connection;
-    next.updated_at = now;
-
-    if let Some(existing) = store.connections.iter_mut().find(|candidate| {
-        candidate.provider == next.provider && candidate.connection_id == next.connection_id
-    }) {
-        next.created_at.clone_from(&existing.created_at);
-        *existing = next;
-    } else {
-        if next.created_at.trim().is_empty() {
-            next.created_at = now_stamp();
+#[tauri::command]
+pub async fn exchange_github_manifest_code(
+    app: AppHandle,
+    request: GitHubManifestExchangeRequest,
+) -> ScmResult<GitHubManifestExchangeResult> {
+    validate_github_manifest_exchange_connection(&request.connection)?;
+    let conversion =
+        exchange_github_manifest_code_http(&request.connection.base_url, &request.code).await?;
+    let mut result = build_github_manifest_exchange_result(
+        request.connection,
+        conversion,
+        request.secret_namespace.as_deref(),
+    )?;
+    match upsert_connection(&app, result.connection.clone()) {
+        Ok(_) => {
+            result.local_metadata_saved = true;
+            result.local_metadata_error = None;
         }
-        store.connections.push(next);
+        Err(error) => {
+            result.local_metadata_saved = false;
+            result.local_metadata_error = Some(error);
+        }
     }
-
-    store.connections.sort_by(|a, b| {
-        a.provider
-            .slug()
-            .cmp(b.provider.slug())
-            .then(a.connection_id.cmp(&b.connection_id))
-    });
-    write_store(&app, &store)?;
-    Ok(store.connections)
+    Ok(result)
 }
 
 #[tauri::command]
@@ -293,7 +340,7 @@ fn github_plan(
     let secret_name = secret_name(ScmProvider::GitHub, &connection_id);
     let secret_keys = github_secret_keys();
     let app_name = format!("CTO {display_name} {connection_id}");
-    let setup_urls = github_setup_urls(&owner);
+    let setup_urls = github_setup_urls(&base_url, &owner);
     let repository_selection_label = match repository_selection {
         RepositorySelection::All => "all",
         RepositorySelection::Selected => "selected",
@@ -329,6 +376,10 @@ fn github_plan(
         base_url,
         secret_name: secret_name.clone(),
         secret_keys: secret_keys.clone(),
+        provider_app_id: None,
+        provider_app_slug: None,
+        provider_app_url: None,
+        credentials_updated_at: None,
         auth_strategy: ScmAuthStrategy::GitHubAppManifest,
         callback_url: github_manifest["redirect_url"]
             .as_str()
@@ -367,15 +418,15 @@ fn github_secret_keys() -> Vec<String> {
     ])
 }
 
-fn github_setup_urls(owner: &str) -> Vec<ScmSetupUrl> {
+fn github_setup_urls(base_url: &str, owner: &str) -> Vec<ScmSetupUrl> {
     vec![
         ScmSetupUrl {
             label: "User-owned app".to_string(),
-            url: "https://github.com/settings/apps/new".to_string(),
+            url: format!("{base_url}/settings/apps/new"),
         },
         ScmSetupUrl {
             label: format!("Org-owned app ({owner})"),
-            url: format!("https://github.com/organizations/{owner}/settings/apps/new"),
+            url: format!("{base_url}/organizations/{owner}/settings/apps/new"),
         },
     ]
 }
@@ -438,6 +489,10 @@ fn gitlab_plan(plan_base: ScmPlanBase) -> ScmProvisioningPlan {
         base_url,
         secret_name: secret_name.clone(),
         secret_keys: secret_keys.clone(),
+        provider_app_id: None,
+        provider_app_slug: None,
+        provider_app_url: None,
+        credentials_updated_at: None,
         auth_strategy,
         callback_url: local_callback_url.clone(),
         webhook_url,
@@ -532,6 +587,263 @@ fn validate_connection(connection: &ScmConnection) -> ScmResult<()> {
         return Err("webhookEnabled requires a webhookUrl".to_string());
     }
     Ok(())
+}
+
+fn upsert_connection(app: &AppHandle, connection: ScmConnection) -> ScmResult<Vec<ScmConnection>> {
+    validate_connection(&connection)?;
+
+    let mut store = read_store(app)?;
+    let now = now_stamp();
+    let mut next = connection;
+    next.updated_at.clone_from(&now);
+
+    if let Some(existing) = store.connections.iter_mut().find(|candidate| {
+        candidate.provider == next.provider && candidate.connection_id == next.connection_id
+    }) {
+        next.created_at.clone_from(&existing.created_at);
+        *existing = next;
+    } else {
+        if next.created_at.trim().is_empty() {
+            next.created_at = now;
+        }
+        store.connections.push(next);
+    }
+
+    store.connections.sort_by(|a, b| {
+        a.provider
+            .slug()
+            .cmp(b.provider.slug())
+            .then(a.connection_id.cmp(&b.connection_id))
+    });
+    write_store(app, &store)?;
+    Ok(store.connections)
+}
+
+async fn exchange_github_manifest_code_http(
+    base_url: &str,
+    code: &str,
+) -> ScmResult<GitHubManifestConversion> {
+    let url = github_manifest_conversion_url(base_url, code)?;
+    let response = Client::new()
+        .post(url)
+        .header("Accept", "application/vnd.github+json")
+        .header("User-Agent", "cto-app")
+        .header("X-GitHub-Api-Version", GITHUB_API_VERSION)
+        .send()
+        .await
+        .map_err(|error| format!("GitHub manifest exchange request failed: {error}"))?;
+
+    let status = response.status();
+    let body = response
+        .bytes()
+        .await
+        .map_err(|error| format!("failed to read GitHub manifest exchange response: {error}"))?;
+
+    if !status.is_success() {
+        return Err(format_github_manifest_exchange_error(status, &body));
+    }
+
+    parse_github_manifest_conversion(&body)
+}
+
+fn build_github_manifest_exchange_result(
+    mut connection: ScmConnection,
+    conversion: GitHubManifestConversion,
+    secret_namespace: Option<&str>,
+) -> ScmResult<GitHubManifestExchangeResult> {
+    validate_github_manifest_exchange_connection(&connection)?;
+
+    let namespace = normalize_secret_namespace(secret_namespace)?;
+    let credential_data = github_manifest_secret_data(&conversion);
+    let credential_keys = connection.secret_keys.clone();
+    let secret_manifest = render_kubernetes_secret_manifest(
+        ScmProvider::GitHub,
+        &connection.connection_id,
+        &connection.secret_name,
+        &namespace,
+        &credential_data,
+    );
+    let now = now_stamp();
+
+    connection.provider_app_id = Some(conversion.id.to_string());
+    connection.provider_app_slug.clone_from(&conversion.slug);
+    connection.provider_app_url.clone_from(&conversion.html_url);
+    connection.credentials_updated_at = Some(now.clone());
+    connection.status = ScmConnectionStatus::PendingInstall;
+    connection.updated_at = now;
+
+    Ok(GitHubManifestExchangeResult {
+        app_id: conversion.id,
+        app_slug: conversion.slug,
+        app_url: conversion.html_url,
+        kubernetes_secret_name: connection.secret_name.clone(),
+        kubernetes_secret_namespace: namespace,
+        kubernetes_secret_manifest: secret_manifest,
+        credential_keys,
+        next_steps: strings(&[
+            "Apply the generated Secret manifest to the local CTO cluster.",
+            "Install the GitHub App on selected repositories.",
+            "Run installation discovery once available to populate installation-ids.",
+        ]),
+        local_metadata_saved: false,
+        local_metadata_error: None,
+        connection,
+    })
+}
+
+fn validate_github_manifest_exchange_connection(connection: &ScmConnection) -> ScmResult<()> {
+    if connection.provider != ScmProvider::GitHub {
+        return Err("GitHub manifest exchange requires a GitHub connection".to_string());
+    }
+    if connection.auth_strategy != ScmAuthStrategy::GitHubAppManifest {
+        return Err(
+            "GitHub manifest exchange requires a github-app-manifest connection".to_string(),
+        );
+    }
+    validate_connection(connection)
+}
+
+fn github_manifest_secret_data(conversion: &GitHubManifestConversion) -> BTreeMap<String, String> {
+    BTreeMap::from([
+        ("app-id".to_string(), conversion.id.to_string()),
+        ("client-id".to_string(), conversion.client_id.clone()),
+        (
+            "client-secret".to_string(),
+            conversion.client_secret.clone(),
+        ),
+        ("installation-ids".to_string(), String::new()),
+        ("private-key".to_string(), conversion.pem.clone()),
+        (
+            "webhook-secret".to_string(),
+            conversion.webhook_secret.clone(),
+        ),
+    ])
+}
+
+fn render_kubernetes_secret_manifest(
+    provider: ScmProvider,
+    connection_id: &str,
+    secret_name: &str,
+    namespace: &str,
+    data: &BTreeMap<String, String>,
+) -> String {
+    let mut manifest = format!(
+        "apiVersion: v1\nkind: Secret\nmetadata:\n  name: {secret_name}\n  namespace: \
+         {namespace}\n  labels:\n    app.kubernetes.io/managed-by: cto-app\n    \
+         cto.5dlabs.ai/scm-provider: {}\n    cto.5dlabs.ai/scm-connection-id: \
+         {connection_id}\ntype: Opaque\nstringData:\n",
+        provider.slug()
+    );
+
+    for (key, value) in data {
+        if value.is_empty() {
+            let _ = writeln!(manifest, "  {key}: \"\"");
+            continue;
+        }
+
+        let _ = writeln!(manifest, "  {key}: |-");
+        let normalized = value.replace("\r\n", "\n").replace('\r', "\n");
+        for line in normalized.lines() {
+            manifest.push_str("    ");
+            manifest.push_str(line);
+            manifest.push('\n');
+        }
+    }
+
+    manifest
+}
+
+fn parse_github_manifest_conversion(body: &[u8]) -> ScmResult<GitHubManifestConversion> {
+    serde_json::from_slice(body)
+        .map_err(|error| format!("failed to parse GitHub manifest conversion response: {error}"))
+}
+
+fn github_manifest_conversion_url(base_url: &str, code: &str) -> ScmResult<Url> {
+    let code = code.trim();
+    if code.is_empty() {
+        return Err("manifest code is required".to_string());
+    }
+
+    let api_base = github_api_base_url(base_url)?;
+    let mut url =
+        Url::parse(&api_base).map_err(|error| format!("invalid GitHub API URL: {error}"))?;
+    url.path_segments_mut()
+        .map_err(|()| "GitHub API URL cannot be a base".to_string())?
+        .pop_if_empty()
+        .extend(["app-manifests", code, "conversions"]);
+    Ok(url)
+}
+
+fn github_api_base_url(base_url: &str) -> ScmResult<String> {
+    let base_url = normalize_url(base_url)?;
+    let url = Url::parse(&base_url).map_err(|error| format!("invalid GitHub base URL: {error}"))?;
+    if url
+        .host_str()
+        .is_some_and(|host| host.eq_ignore_ascii_case("github.com"))
+    {
+        Ok("https://api.github.com".to_string())
+    } else {
+        Ok(format!("{base_url}/api/v3"))
+    }
+}
+
+fn normalize_secret_namespace(secret_namespace: Option<&str>) -> ScmResult<String> {
+    let namespace = secret_namespace
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(DEFAULT_SCM_SECRET_NAMESPACE);
+    validate_kubernetes_name(namespace, "secret namespace")?;
+    Ok(namespace.to_string())
+}
+
+fn validate_kubernetes_name(value: &str, label: &str) -> ScmResult<()> {
+    if value.is_empty() || value.len() > 63 {
+        return Err(format!("{label} must be 1-63 characters"));
+    }
+    if value.starts_with('-') || value.ends_with('-') {
+        return Err(format!("{label} cannot start or end with '-'"));
+    }
+    if !value
+        .bytes()
+        .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+    {
+        return Err(format!(
+            "{label} must contain only lowercase letters, numbers, and '-'"
+        ));
+    }
+    Ok(())
+}
+
+fn format_github_manifest_exchange_error(status: StatusCode, body: &[u8]) -> String {
+    let detail = serde_json::from_slice::<Value>(body)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("message")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
+        .unwrap_or_else(|| String::from_utf8_lossy(body).trim().to_string());
+    let detail = detail.trim();
+    if detail.is_empty() {
+        format!("GitHub manifest exchange failed: HTTP {status}")
+    } else {
+        format!(
+            "GitHub manifest exchange failed: HTTP {status} — {}",
+            truncate_for_error(detail)
+        )
+    }
+}
+
+fn truncate_for_error(value: &str) -> String {
+    const MAX_LEN: usize = 240;
+    let mut chars = value.chars();
+    let truncated = chars.by_ref().take(MAX_LEN).collect::<String>();
+    if chars.next().is_none() {
+        value.to_string()
+    } else {
+        format!("{truncated}…")
+    }
 }
 
 fn validate_connection_id(connection_id: &str) -> ScmResult<()> {
@@ -630,6 +942,18 @@ mod tests {
         }
     }
 
+    fn github_conversion() -> GitHubManifestConversion {
+        GitHubManifestConversion {
+            id: 12_345,
+            slug: Some("cto-acme-dev".to_string()),
+            html_url: Some("https://github.com/apps/cto-acme-dev".to_string()),
+            client_id: "Iv1.fakeclient".to_string(),
+            client_secret: "client-value".to_string(),
+            webhook_secret: "webhook-value".to_string(),
+            pem: "pem-value-line-1\npem-value-line-2\n".to_string(),
+        }
+    }
+
     #[test]
     fn github_manifest_uses_private_tenant_secret_and_local_callback() {
         let plan = build_provisioning_plan(github_request()).expect("plan");
@@ -651,6 +975,99 @@ mod tests {
             Value::String("write".to_string())
         );
         assert!(!manifest.to_string().contains("5dlabs"));
+    }
+
+    #[test]
+    fn github_manifest_exchange_url_uses_public_or_enterprise_api() {
+        let public = github_manifest_conversion_url("https://github.com", " abc ").expect("url");
+        assert_eq!(
+            public.as_str(),
+            "https://api.github.com/app-manifests/abc/conversions"
+        );
+
+        let enterprise =
+            github_manifest_conversion_url("https://github.example.test/", "abc/123").expect("url");
+        assert_eq!(
+            enterprise.as_str(),
+            "https://github.example.test/api/v3/app-manifests/abc%2F123/conversions"
+        );
+    }
+
+    #[test]
+    fn github_enterprise_plan_uses_enterprise_setup_urls() {
+        let mut request = github_request();
+        request.base_url = Some("https://github.example.test/".to_string());
+
+        let plan = build_provisioning_plan(request).expect("plan");
+
+        assert_eq!(
+            plan.setup_urls[0].url,
+            "https://github.example.test/settings/apps/new"
+        );
+        assert_eq!(
+            plan.setup_urls[1].url,
+            "https://github.example.test/organizations/acme/settings/apps/new"
+        );
+    }
+
+    #[test]
+    fn github_manifest_exchange_updates_metadata_and_renders_secret() {
+        let plan = build_provisioning_plan(github_request()).expect("plan");
+        let result = build_github_manifest_exchange_result(
+            plan.connection,
+            github_conversion(),
+            Some("bots-dev"),
+        )
+        .expect("exchange result");
+
+        assert_eq!(result.app_id, 12_345);
+        assert_eq!(result.app_slug.as_deref(), Some("cto-acme-dev"));
+        assert_eq!(result.connection.provider_app_id.as_deref(), Some("12345"));
+        assert_eq!(
+            result.connection.provider_app_url.as_deref(),
+            Some("https://github.com/apps/cto-acme-dev")
+        );
+        assert_eq!(
+            result.connection.status,
+            ScmConnectionStatus::PendingInstall
+        );
+        assert_eq!(result.kubernetes_secret_namespace, "bots-dev");
+        assert_eq!(result.credential_keys, github_secret_keys());
+        assert!(result
+            .kubernetes_secret_manifest
+            .contains("name: cto-scm-github-acme-dev"));
+        assert!(result
+            .kubernetes_secret_manifest
+            .contains("namespace: bots-dev"));
+        assert!(result
+            .kubernetes_secret_manifest
+            .contains("installation-ids: \"\""));
+        assert!(result
+            .kubernetes_secret_manifest
+            .contains("private-key: |-\n    pem-value-line-1\n    pem-value-line-2"));
+
+        let stored_connection = serde_json::to_string(&result.connection).expect("json");
+        assert!(!stored_connection.contains("client-value"));
+        assert!(!stored_connection.contains("pem-value-line"));
+        assert!(!stored_connection.contains("webhook-value"));
+    }
+
+    #[test]
+    fn github_manifest_exchange_rejects_non_github_connections() {
+        let plan = build_provisioning_plan(ScmProvisioningRequest {
+            provider: ScmProvider::GitLab,
+            connection_id: "acme-gitlab".to_string(),
+            display_name: None,
+            owner: "acme".to_string(),
+            base_url: Some("https://gitlab.com".to_string()),
+            callback_base_url: None,
+            repository_selection: None,
+        })
+        .expect("plan");
+
+        let err = build_github_manifest_exchange_result(plan.connection, github_conversion(), None)
+            .expect_err("gitlab connection should fail");
+        assert!(err.contains("GitHub connection"));
     }
 
     #[test]

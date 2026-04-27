@@ -23,6 +23,10 @@ export interface ScmConnection {
   baseUrl: string;
   secretName: string;
   secretKeys: string[];
+  providerAppId?: string;
+  providerAppSlug?: string;
+  providerAppUrl?: string;
+  credentialsUpdatedAt?: string;
   authStrategy: ScmAuthStrategy;
   callbackUrl: string;
   webhookUrl: string | null;
@@ -61,6 +65,26 @@ export interface ScmProvisioningPlan {
   warnings: string[];
 }
 
+export interface GitHubManifestExchangeRequest {
+  connection: ScmConnection;
+  code: string;
+  secretNamespace?: string;
+}
+
+export interface GitHubManifestExchangeResult {
+  connection: ScmConnection;
+  appId: number;
+  appSlug: string | null;
+  appUrl: string | null;
+  kubernetesSecretName: string;
+  kubernetesSecretNamespace: string;
+  kubernetesSecretManifest: string;
+  credentialKeys: string[];
+  nextSteps: string[];
+  localMetadataSaved: boolean;
+  localMetadataError: string | null;
+}
+
 export function listScmConnections(): Promise<ScmConnection[]> {
   return invoke<ScmConnection[]>("list_scm_connections");
 }
@@ -75,6 +99,14 @@ export function saveScmConnection(
   connection: ScmConnection,
 ): Promise<ScmConnection[]> {
   return invoke<ScmConnection[]>("save_scm_connection", { connection });
+}
+
+export function exchangeGithubManifestCode(
+  request: GitHubManifestExchangeRequest,
+): Promise<GitHubManifestExchangeResult> {
+  return invoke<GitHubManifestExchangeResult>("exchange_github_manifest_code", {
+    request,
+  });
 }
 
 export function deleteScmConnection(

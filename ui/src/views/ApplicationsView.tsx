@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import {
   IconPuzzle,
   IconCurrency,
@@ -15,73 +16,134 @@ import { APPLICATIONS, type ExtensionModule } from "./data";
 
 type Tab = "runtime" | "extensions";
 
-type Pod = {
-  name: string;
-  namespace: string;
-  containers: { name: string; status: "running" | "pending" | "error" }[];
-  status: "Running" | "Pending" | "Error" | "CrashLoopBackOff";
-  restarts: number;
-  age: string;
+type ResourceAmount = {
+  cpuMilliCores?: number | null;
+  memoryBytes?: number | null;
 };
 
-const PODS: Pod[] = [
-  {
-    name: "narrator-85c64ccb7c-99glr",
-    namespace: "cto",
-    containers: [{ name: "narrator", status: "running" }],
-    status: "Running",
-    restarts: 0,
-    age: "2h14m",
-  },
-  {
-    name: "musetalk-worker-79f8b49d64-5trhf",
-    namespace: "cto",
-    containers: [{ name: "worker", status: "running" }],
-    status: "Running",
-    restarts: 0,
-    age: "2h17m",
-  },
-  {
-    name: "hunyuan-avatar-worker-5c7d9b-qk2fn",
-    namespace: "cto",
-    containers: [{ name: "worker", status: "running" }],
-    status: "Running",
-    restarts: 0,
-    age: "2h19m",
-  },
-  {
-    name: "rex-coderun-feat-narrator-a8f2",
-    namespace: "cto",
-    containers: [
-      { name: "agent", status: "running" },
-      { name: "code-server", status: "running" },
-      { name: "narrator-musetalk", status: "running" },
-      { name: "narrator-hunyuan", status: "running" },
-    ],
-    status: "Running",
-    restarts: 0,
-    age: "34m",
-  },
-  {
-    name: "blaze-coderun-ui-tokens-4c1d",
-    namespace: "cto",
-    containers: [
-      { name: "agent", status: "running" },
-      { name: "code-server", status: "running" },
-    ],
-    status: "Running",
-    restarts: 0,
-    age: "12m",
-  },
-  {
-    name: "morgan-intake-6b4f8c9d5-n2xqp",
-    namespace: "cto",
-    containers: [{ name: "moderator", status: "running" }],
-    status: "Running",
-    restarts: 1,
-    age: "8h02m",
-  },
-];
+type LiveResourceUsage = {
+  cpuNanoCores?: number | null;
+  memoryBytes?: number | null;
+};
+
+type RuntimeAllocation = {
+  cpuCores?: number | null;
+  memoryBytes?: number | null;
+  diskBytes?: number | null;
+  source: string;
+  details: Record<string, string>;
+};
+
+type MetricsClusterReport = {
+  name: string;
+  context: string;
+  kindClusterExists: boolean;
+  apiReachable: boolean;
+  reason?: string;
+};
+
+type MetricsRuntimeReport = {
+  label: string;
+  available: boolean;
+  allocation?: RuntimeAllocation | null;
+};
+
+type RuntimeContainerMetrics = {
+  name: string;
+  runtime: string;
+  statsAvailable: boolean;
+  unavailableReason?: string;
+  cpuPercent?: number | null;
+  memoryUsageBytes?: number | null;
+  memoryLimitBytes?: number | null;
+  memoryPercent?: number | null;
+  pids?: number | null;
+  raw: Record<string, string>;
+};
+
+type KubernetesNodeMetrics = {
+  name: string;
+  ready: boolean;
+  roles: string[];
+  createdAt?: string;
+  ageSeconds?: number | null;
+  capacity: ResourceAmount;
+  allocatable: ResourceAmount;
+};
+
+type KubernetesContainerMetrics = {
+  name: string;
+  requests: ResourceAmount;
+  limits: ResourceAmount;
+  liveUsage: LiveResourceUsage;
+};
+
+type KubernetesPodMetrics = {
+  namespace: string;
+  name: string;
+  phase: string;
+  nodeName?: string;
+  createdAt?: string;
+  ageSeconds?: number | null;
+  readyContainers: number;
+  totalContainers: number;
+  restarts: number;
+  containerNames: string[];
+  requests: ResourceAmount;
+  limits: ResourceAmount;
+  liveUsage: LiveResourceUsage;
+  containers: KubernetesContainerMetrics[];
+};
+
+type NamespaceResourceTotals = {
+  namespace: string;
+  pods: number;
+  containers: number;
+  restarts: number;
+  requests: ResourceAmount;
+  limits: ResourceAmount;
+  liveUsage: LiveResourceUsage;
+};
+
+type ResourceMetricTotals = {
+  nodes: number;
+  pods: number;
+  containers: number;
+  restarts: number;
+  nodeCapacity: ResourceAmount;
+  nodeAllocatable: ResourceAmount;
+  requests: ResourceAmount;
+  limits: ResourceAmount;
+  liveUsage: LiveResourceUsage;
+  byNamespace: NamespaceResourceTotals[];
+};
+
+type MetricsSourceStatus = {
+  name: string;
+  available: boolean;
+  partial: boolean;
+  message?: string;
+};
+
+type LocalStackResourceMetricsReport = {
+  generatedAtEpochSeconds: number;
+  cluster: MetricsClusterReport;
+  runtime: MetricsRuntimeReport;
+  nodeContainers: RuntimeContainerMetrics[];
+  nodes: KubernetesNodeMetrics[];
+  pods: KubernetesPodMetrics[];
+  totals: ResourceMetricTotals;
+  sources: MetricsSourceStatus[];
+  warnings: string[];
+  errors: string[];
+};
+
+type PodHealth = "running" | "pending" | "error";
+type RuntimeNotice = { tone: "warn" | "danger"; text: string };
+type MetricParts = { value: string; unit: string };
+type MetricNumber = number | null | undefined;
+
+const EMPTY_PODS: KubernetesPodMetrics[] = [];
 
 const ARGO_APPS = [
   { name: "cto-controller", sync: "Synced", health: "Healthy" },
@@ -101,20 +163,360 @@ const LOG_LINES = [
   `{"ts":"17:42:11.502","lvl":"info","mod":"narrator","backend":"musetalk","phrase":"Check passes — moving on to the CRD mirror."}`,
 ];
 
+function toErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function podKey(pod: KubernetesPodMetrics) {
+  return `${pod.namespace}/${pod.name}`;
+}
+
+function getPodContainerNames(pod: KubernetesPodMetrics) {
+  if (pod.containerNames.length > 0) {
+    return pod.containerNames;
+  }
+  return pod.containers.map((container) => container.name);
+}
+
+function getPodHealth(pod: KubernetesPodMetrics): PodHealth {
+  const phase = pod.phase.toLowerCase();
+  const ready = pod.totalContainers === 0 || pod.readyContainers >= pod.totalContainers;
+
+  if (phase === "running" && ready) {
+    return "running";
+  }
+  if (phase === "pending" || phase === "containercreating" || (phase === "running" && !ready)) {
+    return "pending";
+  }
+  return "error";
+}
+
+function getContainerHealth(pod: KubernetesPodMetrics, index: number): PodHealth {
+  const podHealth = getPodHealth(pod);
+
+  if (podHealth === "error") {
+    return "error";
+  }
+  if (pod.phase.toLowerCase() === "running" && index < pod.readyContainers) {
+    return "running";
+  }
+  return podHealth;
+}
+
+function formatPodStatus(pod: KubernetesPodMetrics) {
+  const phase = pod.phase || "Unknown";
+  if (pod.totalContainers > 0) {
+    return `${phase} ${pod.readyContainers}/${pod.totalContainers}`;
+  }
+  return phase;
+}
+
+function isFiniteMetricNumber(value: MetricNumber): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function divideMetricNumber(value: MetricNumber, divisor: number) {
+  return isFiniteMetricNumber(value) ? value / divisor : undefined;
+}
+
+function firstFiniteMetricNumber(...values: MetricNumber[]) {
+  return values.find(isFiniteMetricNumber);
+}
+
+function formatAge(seconds?: number | null) {
+  if (!isFiniteMetricNumber(seconds)) {
+    return "—";
+  }
+
+  const days = Math.floor(seconds / 86_400);
+  const hours = Math.floor((seconds % 86_400) / 3_600);
+  const minutes = Math.floor((seconds % 3_600) / 60);
+
+  if (days > 0) {
+    return `${days}d${hours > 0 ? ` ${hours}h` : ""}`;
+  }
+  if (hours > 0) {
+    return `${hours}h${minutes > 0 ? ` ${minutes}m` : ""}`;
+  }
+  if (minutes > 0) {
+    return `${minutes}m`;
+  }
+  return `${Math.max(0, seconds)}s`;
+}
+
+function formatDecimal(value: number, maximumFractionDigits = 1) {
+  return value.toLocaleString(undefined, { maximumFractionDigits });
+}
+
+function formatCpuParts(cores?: number | null): MetricParts {
+  if (!isFiniteMetricNumber(cores)) {
+    return { value: "—", unit: "" };
+  }
+  if (cores > 0 && cores < 1) {
+    return { value: Math.max(1, Math.round(cores * 1_000)).toLocaleString(), unit: "m" };
+  }
+  return { value: formatDecimal(cores, cores >= 10 ? 1 : 2), unit: "cores" };
+}
+
+function formatCpuCores(cores?: number | null) {
+  const parts = formatCpuParts(cores);
+  return parts.unit ? `${parts.value} ${parts.unit}` : parts.value;
+}
+
+function formatBytesParts(bytes?: number | null): MetricParts {
+  if (!isFiniteMetricNumber(bytes)) {
+    return { value: "—", unit: "" };
+  }
+
+  const units: Array<[string, number]> = [
+    ["TiB", 1_099_511_627_776],
+    ["GiB", 1_073_741_824],
+    ["MiB", 1_048_576],
+    ["KiB", 1_024],
+  ];
+  const absolute = Math.abs(bytes);
+  for (const [unit, divisor] of units) {
+    if (absolute >= divisor) {
+      const value = bytes / divisor;
+      return { value: formatDecimal(value, Math.abs(value) >= 10 ? 1 : 2), unit };
+    }
+  }
+  return { value: Math.round(bytes).toLocaleString(), unit: "B" };
+}
+
+function formatBytes(bytes?: number | null) {
+  const parts = formatBytesParts(bytes);
+  return parts.unit ? `${parts.value} ${parts.unit}` : parts.value;
+}
+
+function formatPercent(used?: number | null, total?: number | null) {
+  if (!isFiniteMetricNumber(used) || !isFiniteMetricNumber(total) || total <= 0) {
+    return null;
+  }
+  return `${formatDecimal((used / total) * 100, 0)}% used`;
+}
+
+function formatGeneratedAt(epochSeconds?: number) {
+  if (epochSeconds === undefined) {
+    return "not loaded";
+  }
+  return new Date(epochSeconds * 1_000).toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
+
+function formatRuntimeBudget(allocation?: RuntimeAllocation | null) {
+  if (!allocation) {
+    return "No runtime allocation reported";
+  }
+
+  const budget = [
+    isFiniteMetricNumber(allocation.cpuCores) ? formatCpuCores(allocation.cpuCores) : null,
+    isFiniteMetricNumber(allocation.memoryBytes) ? `${formatBytes(allocation.memoryBytes)} memory` : null,
+    isFiniteMetricNumber(allocation.diskBytes) ? `${formatBytes(allocation.diskBytes)} disk` : null,
+  ].filter((item): item is string => item !== null);
+
+  const source = allocation.source ? `via ${allocation.source}` : "runtime allocation";
+  return budget.length > 0 ? `${budget.join(" · ")} · ${source}` : source;
+}
+
 export function ApplicationsView() {
   const [tab, setTab] = useState<Tab>("runtime");
   const [enabled, setEnabled] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(APPLICATIONS.map((m) => [m.key, !!m.active])),
   );
-  const [selectedPod, setSelectedPod] = useState<string>(PODS[3]!.name);
-  const [selectedContainer, setSelectedContainer] = useState<string>("agent");
+  const [metricsReport, setMetricsReport] = useState<LocalStackResourceMetricsReport | null>(null);
+  const [metricsLoading, setMetricsLoading] = useState(false);
+  const [metricsError, setMetricsError] = useState<string | null>(null);
+  const [selectedPodKey, setSelectedPodKey] = useState<string>("");
+  const [selectedContainer, setSelectedContainer] = useState<string>("");
   const [nsFilter, setNsFilter] = useState<string>("all");
+  const metricsRequestId = useRef(0);
+  const mounted = useRef(true);
 
-  const pods = nsFilter === "all" ? PODS : PODS.filter((p) => p.namespace === nsFilter);
-  const activePod = PODS.find((p) => p.name === selectedPod) ?? PODS[0]!;
-  const runningCount = PODS.filter((p) => p.status === "Running").length;
-  const pendingCount = PODS.filter((p) => p.status === "Pending").length;
-  const errorCount = PODS.length - runningCount - pendingCount;
+  useEffect(() => {
+    return () => {
+      mounted.current = false;
+      metricsRequestId.current += 1;
+    };
+  }, []);
+
+  const refreshMetrics = useCallback(async () => {
+    const requestId = metricsRequestId.current + 1;
+    metricsRequestId.current = requestId;
+    setMetricsLoading(true);
+    setMetricsError(null);
+
+    try {
+      const report = await invoke<LocalStackResourceMetricsReport>("local_stack_resource_metrics");
+      if (!mounted.current || metricsRequestId.current !== requestId) {
+        return;
+      }
+      setMetricsReport(report);
+    } catch (error) {
+      if (!mounted.current || metricsRequestId.current !== requestId) {
+        return;
+      }
+      setMetricsError(toErrorMessage(error));
+    } finally {
+      if (mounted.current && metricsRequestId.current === requestId) {
+        setMetricsLoading(false);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    if (tab === "runtime") {
+      void refreshMetrics();
+    }
+  }, [refreshMetrics, tab]);
+
+  const allPods = metricsReport?.pods ?? EMPTY_PODS;
+  const namespaces = useMemo(
+    () => Array.from(new Set(allPods.map((pod) => pod.namespace))).sort((a, b) => a.localeCompare(b)),
+    [allPods],
+  );
+  const pods = useMemo(
+    () => (nsFilter === "all" ? allPods : allPods.filter((pod) => pod.namespace === nsFilter)),
+    [allPods, nsFilter],
+  );
+  const activePod = useMemo(
+    () => allPods.find((pod) => podKey(pod) === selectedPodKey) ?? null,
+    [allPods, selectedPodKey],
+  );
+  const activePodContainers = useMemo(
+    () => (activePod ? getPodContainerNames(activePod) : []),
+    [activePod],
+  );
+  const podCounts = useMemo(
+    () =>
+      allPods.reduce(
+        (counts, pod) => {
+          const health = getPodHealth(pod);
+          counts[health] += 1;
+          return counts;
+        },
+        { running: 0, pending: 0, error: 0 } satisfies Record<PodHealth, number>,
+      ),
+    [allPods],
+  );
+  const sourceIssues = useMemo(
+    () => metricsReport?.sources.filter((source) => !source.available || source.partial) ?? [],
+    [metricsReport],
+  );
+  const healthySourceCount = metricsReport
+    ? metricsReport.sources.filter((source) => source.available && !source.partial).length
+    : 0;
+  const reportNotices = useMemo<RuntimeNotice[]>(() => {
+    const notices: RuntimeNotice[] = [];
+
+    if (metricsError) {
+      notices.push({ tone: "danger", text: `Metrics unavailable: ${metricsError}` });
+    }
+    if (!metricsReport) {
+      return notices;
+    }
+    if (metricsReport.cluster.reason) {
+      notices.push({
+        tone: metricsReport.cluster.apiReachable ? "warn" : "danger",
+        text: metricsReport.cluster.reason,
+      });
+    }
+    metricsReport.errors.forEach((error) => {
+      notices.push({ tone: "danger", text: error });
+    });
+    metricsReport.warnings.forEach((warning) => {
+      notices.push({ tone: "warn", text: warning });
+    });
+    sourceIssues.forEach((source) => {
+      notices.push({
+        tone: source.available ? "warn" : "danger",
+        text: `${source.name} ${source.partial ? "partial" : "unavailable"}${
+          source.message ? `: ${source.message}` : ""
+        }`,
+      });
+    });
+
+    return notices;
+  }, [metricsError, metricsReport, sourceIssues]);
+  const visibleNotices = reportNotices.slice(0, 4);
+  const hiddenNoticeCount = reportNotices.length - visibleNotices.length;
+
+  const cpuLiveCores = divideMetricNumber(metricsReport?.totals.liveUsage.cpuNanoCores, 1_000_000_000);
+  const cpuRequestCores = divideMetricNumber(metricsReport?.totals.requests.cpuMilliCores, 1_000);
+  const cpuCapacityCores = divideMetricNumber(
+    firstFiniteMetricNumber(
+      metricsReport?.totals.nodeAllocatable.cpuMilliCores,
+      metricsReport?.totals.nodeCapacity.cpuMilliCores,
+    ),
+    1_000,
+  );
+  const memoryLiveBytes = metricsReport?.totals.liveUsage.memoryBytes;
+  const memoryRequestBytes = metricsReport?.totals.requests.memoryBytes;
+  const memoryCapacityBytes = firstFiniteMetricNumber(
+    metricsReport?.totals.nodeAllocatable.memoryBytes,
+    metricsReport?.totals.nodeCapacity.memoryBytes,
+  );
+  const cpuLiveParts = formatCpuParts(cpuLiveCores);
+  const memoryLiveParts = formatBytesParts(memoryLiveBytes);
+  const cpuUsedPercent = formatPercent(cpuLiveCores, cpuCapacityCores);
+  const memoryUsedPercent = formatPercent(memoryLiveBytes, memoryCapacityBytes);
+  const clusterTone = !metricsReport
+    ? metricsError
+      ? "danger"
+      : "warn"
+    : metricsReport.cluster.apiReachable
+      ? "success"
+      : "danger";
+  const runtimeTone = !metricsReport
+    ? metricsError
+      ? "danger"
+      : "warn"
+    : metricsReport.runtime.available
+      ? "success"
+      : "danger";
+  const sourceTone = !metricsReport
+    ? metricsError
+      ? "danger"
+      : "warn"
+    : metricsReport.errors.length > 0 || sourceIssues.some((source) => !source.available)
+      ? "danger"
+      : metricsReport.warnings.length > 0 || sourceIssues.length > 0
+        ? "warn"
+        : "success";
+
+  useEffect(() => {
+    if (nsFilter !== "all" && !namespaces.includes(nsFilter)) {
+      setNsFilter("all");
+    }
+  }, [namespaces, nsFilter]);
+
+  useEffect(() => {
+    if (allPods.length === 0) {
+      setSelectedPodKey("");
+      return;
+    }
+
+    setSelectedPodKey((current) => {
+      if (current && allPods.some((pod) => podKey(pod) === current)) {
+        return current;
+      }
+      return podKey(allPods[0]!);
+    });
+  }, [allPods]);
+
+  useEffect(() => {
+    if (activePodContainers.length === 0) {
+      setSelectedContainer("");
+      return;
+    }
+
+    setSelectedContainer((current) =>
+      current && activePodContainers.includes(current) ? current : activePodContainers[0]!,
+    );
+  }, [activePodContainers]);
 
   return (
     <div className="section">
@@ -125,7 +527,7 @@ export function ApplicationsView() {
           onClick={() => setTab("runtime")}
         >
           <IconActivity size={12} /> Runtime
-          <span className="tab__count">{PODS.length}</span>
+          <span className="tab__count">{metricsLoading && !metricsReport ? "…" : allPods.length}</span>
         </button>
         <button
           type="button"
@@ -190,34 +592,122 @@ export function ApplicationsView() {
           <div className="runtime-stats">
             <div className="runtime-stat">
               <div className="runtime-stat__eyebrow">Pods</div>
-              <div className="runtime-stat__value">{PODS.length}</div>
+              <div className="runtime-stat__value">{metricsLoading && !metricsReport ? "…" : allPods.length}</div>
               <div className="runtime-stat__sub">
-                <span className="dot dot--ok" /> {runningCount} running
-                {pendingCount ? <> · <span className="dot dot--warn" /> {pendingCount} pending</> : null}
-                {errorCount ? <> · <span className="dot dot--err" /> {errorCount} error</> : null}
+                {metricsLoading && !metricsReport ? (
+                  "Loading metrics…"
+                ) : (
+                  <>
+                    <span className="dot dot--ok" /> {podCounts.running} running
+                    <span className="dot dot--warn" /> {podCounts.pending} pending
+                    <span className="dot dot--err" /> {podCounts.error} error
+                  </>
+                )}
               </div>
             </div>
             <div className="runtime-stat">
-              <div className="runtime-stat__eyebrow">CPU · cluster</div>
-              <div className="runtime-stat__value">18.4<span className="runtime-stat__unit"> cores</span></div>
-              <div className="runtime-stat__sub">of 32 · 57%</div>
+              <div className="runtime-stat__eyebrow">CPU · live</div>
+              <div className="runtime-stat__value">
+                {cpuLiveParts.value}
+                {cpuLiveParts.unit ? <span className="runtime-stat__unit"> {cpuLiveParts.unit}</span> : null}
+              </div>
+              <div className="runtime-stat__sub">
+                <span>request {formatCpuCores(cpuRequestCores)}</span>
+                <span>capacity {formatCpuCores(cpuCapacityCores)}</span>
+                {cpuUsedPercent ? <span>{cpuUsedPercent}</span> : null}
+              </div>
             </div>
             <div className="runtime-stat">
-              <div className="runtime-stat__eyebrow">Memory · cluster</div>
-              <div className="runtime-stat__value">84.2<span className="runtime-stat__unit"> GiB</span></div>
-              <div className="runtime-stat__sub">of 192 · 43%</div>
+              <div className="runtime-stat__eyebrow">Memory · live</div>
+              <div className="runtime-stat__value">
+                {memoryLiveParts.value}
+                {memoryLiveParts.unit ? <span className="runtime-stat__unit"> {memoryLiveParts.unit}</span> : null}
+              </div>
+              <div className="runtime-stat__sub">
+                <span>request {formatBytes(memoryRequestBytes)}</span>
+                <span>capacity {formatBytes(memoryCapacityBytes)}</span>
+                {memoryUsedPercent ? <span>{memoryUsedPercent}</span> : null}
+              </div>
             </div>
             <div className="runtime-stat">
-              <div className="runtime-stat__eyebrow">ArgoCD</div>
-              <div className="runtime-stat__value">{ARGO_APPS.filter((a) => a.sync === "Synced").length}<span className="runtime-stat__unit"> / {ARGO_APPS.length}</span></div>
-              <div className="runtime-stat__sub">synced</div>
+              <div className="runtime-stat__eyebrow">Runtime budget</div>
+              <div className="runtime-stat__value runtime-stat__value--label">
+                {metricsReport?.runtime.label ?? "—"}
+              </div>
+              <div className="runtime-stat__sub">
+                <span className={`dot dot--${metricsReport?.runtime.available ? "ok" : "err"}`} />
+                {metricsReport
+                  ? metricsReport.runtime.available
+                    ? "available"
+                    : "unavailable"
+                  : metricsLoading
+                    ? "loading"
+                    : "unavailable"}
+              </div>
+              <div className="runtime-stat__sub">
+                {metricsReport ? formatRuntimeBudget(metricsReport.runtime.allocation) : "No metrics loaded"}
+              </div>
             </div>
+          </div>
+
+          <div className="runtime-health" role="status" aria-live="polite">
+            <div className="runtime-health__summary">
+              <span className={`chip chip--${clusterTone}`}>
+                Cluster{" "}
+                {metricsReport
+                  ? `${metricsReport.cluster.name || "local"} · ${
+                      metricsReport.cluster.apiReachable ? "API reachable" : "API unavailable"
+                    }`
+                  : metricsLoading
+                    ? "loading"
+                    : "not loaded"}
+              </span>
+              <span className={`chip chip--${runtimeTone}`}>
+                Runtime{" "}
+                {metricsReport
+                  ? `${metricsReport.runtime.label} · ${
+                      metricsReport.runtime.available ? "available" : "unavailable"
+                    }`
+                  : metricsLoading
+                    ? "loading"
+                    : "not loaded"}
+              </span>
+              <span className={`chip chip--${sourceTone}`}>
+                Sources{" "}
+                {metricsReport
+                  ? metricsReport.sources.length > 0
+                    ? `${healthySourceCount}/${metricsReport.sources.length} OK`
+                    : "not reported"
+                  : metricsLoading
+                    ? "loading"
+                    : "not loaded"}
+              </span>
+              {metricsLoading ? <span className="chip chip--info">Refreshing…</span> : null}
+              <span className="tiny muted">Updated {formatGeneratedAt(metricsReport?.generatedAtEpochSeconds)}</span>
+            </div>
+            {visibleNotices.length > 0 ? (
+              <div className="runtime-health__notes">
+                {visibleNotices.map((notice, index) => (
+                  <span
+                    key={`${notice.tone}-${index}-${notice.text}`}
+                    className={`runtime-health__note runtime-health__note--${notice.tone}`}
+                  >
+                    {notice.text}
+                  </span>
+                ))}
+                {hiddenNoticeCount > 0 ? (
+                  <span className="runtime-health__note">+{hiddenNoticeCount} more</span>
+                ) : null}
+              </div>
+            ) : null}
           </div>
 
           <div className="chart-card">
             <div className="section__head">
               <div>
-                <div className="section__eyebrow">Cluster · cto namespace</div>
+                <div className="section__eyebrow">
+                  Cluster · {nsFilter === "all" ? "all namespaces" : nsFilter}
+                </div>
                 <div className="section__title">Pods</div>
               </div>
               <div className="row">
@@ -227,10 +717,19 @@ export function ApplicationsView() {
                   onChange={(e) => setNsFilter(e.target.value)}
                 >
                   <option value="all">All namespaces</option>
-                  <option value="cto">cto</option>
+                  {namespaces.map((namespace) => (
+                    <option key={namespace} value={namespace}>
+                      {namespace}
+                    </option>
+                  ))}
                 </select>
-                <button type="button" className="ghost-btn">
-                  <IconRefresh size={12} /> Refresh
+                <button
+                  type="button"
+                  className="ghost-btn runtime-refresh"
+                  disabled={metricsLoading}
+                  onClick={() => void refreshMetrics()}
+                >
+                  <IconRefresh size={12} /> {metricsLoading ? "Refreshing" : "Refresh"}
                 </button>
               </div>
             </div>
@@ -243,34 +742,69 @@ export function ApplicationsView() {
                 <span className="pod-table__num">Restarts</span>
                 <span className="pod-table__num">Age</span>
               </div>
-              {pods.map((p) => (
-                <button
-                  type="button"
-                  key={p.name}
-                  className={`pod-table__row${p.name === selectedPod ? " pod-table__row--active" : ""}`}
-                  onClick={() => {
-                    setSelectedPod(p.name);
-                    setSelectedContainer(p.containers[0]?.name ?? "");
-                  }}
-                >
-                  <span className="pod-table__name">{p.name}</span>
-                  <span className="muted tiny">{p.namespace}</span>
-                  <span className="pod-table__dots">
-                    {p.containers.map((c) => (
+              {pods.length > 0 ? (
+                pods.map((p) => {
+                  const containerNames = getPodContainerNames(p);
+                  const health = getPodHealth(p);
+                  return (
+                    <button
+                      type="button"
+                      key={podKey(p)}
+                      className={`pod-table__row${
+                        podKey(p) === selectedPodKey ? " pod-table__row--active" : ""
+                      }`}
+                      onClick={() => {
+                        setSelectedPodKey(podKey(p));
+                        setSelectedContainer((current) =>
+                          current && containerNames.includes(current) ? current : (containerNames[0] ?? ""),
+                        );
+                      }}
+                    >
+                      <span className="pod-table__name">{p.name}</span>
+                      <span className="muted tiny">{p.namespace}</span>
+                      <span className="pod-table__dots">
+                        {containerNames.length > 0 ? (
+                          containerNames.map((containerName, index) => {
+                            const containerHealth = getContainerHealth(p, index);
+                            return (
+                              <span
+                                key={`${containerName}-${index}`}
+                                className={`dot dot--${
+                                  containerHealth === "running"
+                                    ? "ok"
+                                    : containerHealth === "pending"
+                                      ? "warn"
+                                      : "err"
+                                }`}
+                                title={`${containerName} · ${containerHealth}`}
+                              />
+                            );
+                          })
+                        ) : (
+                          <span className="tiny muted">—</span>
+                        )}
+                      </span>
                       <span
-                        key={c.name}
-                        className={`dot dot--${c.status === "running" ? "ok" : c.status === "pending" ? "warn" : "err"}`}
-                        title={`${c.name} · ${c.status}`}
-                      />
-                    ))}
-                  </span>
-                  <span className={`chip chip--${p.status === "Running" ? "success" : p.status === "Pending" ? "warn" : "danger"}`}>
-                    {p.status}
-                  </span>
-                  <span className="pod-table__num tiny muted">{p.restarts}</span>
-                  <span className="pod-table__num tiny muted">{p.age}</span>
-                </button>
-              ))}
+                        className={`chip chip--${
+                          health === "running" ? "success" : health === "pending" ? "warn" : "danger"
+                        }`}
+                      >
+                        {formatPodStatus(p)}
+                      </span>
+                      <span className="pod-table__num tiny muted">{p.restarts}</span>
+                      <span className="pod-table__num tiny muted">{formatAge(p.ageSeconds)}</span>
+                    </button>
+                  );
+                })
+              ) : (
+                <div className="pod-table__empty">
+                  {metricsLoading && !metricsReport
+                    ? "Loading pods…"
+                    : metricsError && !metricsReport
+                      ? "Metrics unavailable. Refresh after opening the app in Tauri."
+                      : "No pods reported for this namespace."}
+                </div>
+              )}
             </div>
           </div>
 
@@ -278,7 +812,7 @@ export function ApplicationsView() {
             <div className="section__head">
               <div>
                 <div className="section__eyebrow">
-                  <IconCpu size={10} /> Logs · {activePod.name}
+                  <IconCpu size={10} /> Logs · {activePod?.name ?? "No pod selected"}
                 </div>
                 <div className="section__title">Container output</div>
               </div>
@@ -286,11 +820,18 @@ export function ApplicationsView() {
                 <select
                   className="ghost-btn"
                   value={selectedContainer}
+                  disabled={activePodContainers.length === 0}
                   onChange={(e) => setSelectedContainer(e.target.value)}
                 >
-                  {activePod.containers.map((c) => (
-                    <option key={c.name} value={c.name}>{c.name}</option>
-                  ))}
+                  {activePodContainers.length > 0 ? (
+                    activePodContainers.map((container) => (
+                      <option key={container} value={container}>
+                        {container}
+                      </option>
+                    ))
+                  ) : (
+                    <option value="">No containers</option>
+                  )}
                 </select>
                 <button type="button" className="ghost-btn">
                   <IconRefresh size={12} /> Tail
@@ -298,9 +839,13 @@ export function ApplicationsView() {
               </div>
             </div>
             <pre className="log-panel">
-              {LOG_LINES.map((l, i) => (
-                <div key={i} className="log-line">{l}</div>
-              ))}
+              {activePod ? (
+                LOG_LINES.map((l, i) => (
+                  <div key={i} className="log-line">{l}</div>
+                ))
+              ) : (
+                <div className="log-line">No pod selected.</div>
+              )}
             </pre>
           </div>
 

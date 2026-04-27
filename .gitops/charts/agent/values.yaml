@@ -23,6 +23,11 @@ image:
   tag: "v2026.2.12"
   pullPolicy: Always
 
+openclaw:
+  # Optional npm package version to install before starting the gateway. Leave
+  # empty to use the OpenClaw version baked into the image.
+  version: ""
+
 # -- Image pull secrets
 imagePullSecrets:
   - name: ghcr-secret
@@ -326,6 +331,11 @@ localIngress:
   host: localhost
   pathBase: /morgan
   pathType: ImplementationSpecific
+  voice:
+    enabled: true
+    serviceName: ""
+    servicePortName: gateway
+    servicePortNumber: null
   annotations:
     nginx.ingress.kubernetes.io/use-regex: "true"
     nginx.ingress.kubernetes.io/rewrite-target: /$2
@@ -780,9 +790,10 @@ mem0Plugin:
         model: "gemini-embedding-001"
         apiKeyEnvVar: "GOOGLE_API_KEY"
     llm:
-      provider: "openai"
+      provider: "anthropic"
       config:
-        model: "gpt-4.1-nano"
+        model: "claude-3-5-haiku-latest"
+        apiKeyEnvVar: "ANTHROPIC_API_KEY"
 
 # =============================================================================
 # Narrator Sidecars (dual sidecar architecture for live narration)

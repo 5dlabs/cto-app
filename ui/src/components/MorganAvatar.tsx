@@ -1,11 +1,10 @@
 import { useEffect, useMemo, useRef } from "react";
 
 /**
- * MorganAvatar — a voice-reactive avatar built around a still portrait.
+ * MorganAvatar — a voice-reactive generated Morgan mark.
  *
- * The portrait renders as a round-rect image; on top of it we draw a
- * waveform ring + halo whose intensity follows live audio RMS and FFT
- * bins from the `analyser` that the parent wires up.
+ * The center mark is generated on canvas; on top of it we draw a waveform
+ * ring + halo whose intensity follows live audio RMS and FFT bins.
  *
  * Two analyser inputs are supported and composited:
  *   - `inputAnalyser`  — the local mic (tints warm when user is speaking)
@@ -19,7 +18,8 @@ import { useEffect, useMemo, useRef } from "react";
 export type AvatarState = "idle" | "listening" | "thinking" | "speaking";
 
 interface MorganAvatarProps {
-  src: string;
+  /** Optional portrait override. Omit for the default generated Morgan mark. */
+  src?: string | null;
   /** Live analyser from the user's mic. */
   inputAnalyser?: AnalyserNode | null;
   /** Live analyser from the bridge's TTS playback. */
@@ -68,12 +68,15 @@ export function MorganAvatar({
     canvas.height = size * dpr;
     ctx.scale(dpr, dpr);
 
-    const img = new Image();
-    img.crossOrigin = "anonymous";
-    img.src = src;
-    img.onload = () => {
-      imgRef.current = img;
-    };
+    imgRef.current = null;
+    if (src) {
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      img.src = src;
+      img.onload = () => {
+        imgRef.current = img;
+      };
+    }
 
     let breathing = 0;
     let lastInLevel = 0;
@@ -186,11 +189,33 @@ export function MorganAvatar({
         ctx.drawImage(im, cx - dw / 2, cy - dh / 2, dw, dh);
         ctx.restore();
       } else {
-        // Placeholder before portrait loads
-        ctx.fillStyle = `hsla(${hue}, 30%, 20%, 1)`;
+        const coreGrad = ctx.createRadialGradient(
+          cx - baseR * 0.28,
+          cy - baseR * 0.32,
+          baseR * 0.1,
+          cx,
+          cy,
+          baseR,
+        );
+        coreGrad.addColorStop(0, `hsla(${hue}, 88%, 68%, 1)`);
+        coreGrad.addColorStop(0.55, `hsla(${hue + 34}, 70%, 34%, 1)`);
+        coreGrad.addColorStop(1, `hsla(${hue + 70}, 70%, 12%, 1)`);
+        ctx.fillStyle = coreGrad;
         ctx.beginPath();
-        ctx.arc(cx, cy, baseR, 0, Math.PI * 2);
+        ctx.arc(cx, cy, baseR * scale, 0, Math.PI * 2);
         ctx.fill();
+
+        ctx.strokeStyle = `hsla(${hue}, 95%, 78%, 0.55)`;
+        ctx.lineWidth = Math.max(1, size * 0.01);
+        ctx.beginPath();
+        ctx.arc(cx, cy, baseR * 0.72 * scale, 0.15, Math.PI * 1.85);
+        ctx.stroke();
+
+        ctx.fillStyle = "rgba(255,255,255,0.92)";
+        ctx.font = `700 ${Math.round(baseR * 0.82)}px Inter, system-ui, sans-serif`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText("M", cx, cy + baseR * 0.03);
       }
 
       // State label ring (top arc)

@@ -1,0 +1,87 @@
+---
+namespace: cto-system
+fullnameOverride: voice-bridge
+nameOverride: ""
+
+replicaCount: 1
+
+image:
+  repository: ghcr.io/5dlabs/voice-bridge
+  tag: "desktop-python-3.11-v0.1.0"
+  pullPolicy: Always
+
+imagePullSecrets: []
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext: {}
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  privileged: false
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+
+service:
+  type: ClusterIP
+  annotations: {}
+  port: 8090
+
+env:
+  LOG_LEVEL: INFO
+  ALLOWED_ORIGINS: "http://localhost:5173,http://127.0.0.1:5173,http://localhost:8080,http://127.0.0.1:8080,http://tauri.localhost,https://tauri.localhost,tauri://localhost"
+  MORGAN_GATEWAY_URL: "http://openclaw-gateway-morgan.cto-system.svc.cluster.local:18789"
+  MORGAN_GATEWAY_TOKEN: "openclaw-internal"
+  MORGAN_MODEL: "openclaw/morgan"
+  MORGAN_VOICE_ID: "iP95p4xoKVk53GoZ742B"
+  VOICE_BRIDGE_AUDIO_MIME: "audio/webm"
+  VOICE_BRIDGE_AUDIO_NAME: "turn.webm"
+  VOICE_BRIDGE_ENABLE_ALIGNMENT: "0"
+
+elevenlabs:
+  enabled: true
+  secretName: cto-agent-keys
+  secretKey: ELEVENLABS_API_KEY
+  optional: true
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    memory: 512Mi
+
+readinessProbe:
+  enabled: true
+  path: /readyz
+  initialDelaySeconds: 3
+  periodSeconds: 5
+  timeoutSeconds: 2
+  failureThreshold: 6
+
+livenessProbe:
+  enabled: true
+  path: /healthz
+  initialDelaySeconds: 10
+  periodSeconds: 20
+  timeoutSeconds: 3
+  failureThreshold: 3
+
+ingress:
+  enabled: true
+  className: nginx
+  host: localhost
+  # Keep this exact and longer than Morgan's gateway fallback so the WebSocket
+  # route is owned by voice-bridge even while older agent charts still render a
+  # generic /morgan/voice placeholder.
+  path: /morgan/voice/ws
+  pathType: Exact
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /ws
+  tls: []
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

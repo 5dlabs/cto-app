@@ -21,11 +21,84 @@ spec:
   source:
     repoURL: ghcr.io/5dlabs/helm-charts
     chart: agent
-    targetRevision: 0.1.3
+    targetRevision: 0.1.12
     helm:
       releaseName: morgan
       valueFiles:
         - ci/values-morgan.yaml
+      valuesObject:
+        openclaw:
+          # The desktop agents image already contains 2026.4.23. Installing
+          # newer OpenClaw versions at runtime fails in the non-root container.
+          version: "2026.4.23"
+        # Local-only credential hook. If this secret exists, private/internal
+        # GHCR runtime images can pull; if packages are public, Kubernetes can
+        # still pull anonymously even if the secret is absent.
+        imagePullSecrets:
+          - name: ghcr-pull-secret
+        storage:
+          # Kind exposes its local-path provisioner as the "standard" storage
+          # class. The published chart defaults to mayastor, which is not
+          # present in the desktop Kind cluster.
+          storageClass: "standard"
+        agent:
+          # Keep the live desktop app equivalent to the OVH Morgan reference
+          # even when consuming a previously published chart package.
+          model: "google/gemini-2.5-flash"
+        modelDefaults:
+          primary: "google/gemini-2.5-flash"
+          fallbacks:
+            - "anthropic/claude-sonnet-4-20250514"
+            - "openai-api/gpt-5.4"
+            - "openai-api/gpt-5.3-codex"
+            - "anthropic/claude-opus-4-6-20260201"
+        models:
+          providers:
+            google:
+              enabled: true
+              api: "google-generative-ai"
+              baseUrl: "https://generativelanguage.googleapis.com/v1beta"
+              apiKeySecretKey: "GEMINI_API_KEY"
+              models:
+                - id: "gemini-2.5-flash"
+                  name: "Gemini 2.5 Flash"
+                - id: "gemini-2.5-pro"
+                  name: "Gemini 2.5 Pro"
+            anthropic:
+              enabled: true
+              apiKeySecretKey: "ANTHROPIC_API_KEY"
+            openai:
+              enabled: true
+              apiKeySecretKey: "OPENAI_API_KEY"
+            openai-api:
+              enabled: true
+              apiKeySecretKey: "OPENAI_API_KEY"
+        projectApi:
+          image:
+            # The current upstream latest image was compiled with a Bun runtime
+            # that drops into `bun --help`; pin the desktop bootstrap to the
+            # rebuilt multi-arch image until upstream latest is republished.
+            tag: "desktop-bun-1.3.13"
+        mem0Plugin:
+          # Match the working OVH Morgan memory provider settings. The vector
+          # store host remains local because desktop deploys Qdrant in cto-system.
+          userId: "jonathon"
+          oss:
+            vectorStore:
+              provider: "qdrant"
+              config:
+                host: "qdrant.cto-system.svc.cluster.local"
+                port: 6333
+            embedder:
+              provider: "google"
+              config:
+                model: "gemini-embedding-001"
+                apiKeyEnvVar: "GOOGLE_API_KEY"
+            llm:
+              provider: "anthropic"
+              config:
+                model: "claude-3-5-haiku-latest"
+                apiKeyEnvVar: "ANTHROPIC_API_KEY"
 
   destination:
     server: https://kubernetes.default.svc

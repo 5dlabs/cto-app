@@ -6,6 +6,10 @@ metadata:
   namespace: {{ include "cto.namespace" . }}
   labels:
     {{- include "cto.tools.labels" . | nindent 4 }}
+  {{- with .Values.tools.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
   ingressClassName: {{ .Values.tools.ingress.className | default "nginx" }}
   rules:

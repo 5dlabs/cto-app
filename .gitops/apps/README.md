@@ -4,7 +4,7 @@ Argo CD Applications applied *after* the base bootstrap (kind + ingress-nginx
 + Argo CD). These are NOT part of the `cto` Helm chart itself — they layer
 on top of it.
 
-For the initial pre-release the desktop bootstrap registers three apps:
+For the initial pre-release the desktop bootstrap registers four apps:
 
 - `cto.yaml` — the CTO platform chart (controller + tools), pulled from
   `ghcr.io/5dlabs/helm-charts/cto` (public OCI). Values are patched by the
@@ -20,7 +20,10 @@ For the initial pre-release the desktop bootstrap registers three apps:
   `http://localhost:6333/dashboard`.
 - `morgan.yaml` — the always-up local Morgan OpenClaw gateway/agent, pulled
   from `ghcr.io/5dlabs/helm-charts/agent` and deployed into `cto-system` so it
-  can use `http://cto-tools.cto-system.svc.cluster.local:8080/mcp`.
+  can use `http://cto-tools.cto-system.svc.cluster.local:3000/mcp`.
+- `voice-bridge.yaml` — the local Morgan voice WebSocket bridge, pulled from
+  `ghcr.io/5dlabs/helm-charts/voice-bridge` and exposed only at the exact local
+  NGINX route `ws://localhost:8080/morgan/voice/ws`.
 - `observability.yaml` — optional local-only Loki, Prometheus, Grafana, and
   Promtail for desktop diagnostics. The bootstrap does not apply it by default;
   apply it manually when local logs/metrics are needed. Grafana is exposed only
@@ -33,6 +36,8 @@ observability app or provide another local Loki endpoint.
 
 During local desktop validation, set
 `CTO_BOOTSTRAP_TEST_MODE=controller-only` before launching Tauri to register only
-`cto.yaml` and skip the later `qdrant.yaml` and `morgan.yaml` Application
+`cto.yaml` and skip the later `qdrant.yaml`, `morgan.yaml`, and
+`voice-bridge.yaml` Application
 syncs. Leaving the variable unset, or setting it to `full`, preserves the normal
-full application order: `cto`, then `qdrant`, then `morgan`.
+full application order: `cto`, then `qdrant`, then `morgan`, then
+`voice-bridge`.

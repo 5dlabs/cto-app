@@ -24,6 +24,7 @@ agentKeys:
   FACTORY_API_KEY: ""
   MINIMAX_API_KEY: ""
   MINIMAX_GROUP_ID: ""
+  ELEVENLABS_API_KEY: ""
 
 controller:
   enabled: true
@@ -67,6 +68,50 @@ controller:
     testing: false
     deployment: false
 
+agent:
+  image:
+    repository: ghcr.io/5dlabs/agents
+    tag: latest
+    pullPolicy: IfNotPresent
+  serviceAccountName: cto-agent
+  cliImages:
+    claude:
+      repository: ghcr.io/5dlabs/agents
+      tag: latest
+      pullPolicy: IfNotPresent
+    cursor:
+      repository: ghcr.io/5dlabs/agents
+      tag: latest
+      pullPolicy: IfNotPresent
+    codex:
+      repository: ghcr.io/5dlabs/agents
+      tag: latest
+      pullPolicy: IfNotPresent
+    code:
+      repository: ghcr.io/5dlabs/agents
+      tag: latest
+      pullPolicy: IfNotPresent
+    gemini:
+      repository: ghcr.io/5dlabs/agents
+      tag: latest
+      pullPolicy: IfNotPresent
+    factory:
+      repository: ghcr.io/5dlabs/agents
+      tag: latest
+      pullPolicy: IfNotPresent
+    opencode:
+      repository: ghcr.io/5dlabs/agents
+      tag: latest
+      pullPolicy: IfNotPresent
+    research:
+      repository: ghcr.io/5dlabs/agents
+      tag: latest
+      pullPolicy: IfNotPresent
+    grok:
+      repository: ghcr.io/5dlabs/agents
+      tag: latest
+      pullPolicy: IfNotPresent
+
 tools:
   enabled: true
   # Docker-in-Docker sidecar for Docker-based MCP servers. Disabled by default
@@ -81,32 +126,72 @@ tools:
     pullPolicy: IfNotPresent
   service:
     type: ClusterIP
-    port: 8080
+    port: 3000
   # Path-based ingress on kind's NGINX. Host defaults to the ingress controller's listen addr.
   ingress:
     enabled: true
     className: nginx
-    host: ""          # empty = match any host (kind local)
-    path: /tools
-    pathType: Prefix
+    host: "localhost"
+    path: /tools(/|$)(.*)
+    pathType: ImplementationSpecific
+    annotations:
+      nginx.ingress.kubernetes.io/use-regex: "true"
+      nginx.ingress.kubernetes.io/rewrite-target: /$2
   workspace:
     enabled: true
     size: 5Gi
   # MCP servers enabled in the tools deployment. Secrets for each server live inline here
   # to keep the config-source next to its consumer.
   servers:
-    github:
+    filesystem:
       enabled: true
+      name: "Filesystem"
+      description: "Local workspace file access for desktop agents"
+      transport: "stdio"
+      command: "npx"
+      args:
+        - "-y"
+        - "@modelcontextprotocol/server-filesystem"
+        - "/data/workspace"
+      workingDirectory: "/tmp"
+    memory:
+      enabled: true
+      name: "Memory"
+      description: "Ephemeral MCP memory store for local desktop tools"
+      transport: "stdio"
+      command: "npx"
+      args:
+        - "-y"
+        - "@modelcontextprotocol/server-memory"
+      workingDirectory: "/tmp"
+    github:
+      enabled: false
+      name: "GitHub"
+      description: "GitHub API operations when a user-owned token is configured"
+      transport: "stdio"
+      command: "npx"
+      args:
+        - "-y"
+        - "@modelcontextprotocol/server-github"
+      workingDirectory: "/tmp"
+      env:
+        GITHUB_PERSONAL_ACCESS_TOKEN: "${GITHUB_TOKEN}"
       secret:
         # keys: GITHUB_TOKEN
         GITHUB_TOKEN: ""
     kubernetes:
-      enabled: true
+      enabled: false
+      name: "Kubernetes"
+      description: "Kubernetes API operations when a kubeconfig is configured"
+      transport: "stdio"
+      command: "npx"
+      args:
+        - "-y"
+        - "kubernetes-mcp-server@latest"
+      workingDirectory: "/tmp"
       secret:
         # keys: KUBECONFIG (base64)
         KUBECONFIG: ""
-    filesystem:
-      enabled: true
     firecrawl:
       enabled: false
       secret:
@@ -118,7 +203,13 @@ tools:
         AWS_SECRET_ACCESS_KEY: ""
         AWS_REGION: ""
     argocd:
-      enabled: true
+      enabled: false
+      name: "Argo CD"
+      description: "Argo CD API operations when credentials are configured"
+      transport: "stdio"
+      command: "cto-mcp"
+      args: []
+      workingDirectory: "/tmp"
       secret:
         ARGOCD_SERVER: ""
         ARGOCD_AUTH_TOKEN: ""

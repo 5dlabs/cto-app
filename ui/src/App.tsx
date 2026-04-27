@@ -17,6 +17,7 @@ import {
   IconBracket,
   IconCpu,
   IconTerminal,
+  IconChevLeft,
 } from "./views/icons";
 import { MorganView } from "./views/MorganView";
 import { ProjectsView } from "./views/ProjectsView";
@@ -125,80 +126,126 @@ const TITLES: Record<NavKey, { title: string; sub: string }> = {
 
 export default function App() {
   const [active, setActive] = useState<NavKey>("morgan");
+  const [lastNonMorgan, setLastNonMorgan] = useState<NavKey>("projects");
   const [showNewAgent, setShowNewAgent] = useState(false);
+  const isMorganFocus = active === "morgan";
+
+  const navigate = (next: NavKey) => {
+    if (active !== "morgan" && next === "morgan") {
+      setLastNonMorgan(active);
+    }
+    setActive(next);
+  };
 
   return (
     <LocalStackBootstrap>
       <ProjectProvider>
-        <div className="app-shell" data-motif="cyan" data-claw="angle" data-chrome="plain">
-          <header className="titlebar">
-            <div className="titlebar__brand">
-              <IconHome size={14} />
-              <span>5D Platform</span>
-            </div>
-            <div className="titlebar__search">
-              <IconSearch size={12} />
-              <span>Search agents, sessions, docs…</span>
-              <kbd>
-                <IconCommand size={10} /> K
-              </kbd>
-            </div>
-            <div className="titlebar__actions">
-              <button className="ghost-btn" type="button" aria-label="Notifications">
-                <IconBell size={14} />
-              </button>
-            </div>
+        <div
+          className={`app-shell${isMorganFocus ? " app-shell--morgan" : ""}`}
+          data-motif="cyan"
+          data-claw="angle"
+          data-chrome="plain"
+        >
+          <header className={`titlebar${isMorganFocus ? " titlebar--morgan" : ""}`}>
+            {isMorganFocus ? (
+              <>
+                <div className="titlebar__brand titlebar__brand--interactive">
+                  <button
+                    className="ghost-btn ghost-btn--compact"
+                    type="button"
+                    onClick={() => navigate(lastNonMorgan)}
+                  >
+                    <IconChevLeft size={13} />
+                    Back
+                  </button>
+                  <span className="titlebar__morgan-label">Morgan</span>
+                </div>
+                <div className="titlebar__center">CTO Desktop</div>
+                <div className="titlebar__actions">
+                  <button
+                    className="ghost-btn ghost-btn--icon"
+                    type="button"
+                    aria-label="Notifications"
+                  >
+                    <IconBell size={14} />
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="titlebar__brand">
+                  <IconHome size={14} />
+                  <span>5D Platform</span>
+                </div>
+                <div className="titlebar__search">
+                  <IconSearch size={12} />
+                  <span>Search agents, sessions, docs…</span>
+                  <kbd>
+                    <IconCommand size={10} /> K
+                  </kbd>
+                </div>
+                <div className="titlebar__actions">
+                  <button className="ghost-btn" type="button" aria-label="Notifications">
+                    <IconBell size={14} />
+                  </button>
+                </div>
+              </>
+            )}
           </header>
 
           <div className="shell-body">
-            <nav className="sidebar" aria-label="Primary">
-              <div className="sidebar__group">
-                {primaryNav.map((item) => (
+            {!isMorganFocus && (
+              <nav className="sidebar" aria-label="Primary">
+                <div className="sidebar__group">
+                  {primaryNav.map((item) => (
+                    <NavButton
+                      key={item.key}
+                      item={item}
+                      active={active === item.key}
+                      onClick={() => navigate(item.key)}
+                    />
+                  ))}
+                </div>
+
+                <div className="sidebar__group">
+                  <div className="sidebar__label">Platform</div>
+                  {platformNav.map((item) => (
+                    <NavButton
+                      key={item.key}
+                      item={item}
+                      active={active === item.key}
+                      onClick={() => navigate(item.key)}
+                    />
+                  ))}
+                </div>
+
+                <div className="sidebar__spacer" />
+
+                <div className="sidebar__group">
                   <NavButton
-                    key={item.key}
-                    item={item}
-                    active={active === item.key}
-                    onClick={() => setActive(item.key)}
+                    item={{ key: "settings", label: "Settings", icon: IconSettings }}
+                    active={active === "settings"}
+                    onClick={() => navigate("settings")}
                   />
-                ))}
-              </div>
-
-              <div className="sidebar__group">
-                <div className="sidebar__label">Platform</div>
-                {platformNav.map((item) => (
-                  <NavButton
-                    key={item.key}
-                    item={item}
-                    active={active === item.key}
-                    onClick={() => setActive(item.key)}
-                  />
-                ))}
-              </div>
-
-              <div className="sidebar__spacer" />
-
-              <div className="sidebar__group">
-                <NavButton
-                  item={{ key: "settings", label: "Settings", icon: IconSettings }}
-                  active={active === "settings"}
-                  onClick={() => setActive("settings")}
-                />
-              </div>
-            </nav>
+                </div>
+              </nav>
+            )}
 
             <main className="content">
               <ContentPane active={active} onNewAgent={() => setShowNewAgent(true)} />
             </main>
           </div>
 
-          <footer className="statusbar">
-            <span className="statusbar__dot" aria-hidden />
-            <span>Connected · gitlab.5dlabs.ai</span>
-            <span className="statusbar__sep">·</span>
-            <span>32 projects mirrored</span>
-            <span className="statusbar__spacer" />
-            <span>v0.1.0 · dev</span>
-          </footer>
+          {!isMorganFocus && (
+            <footer className="statusbar">
+              <span className="statusbar__dot" aria-hidden />
+              <span>Connected · gitlab.5dlabs.ai</span>
+              <span className="statusbar__sep">·</span>
+              <span>32 projects mirrored</span>
+              <span className="statusbar__spacer" />
+              <span>v0.1.0 · dev</span>
+            </footer>
+          )}
 
           <NewAgentModal open={showNewAgent} onClose={() => setShowNewAgent(false)} />
         </div>
@@ -234,7 +281,7 @@ function NavButton({
 // header above them). The embedded GitLab iframe is the obvious one — the
 // giant pane header stacked on top of GitLab's own top bar wastes a lot of
 // vertical space and made the embed feel buried.
-const FULL_BLEED_VIEWS: ReadonlySet<NavKey> = new Set(["gitlab"]);
+const FULL_BLEED_VIEWS: ReadonlySet<NavKey> = new Set(["gitlab", "morgan"]);
 
 function ContentPane({
   active,
@@ -278,8 +325,8 @@ function ViewRouter({
   onNewAgent: () => void;
 }) {
   // Morgan is special: we always render it, just hide it when another view
-  // is active. That way an in-flight voice/text reply (including LemonSlice
-  // video + audio playback) keeps streaming when the user flips over to
+  // is active. That way an in-flight local avatar voice/text reply keeps
+  // streaming when the user flips over to
   // /projects or /tasks and back. Unmounting would tear down the
   // VoiceClient WebRTC peer, the message list, the analyser graph — every
   // bit of state the user legitimately expects to survive a nav.

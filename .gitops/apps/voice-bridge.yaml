@@ -1,0 +1,49 @@
+---
+# Voice bridge — local WebSocket bridge for Morgan voice in CTO Desktop.
+#
+# This owns the exact /morgan/voice/ws route. Morgan's agent ingress still owns
+# the gateway and sidecar paths; the exact voice route is longer and rewrites to
+# the FastAPI bridge's /ws endpoint.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: voice-bridge
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: voice-bridge
+    app.kubernetes.io/part-of: platform
+    app.kubernetes.io/component: voice
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  source:
+    repoURL: ghcr.io/5dlabs/helm-charts
+    chart: voice-bridge
+    targetRevision: 0.1.3
+    helm:
+      releaseName: voice-bridge
+      valuesObject:
+        namespace: cto-system
+        fullnameOverride: voice-bridge
+        imagePullSecrets:
+          - name: ghcr-pull-secret
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cto-system
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m

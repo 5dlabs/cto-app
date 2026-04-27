@@ -45,6 +45,11 @@ const EXPECTED_QDRANT_HOST: &str = "qdrant.cto-system.svc.cluster.local";
 const EXPECTED_QDRANT_PORT: u64 = 6333;
 const EXPECTED_QDRANT_GRPC_PORT: u64 = 6334;
 const EXPECTED_COLLECTION: &str = "cto_memory";
+const EXPECTED_MEM0_USER_ID: &str = "jonathon";
+const EXPECTED_MEM0_EMBEDDER_PROVIDER: &str = "google";
+const EXPECTED_MEM0_EMBEDDER_MODEL: &str = "gemini-embedding-001";
+const EXPECTED_MEM0_LLM_PROVIDER: &str = "anthropic";
+const EXPECTED_MEM0_LLM_MODEL: &str = "claude-3-5-haiku-latest";
 const EXPECTED_LOAD_PATH_FRAGMENT: &str = "@mem0/openclaw-mem0";
 const EXPECTED_CONTROLLER_NAME: &str = "cto-controller";
 const EXPECTED_HERMES_CODERUN_NAME: &str = "hermes-coderun-smoke";
@@ -485,63 +490,8 @@ fn deindent_lines(lines: &[&str], indent: usize) -> String {
 fn assert_morgan_mem0_config(config: &Value) -> AppResult<Mem0Report> {
     let mut failures = Vec::new();
 
-    require_bool(
-        config,
-        &mut failures,
-        "plugins.entries.openclaw-mem0.enabled",
-        true,
-    );
-    require_bool(
-        config,
-        &mut failures,
-        "plugins.entries.memory-core.enabled",
-        false,
-    );
-    require_string(
-        config,
-        &mut failures,
-        "plugins.slots.memory",
-        "openclaw-mem0",
-    );
-    require_array_string_contains(
-        config,
-        &mut failures,
-        "plugins.load.paths",
-        EXPECTED_LOAD_PATH_FRAGMENT,
-    );
-    require_string(
-        config,
-        &mut failures,
-        &format!("{QDRANT_CONFIG_PATH}.host"),
-        EXPECTED_QDRANT_HOST,
-    );
-    require_u64(
-        config,
-        &mut failures,
-        &format!("{QDRANT_CONFIG_PATH}.port"),
-        EXPECTED_QDRANT_PORT,
-    );
-    require_string(
-        config,
-        &mut failures,
-        &format!("{QDRANT_CONFIG_PATH}.collectionName"),
-        EXPECTED_COLLECTION,
-    );
-    require_present(
-        config,
-        &mut failures,
-        &format!("{MEM0_CONFIG_PATH}.customCategories"),
-    );
-    require_present(
-        config,
-        &mut failures,
-        &format!("{MEM0_CONFIG_PATH}.customInstructions"),
-    );
-    require_present(
-        config,
-        &mut failures,
-        &format!("{MEM0_CONFIG_PATH}.metadataSource"),
-    );
+    assert_morgan_mem0_plugin_config(config, &mut failures);
+    assert_morgan_mem0_provider_config(config, &mut failures);
 
     if failures.is_empty() {
         Ok(Mem0Report {
@@ -556,6 +506,99 @@ fn assert_morgan_mem0_config(config: &Value) -> AppResult<Mem0Report> {
             failures.join("\n- ")
         ))
     }
+}
+
+fn assert_morgan_mem0_plugin_config(config: &Value, failures: &mut Vec<String>) {
+    require_bool(
+        config,
+        failures,
+        "plugins.entries.openclaw-mem0.enabled",
+        true,
+    );
+    require_absent(
+        config,
+        failures,
+        "plugins.entries.openclaw-mem0.hooks.allowConversationAccess",
+    );
+    require_bool(
+        config,
+        failures,
+        "plugins.entries.memory-core.enabled",
+        false,
+    );
+    require_string(config, failures, "plugins.slots.memory", "openclaw-mem0");
+    require_array_string_contains(
+        config,
+        failures,
+        "plugins.load.paths",
+        EXPECTED_LOAD_PATH_FRAGMENT,
+    );
+}
+
+fn assert_morgan_mem0_provider_config(config: &Value, failures: &mut Vec<String>) {
+    require_string(
+        config,
+        failures,
+        &format!("{MEM0_CONFIG_PATH}.userId"),
+        EXPECTED_MEM0_USER_ID,
+    );
+    require_string(
+        config,
+        failures,
+        &format!("{QDRANT_CONFIG_PATH}.host"),
+        EXPECTED_QDRANT_HOST,
+    );
+    require_u64(
+        config,
+        failures,
+        &format!("{QDRANT_CONFIG_PATH}.port"),
+        EXPECTED_QDRANT_PORT,
+    );
+    require_string(
+        config,
+        failures,
+        &format!("{QDRANT_CONFIG_PATH}.collectionName"),
+        EXPECTED_COLLECTION,
+    );
+    require_string(
+        config,
+        failures,
+        &format!("{MEM0_CONFIG_PATH}.oss.embedder.provider"),
+        EXPECTED_MEM0_EMBEDDER_PROVIDER,
+    );
+    require_string(
+        config,
+        failures,
+        &format!("{MEM0_CONFIG_PATH}.oss.embedder.config.model"),
+        EXPECTED_MEM0_EMBEDDER_MODEL,
+    );
+    require_string(
+        config,
+        failures,
+        &format!("{MEM0_CONFIG_PATH}.oss.llm.provider"),
+        EXPECTED_MEM0_LLM_PROVIDER,
+    );
+    require_string(
+        config,
+        failures,
+        &format!("{MEM0_CONFIG_PATH}.oss.llm.config.model"),
+        EXPECTED_MEM0_LLM_MODEL,
+    );
+    require_absent(
+        config,
+        failures,
+        &format!("{MEM0_CONFIG_PATH}.customCategories"),
+    );
+    require_absent(
+        config,
+        failures,
+        &format!("{MEM0_CONFIG_PATH}.customInstructions"),
+    );
+    require_absent(
+        config,
+        failures,
+        &format!("{MEM0_CONFIG_PATH}.metadataSource"),
+    );
 }
 
 fn assert_morgan_diagnostics_config(
@@ -1347,11 +1390,9 @@ fn require_u64(config: &Value, failures: &mut Vec<String>, path: &str, expected:
     }
 }
 
-fn require_present(config: &Value, failures: &mut Vec<String>, path: &str) {
-    match value_at_path(config, path) {
-        Some(Value::Null) => failures.push(format!("{path} must not be null")),
-        Some(_) => {}
-        None => failures.push(format!("{path} missing")),
+fn require_absent(config: &Value, failures: &mut Vec<String>, path: &str) {
+    if let Some(actual) = value_at_path(config, path) {
+        failures.push(format!("{path} must be absent but found {actual}"));
     }
 }
 
@@ -1868,17 +1909,55 @@ mod tests {
     }
 
     #[test]
-    fn rejects_missing_custom_instructions() {
+    fn rejects_local_only_custom_instructions() {
         let mut config = sample_openclaw_config();
         let mem0_config = value_at_path_mut(&mut config, MEM0_CONFIG_PATH).expect("mem0 config");
-        mem0_config
-            .as_object_mut()
-            .expect("mem0 object")
-            .remove("customInstructions");
+        mem0_config["customInstructions"] = json!("Keep cto-app memories concise.");
 
-        let error = assert_morgan_mem0_config(&config).expect_err("custom instructions missing");
+        let error = assert_morgan_mem0_config(&config).expect_err("custom instructions present");
 
-        assert!(error.contains("plugins.entries.openclaw-mem0.config.customInstructions missing"));
+        assert!(error
+            .contains("plugins.entries.openclaw-mem0.config.customInstructions must be absent"));
+    }
+
+    #[test]
+    fn rejects_local_only_custom_categories() {
+        let mut config = sample_openclaw_config();
+        let mem0_config = value_at_path_mut(&mut config, MEM0_CONFIG_PATH).expect("mem0 config");
+        mem0_config["customCategories"] = json!({ "project": "Project facts" });
+
+        let error = assert_morgan_mem0_config(&config).expect_err("custom categories present");
+
+        assert!(
+            error.contains("plugins.entries.openclaw-mem0.config.customCategories must be absent")
+        );
+    }
+
+    #[test]
+    fn rejects_mem0_conversation_hook_access() {
+        let mut config = sample_openclaw_config();
+        let mem0 =
+            value_at_path_mut(&mut config, "plugins.entries.openclaw-mem0").expect("mem0 entry");
+        mem0["hooks"] = json!({ "allowConversationAccess": true });
+
+        let error = assert_morgan_mem0_config(&config).expect_err("hook access present");
+
+        assert!(error.contains(
+            "plugins.entries.openclaw-mem0.hooks.allowConversationAccess must be absent"
+        ));
+    }
+
+    #[test]
+    fn rejects_openclaw_rejected_mem0_metadata_source() {
+        let mut config = sample_openclaw_config();
+        let mem0_config = value_at_path_mut(&mut config, MEM0_CONFIG_PATH).expect("mem0 config");
+        mem0_config["metadataSource"] = json!("desktop");
+
+        let error = assert_morgan_mem0_config(&config).expect_err("metadata source present");
+
+        assert!(
+            error.contains("plugins.entries.openclaw-mem0.config.metadataSource must be absent")
+        );
     }
 
     #[test]
@@ -2230,15 +2309,25 @@ data:
           "openclaw-mem0": {
             "enabled": true,
             "config": {
-              "customCategories": ["project"],
-              "customInstructions": "Keep cto-app memories concise.",
-              "metadataSource": "desktop",
+              "userId": "jonathon",
               "oss": {
                 "vectorStore": {
                   "config": {
                     "host": "qdrant.cto-system.svc.cluster.local",
                     "port": 6333,
                     "collectionName": "cto_memory"
+                  }
+                },
+                "embedder": {
+                  "provider": "google",
+                  "config": {
+                    "model": "gemini-embedding-001"
+                  }
+                },
+                "llm": {
+                  "provider": "anthropic",
+                  "config": {
+                    "model": "claude-3-5-haiku-latest"
                   }
                 }
               }
@@ -2474,15 +2563,25 @@ spec:
                     "openclaw-mem0": {
                         "enabled": true,
                         "config": {
-                            "customCategories": ["project", "decision"],
-                            "customInstructions": "Capture durable CTO desktop context.",
-                            "metadataSource": "desktop",
+                            "userId": EXPECTED_MEM0_USER_ID,
                             "oss": {
                                 "vectorStore": {
                                     "config": {
                                         "host": EXPECTED_QDRANT_HOST,
                                         "port": EXPECTED_QDRANT_PORT,
                                         "collectionName": EXPECTED_COLLECTION
+                                    }
+                                },
+                                "embedder": {
+                                    "provider": EXPECTED_MEM0_EMBEDDER_PROVIDER,
+                                    "config": {
+                                        "model": EXPECTED_MEM0_EMBEDDER_MODEL
+                                    }
+                                },
+                                "llm": {
+                                    "provider": EXPECTED_MEM0_LLM_PROVIDER,
+                                    "config": {
+                                        "model": EXPECTED_MEM0_LLM_MODEL
                                     }
                                 }
                             }

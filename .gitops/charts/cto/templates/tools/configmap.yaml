@@ -16,7 +16,41 @@ data:
         {{- if not $first }},{{ end }}
         {{- $first = false }}
         "{{ $name }}": {
-          "enabled": true
+          "enabled": true,
+          "transport": {{ $cfg.transport | default "stdio" | quote }}
+          {{- if $cfg.name }},
+          "name": {{ $cfg.name | quote }}
+          {{- end }}
+          {{- if $cfg.description }},
+          "description": {{ $cfg.description | quote }}
+          {{- end }}
+          {{- if $cfg.command }},
+          "command": {{ $cfg.command | quote }}
+          {{- end }}
+          {{- if $cfg.args }},
+          "args": {{ $cfg.args | toJson }}
+          {{- else }},
+          "args": []
+          {{- end }}
+          {{- if $cfg.workingDirectory }},
+          "workingDirectory": {{ $cfg.workingDirectory | quote }}
+          {{- end }}
+          {{- if $cfg.url }},
+          "url": {{ $cfg.url | quote }}
+          {{- end }}
+          {{- if $cfg.local }},
+          "local": true
+          {{- end }}
+          {{- if $cfg.env }},
+          "env": {{ $cfg.env | toJson }}
+          {{- else }},
+          "env": {}
+          {{- end }}
+          {{- if $cfg.headers }},
+          "headers": {{ $cfg.headers | toJson }}
+          {{- else }},
+          "headers": {}
+          {{- end }}
         }
         {{- end }}
         {{- end }}

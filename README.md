@@ -36,6 +36,9 @@ npm install --workspaces --include-workspace-root
 
 # run the desktop app in dev (Vite + Tauri)
 npm run tauri:dev
+
+# run only the React UI in a browser, without Rust/Tauri bootstrap
+npm run web:dev
 ```
 
 ## Local Stack Bootstrap
@@ -51,6 +54,19 @@ Argo CD controller into the `argocd` namespace, and registers the 5D Labs CTO
 platform, local Qdrant memory, and the always-up Morgan OpenClaw gateway into the
 cluster.
 
+The local Argo CD Applications are embedded from `.gitops/apps/*.yaml` at build
+time and applied into the Kind cluster; they pull public OCI charts from
+`ghcr.io/5dlabs/helm-charts`. For the temporary GitHub bootstrap flow, set
+`CTO_GITHUB_PAT` and optionally `CTO_GITHUB_OWNER` before launching the app. The
+first-run GitHub form is prefilled from those environment variables and applies
+the PAT only to the local `cto-system/cto-agent-keys` Kubernetes Secret so
+Morgan and `project-api` can create or clone private repos.
+
+After a host reboot, the bootstrap treats the existing Kind node containers as
+the source of truth: it starts any stopped `cto-app` node containers, re-exports
+the `kind-cto-app` kubeconfig because the local API server port can change, and
+only creates a new cluster when no persisted Kind cluster exists.
+
 For local controller/chart validation while downstream GHCR artifacts are still
 private or unpublished, run the desktop app with
 `CTO_BOOTSTRAP_TEST_MODE=controller-only npm run tauri:dev`. This explicit test
@@ -64,6 +80,14 @@ Morgan desktop endpoints are private localhost paths on the local ingress:
 `http://localhost:8080/morgan/project-api` for the project sidecar.
 Voice/WebSocket clients use the same private ingress under
 `ws://localhost:8080/morgan/voice/ws`.
+The desktop Morgan avatar is rendered locally in the Tauri/React app and driven
+by that local voice bridge in Voice mode. Video mode loads the self-hosted
+LiveKit/LemonSlice avatar embed, defaulting to
+`https://app.5dlabs.ai/morgan/avatar/embed`; override it with
+`VITE_MORGAN_AVATAR_EMBED_URL`, or set that variable to `local`, `none`, or
+`off` to use the local generated Morgan avatar fallback. The older hosted
+LemonSlice widget remains opt-in via
+`VITE_LEMONSLICE_PRODUCT_MORGAN_AGENT_ID`.
 
 ### Optional local observability
 

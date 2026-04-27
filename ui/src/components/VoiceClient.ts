@@ -6,6 +6,7 @@
  *     { type: "start", session_id }       — open a turn
  *     <binary opus-webm chunk>            — mic audio frames
  *     { type: "text", text }              — keyboard addendum merged w/ speech
+ *     { type: "speak", text, reason }     — TTS-only cue; no agent inference
  *     { type: "end_utterance" }           — user stopped speaking
  *     { type: "stop" }                    — close session
  *   bridge → client:
@@ -13,6 +14,8 @@
  *     { type: "transcript", text }        — STT result
  *     { type: "reply_delta", text }       — streaming agent tokens
  *     { type: "reply_text", text }        — final assembled reply text
+ *     { type: "speech_text", text }       — local TTS cue text
+ *     { type: "speech_done" }             — local TTS cue complete
  *     <binary mp3 chunk>                  — TTS audio frames
  *     { type: "turn_done" }
  *     { type: "error", error }
@@ -32,6 +35,8 @@ export interface VoiceClientHandlers {
   onTranscript?: (text: string) => void;
   onReplyDelta?: (text: string) => void;
   onReplyText?: (text: string) => void;
+  onSpeechText?: (text: string, reason: string) => void;
+  onSpeechDone?: (reason: string) => void;
   onTurnDone?: () => void;
   onError?: (err: string) => void;
   /** Emitted when the playback analyser is live so the avatar can bind. */
@@ -80,12 +85,15 @@ export class VoiceClient {
   private micStream: MediaStream | null = null;
   private micSource: MediaStreamAudioSourceNode | null = null;
   private recorder: MediaRecorder | null = null;
+  private connectPromise: Promise<void> | null = null;
+  private cueWs: WebSocket | null = null;
   private mediaSource: MediaSource | null = null;
   private mp3Buffer: SourceBuffer | null = null;
   private pendingMp3: Uint8Array[] = [];
   private audioEl: HTMLAudioElement | null = null;
   private audioElSource: MediaElementAudioSourceNode | null = null;
   private status: VoiceStatus = "idle";
+  private turnHadReply = false;
   private readonly url: string;
   private readonly sessionId: string;
   private readonly mimeType: string;
@@ -104,10 +112,11 @@ export class VoiceClient {
 
   async connect(): Promise<void> {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) return;
+    if (this.connectPromise) return this.connectPromise;
     this.setStatus("connecting");
     await this.ensureAudioContext();
 
-    await new Promise<void>((resolve, reject) => {
+    this.connectPromise = new Promise<void>((resolve, reject) => {
       let settled = false;
       const ws = new WebSocket(this.url);
       ws.binaryType = "arraybuffer";
@@ -136,16 +145,20 @@ export class VoiceClient {
         }
       };
       ws.onerror = () => {
-        this.setStatus("error");
-        this.handlers.onError?.("websocket error");
+        if (this.ws === ws) {
+          this.setStatus("error");
+          this.handlers.onError?.("websocket error");
+        }
         if (!settled) {
           settled = true;
           reject(new Error("websocket error"));
         }
       };
       ws.onclose = () => {
-        this.setStatus("idle");
-        this.ws = null;
+        if (this.ws === ws) {
+          this.setStatus("idle");
+          this.ws = null;
+        }
       };
 
       // Fallback: if server is slow to acknowledge, still resolve after 2s
@@ -157,7 +170,11 @@ export class VoiceClient {
           resolve();
         }
       }, 2000);
+    }).finally(() => {
+      this.connectPromise = null;
     });
+
+    await this.connectPromise;
 
     this.setStatus("listening");
   }
@@ -168,6 +185,7 @@ export class VoiceClient {
     }
     if (this.recorder && this.recorder.state === "recording") return;
 
+    this.turnHadReply = false;
     await this.ensureMic();
     const stream = this.micStream;
     if (!stream) throw new Error("mic unavailable");
@@ -207,9 +225,88 @@ export class VoiceClient {
   sendText(text: string): void {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
     if (!text.trim()) return;
+    this.turnHadReply = false;
     this.ws.send(JSON.stringify({ type: "text", text: text.trim() }));
     this.ws.send(JSON.stringify({ type: "end_utterance" }));
     this.setStatus("awaiting_reply");
+  }
+
+  async speakCue(text: string, reason = "cue"): Promise<void> {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    const restoreStatus = this.status;
+    await this.ensureAudioContext();
+
+    this.cueWs?.close();
+    await new Promise<void>((resolve, reject) => {
+      let settled = false;
+      const ws = new WebSocket(this.url);
+      ws.binaryType = "arraybuffer";
+      this.cueWs = ws;
+
+      const done = () => {
+        if (!settled) {
+          settled = true;
+          resolve();
+        }
+      };
+      const fail = (err: Error) => {
+        if (!settled) {
+          settled = true;
+          reject(err);
+        }
+      };
+
+      ws.onopen = () => {
+        ws.send(JSON.stringify({ type: "start", session_id: `${this.sessionId}-cue` }));
+      };
+      ws.onmessage = (ev) => {
+        if (typeof ev.data !== "string") {
+          this.handleCueBinaryFrame(ev.data as ArrayBuffer);
+          return;
+        }
+        let frame: { type?: string; text?: string; reason?: string; error?: string };
+        try {
+          frame = JSON.parse(ev.data) as typeof frame;
+        } catch {
+          return;
+        }
+        switch (frame.type) {
+          case "started":
+            ws.send(JSON.stringify({ type: "speak", text: trimmed, reason }));
+            break;
+          case "speech_text":
+            this.handlers.onSpeechText?.(frame.text ?? trimmed, frame.reason ?? reason);
+            this.setStatus("speaking");
+            break;
+          case "speech_done":
+            this.handlers.onSpeechDone?.(frame.reason ?? reason);
+            this.restoreStatusAfterCue(restoreStatus);
+            try {
+              ws.send(JSON.stringify({ type: "stop" }));
+            } catch {
+              /* ignore */
+            }
+            ws.close();
+            done();
+            break;
+          case "error":
+            this.handlers.onError?.(frame.error ?? "speech cue error");
+            this.restoreStatusAfterCue(restoreStatus);
+            ws.close();
+            fail(new Error(frame.error ?? "speech cue error"));
+            break;
+        }
+      };
+      ws.onerror = () => {
+        this.restoreStatusAfterCue(restoreStatus);
+        fail(new Error("speech cue websocket error"));
+      };
+      ws.onclose = () => {
+        if (this.cueWs === ws) this.cueWs = null;
+        done();
+      };
+    });
   }
 
   close(): void {
@@ -220,6 +317,9 @@ export class VoiceClient {
     }
     this.ws?.close();
     this.ws = null;
+    this.connectPromise = null;
+    this.cueWs?.close();
+    this.cueWs = null;
     this.recorder?.stop();
     this.recorder = null;
     this.micStream?.getTracks().forEach((t) => t.stop());
@@ -303,19 +403,48 @@ export class VoiceClient {
         if (frame.text) this.handlers.onTranscript?.(frame.text);
         break;
       case "reply_delta":
-        if (frame.text) this.handlers.onReplyDelta?.(frame.text);
+        if (frame.text) {
+          this.turnHadReply = true;
+          this.handlers.onReplyDelta?.(frame.text);
+        }
         break;
       case "reply_text":
-        if (frame.text) this.handlers.onReplyText?.(frame.text);
-        this.prepareMp3Sink();
+        if (frame.text?.trim()) {
+          this.turnHadReply = true;
+          this.handlers.onReplyText?.(frame.text);
+          this.prepareMp3Sink();
+          this.setStatus("speaking");
+        }
+        break;
+      case "speech_text":
+        if (frame.text) this.handlers.onSpeechText?.(frame.text, "cue");
         this.setStatus("speaking");
+        break;
+      case "speech_done":
+        this.handlers.onSpeechDone?.("cue");
+        this.setStatus("listening");
         break;
       case "turn_done":
         this.finalizeMp3Sink();
         this.handlers.onTurnDone?.();
-        this.setStatus("listening");
+        if (this.turnHadReply) {
+          this.setStatus("listening");
+        } else {
+          this.handlers.onError?.(
+            "Morgan returned an empty response. Check local model provider credentials.",
+          );
+          this.setStatus("error");
+        }
         break;
       case "error":
+        if (frame.error === "empty_utterance") {
+          this.handlers.onError?.(
+            "I didn't catch any speech. Check microphone input or local STT credentials.",
+          );
+          this.handlers.onTurnDone?.();
+          this.setStatus("listening");
+          break;
+        }
         this.handlers.onError?.(frame.error ?? "unknown error");
         this.setStatus("error");
         break;
@@ -324,9 +453,27 @@ export class VoiceClient {
 
   private handleBinaryFrame(buf: ArrayBuffer): void {
     if (!this.mediaSource) this.prepareMp3Sink();
+    this.turnHadReply = true;
+    this.setStatus("speaking");
     const bytes = new Uint8Array(buf);
     this.pendingMp3.push(bytes);
     this.flushMp3Buffer();
+  }
+
+  private handleCueBinaryFrame(buf: ArrayBuffer): void {
+    if (!this.mediaSource) this.prepareMp3Sink();
+    this.setStatus("speaking");
+    const bytes = new Uint8Array(buf);
+    this.pendingMp3.push(bytes);
+    this.flushMp3Buffer();
+  }
+
+  private restoreStatusAfterCue(restoreStatus: VoiceStatus): void {
+    if (restoreStatus === "awaiting_reply" || restoreStatus === "streaming_user") {
+      this.setStatus(restoreStatus);
+      return;
+    }
+    this.setStatus(this.ws?.readyState === WebSocket.OPEN ? "listening" : "idle");
   }
 
   private prepareMp3Sink(): void {

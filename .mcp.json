@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "tauri-mcp": {
+      "type": "local",
+      "command": "npm",
+      "args": [
+        "run",
+        "mcp:tauri"
+      ]
+    }
+  }
+}

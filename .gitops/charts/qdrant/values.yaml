@@ -60,6 +60,9 @@ env:
   QDRANT__TELEMETRY_DISABLED: "true"
   QDRANT__SERVICE__HTTP_PORT: "6333"
   QDRANT__SERVICE__GRPC_PORT: "6334"
+  QDRANT__STORAGE__STORAGE_PATH: "/qdrant/storage"
+  QDRANT__STORAGE__SNAPSHOTS_PATH: "/qdrant/storage/snapshots"
+  QDRANT_INIT_FILE_PATH: "/qdrant/storage/.qdrant-initialized"
 
 resources:
   requests:
@@ -76,6 +79,13 @@ persistence:
   # Empty means "use the cluster default"; kind's default is local-path.
   storageClassName: ""
   annotations: {}
+
+initPermissions:
+  enabled: true
+  image:
+    repository: busybox
+    tag: "1.36"
+    pullPolicy: IfNotPresent
 
 startupProbe:
   enabled: true
