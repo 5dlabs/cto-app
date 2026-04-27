@@ -22,7 +22,7 @@ Located at `/workspace/tools-config.json`. Provides MCP tools to CLI backends.
 
 ```json
 {
-  "remoteTools": ["firecrawl_*"],
+  "remoteTools": ["exa_*", "firecrawl_*", "tavily_*"],
   "localServers": {
     "memory": {
       "command": "npx",
@@ -35,7 +35,7 @@ Located at `/workspace/tools-config.json`. Provides MCP tools to CLI backends.
 
 ### remoteTools
 
-Glob patterns matching tools forwarded from the CTO tool server. The tool server runs as a sidecar/service and exposes tools via MCP protocol. Patterns like `"firecrawl_*"` match all Firecrawl tools.
+Glob patterns matching tools forwarded from the CTO tool server. The tool server runs as a sidecar/service and exposes tools via MCP protocol. Patterns like `"firecrawl_*"` match all Firecrawl tools. Use the central `cto-tools` service for research providers such as Exa, Firecrawl, and Tavily instead of duplicating those servers as per-agent local MCP entries.
 
 ### localServers
 

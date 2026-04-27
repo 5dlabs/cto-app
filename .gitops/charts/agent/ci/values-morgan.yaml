@@ -399,9 +399,12 @@ cloudProviders:
 toolsConfig:
   remoteTools:
     - "argocd_*"
+    - "exa_*"
     - "filesystem_*"
+    - "firecrawl_*"
     - "github_*"
     - "kubernetes_*"
+    - "tavily_*"
   localServers: {}
 
 cliBackends:
