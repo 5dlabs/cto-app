@@ -17,6 +17,7 @@ import { VoiceClient, type VoiceStatus } from "../components/VoiceClient";
 import { NewProjectModal } from "./NewProjectModal";
 import { useProjects } from "../state/projectContext";
 import { buildCoderUrl } from "./data";
+import { shouldAutostartMorgan } from "../runtime";
 
 type Mode = "video" | "voice" | "text";
 
@@ -124,7 +125,7 @@ function newId(): string {
 }
 
 export function MorganView() {
-  const [mode, setMode] = useState<Mode>("video");
+  const [mode, setMode] = useState<Mode>(() => (shouldAutostartMorgan() ? "video" : "text"));
   const [voiceConnected, setVoiceConnected] = useState(false);
   const [voiceStatus, setVoiceStatus] = useState<VoiceStatus>("idle");
   const [voiceError, setVoiceError] = useState<string | null>(null);
@@ -420,11 +421,13 @@ export function MorganView() {
   const refreshWebView = useCallback(() => {
     window.location.reload();
   }, []);
+  const autoStartMorgan = shouldAutostartMorgan();
   const voicePresenceActive = mode === "video" || mode === "voice";
 
   // Warm the bridge immediately. This opens the socket and checks readiness,
   // but does not start microphone capture until the Voice tab is active.
   useEffect(() => {
+    if (!autoStartMorgan) return;
     let cancelled = false;
     const timer = window.setTimeout(() => {
       void (async () => {
@@ -452,9 +455,10 @@ export function MorganView() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [activeProject, ensureClient, speakCue]);
+  }, [activeProject, autoStartMorgan, ensureClient, speakCue]);
 
   useEffect(() => {
+    if (!autoStartMorgan) return;
     if (voicePresenceActive) {
       if (!voiceConnected && voiceStatus !== "connecting") void connectVoice();
       return;
@@ -462,7 +466,7 @@ export function MorganView() {
     if (voiceStatus === "streaming_user") {
       void clientRef.current?.endUtterance();
     }
-  }, [connectVoice, voiceConnected, voicePresenceActive, voiceStatus]);
+  }, [autoStartMorgan, connectVoice, voiceConnected, voicePresenceActive, voiceStatus]);
 
   useEffect(() => {
     if (!voicePresenceActive) return;
@@ -867,7 +871,9 @@ export function MorganView() {
               error={voiceError}
               transcript={voiceTranscript}
               reply={voiceReply}
-              cue={voiceCue ?? (!avatarLoaded ? introCue(activeProject) : null)}
+              cue={
+                voiceCue ?? (autoStartMorgan && !avatarLoaded ? introCue(activeProject) : null)
+              }
               inputAnalyser={inputAnalyser}
               outputAnalyser={outputAnalyser}
               avatarState={avatarState}

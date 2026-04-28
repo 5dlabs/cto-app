@@ -14,7 +14,7 @@ import {
   type ScmProvider,
 } from "../api/sourceControlProvisioning";
 import { invokeTauri, isTauriCommandAvailable, listenTauri } from "../api/tauri";
-import { shouldSkipLocalStackBootstrap } from "../runtime";
+import { isLocalStackBootstrapPreview, shouldSkipLocalStackBootstrap } from "../runtime";
 import fiveDLabsLogo from "../assets/5d-labs-mark.png";
 import {
   IconClaude,
@@ -103,6 +103,8 @@ type BootstrapLocalStackRequest = {
   };
   setup?: BootstrapSetupProfile;
 };
+
+const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 type BootstrapSetupProfile = {
   source: {
@@ -664,6 +666,7 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
     progress: 4,
   });
   const [error, setError] = useState<string | null>(null);
+  const [previewBanner, setPreviewBanner] = useState<string | null>(null);
   const [metrics, setMetrics] = useState<MetricsState>({ status: "idle", report: null });
   const [githubForm, setGithubForm] = useState<BootstrapGithubForm>({
     enabled: true,
@@ -747,6 +750,10 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
   );
 
   const refreshMetrics = useCallback(async () => {
+    if (isLocalStackBootstrapPreview()) {
+      setMetrics({ status: "unavailable", report: null });
+      return;
+    }
     if (metricsInFlight.current) return;
 
     metricsInFlight.current = true;
@@ -789,6 +796,7 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
   const runBootstrap = useCallback(async () => {
     setState("checking");
     setError(null);
+    setPreviewBanner(null);
     setMetrics({ status: "idle", report: null });
     lastMetricsProgress.current = 0;
     setProgress({
@@ -797,6 +805,38 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
       progress: 4,
     });
     void refreshMetrics();
+
+    if (isLocalStackBootstrapPreview()) {
+      try {
+        setProgress({
+          stage: "credentials",
+          message: "[Preview] Saving choices (skipped on web)",
+          progress: 10,
+        });
+        await delay(240);
+        setProgress({
+          stage: "runtime",
+          message: "[Preview] Skipping Rust / Kind bootstrap",
+          progress: 55,
+        });
+        await delay(280);
+        setProgress({
+          stage: "ready",
+          message: "[Preview] Would launch from desktop shell",
+          progress: 100,
+        });
+        await delay(220);
+        setPreviewBanner(
+          "Preview mode only — no provisioning ran. Use the desktop app for a real bootstrap; use npm run web:dev for the main shell.",
+        );
+        setState("credentials");
+        setSetupScreen("harness");
+      } catch (err) {
+        setError(String(err));
+        setState("failed");
+      }
+      return;
+    }
 
     try {
       await persistSourceConnection();
@@ -836,6 +876,8 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
   ]);
 
   useEffect(() => {
+    if (isLocalStackBootstrapPreview()) return;
+
     let unlisten: (() => void) | undefined;
 
     listenTauri<BootstrapProgress>("local-stack-progress", (event) => {
@@ -914,13 +956,20 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
     void refreshMetrics();
   }, [progress.progress, refreshMetrics, state]);
 
-  if (state === "ready") {
+  if (state === "ready" && !isLocalStackBootstrapPreview()) {
     return <>{children}</>;
   }
 
   const metricItems = buildMetricsItems(metrics);
   const isIntro = state === "credentials" && setupScreen === "intro";
   const isCredentialSetup = state === "credentials" && setupScreen !== "intro";
+  const bars = (
+    <div className="local-bootstrap__bars" aria-hidden="true">
+      {Array.from({ length: 20 }).map((_, index) => (
+        <span key={index} style={{ animationDelay: `${index * 70}ms` }} />
+      ))}
+    </div>
+  );
 
   return (
     <div className="local-bootstrap" role="status" aria-live="polite">
@@ -942,12 +991,20 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
           title={isIntro ? "Start setup" : undefined}
           aria-hidden={isIntro ? undefined : true}
           aria-label={isIntro ? "Start setup" : undefined}
-          onClick={isIntro ? () => setSetupScreen("profiles") : undefined}
+          onClick={
+            isIntro
+              ? () => {
+                  setPreviewBanner(null);
+                  setSetupScreen("profiles");
+                }
+              : undefined
+          }
           onKeyDown={
             isIntro
               ? (event) => {
                   if (event.key === "Enter" || event.key === " ") {
                     event.preventDefault();
+                    setPreviewBanner(null);
                     setSetupScreen("profiles");
                   }
                 }
@@ -957,19 +1014,17 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
           <div className="local-bootstrap__ring local-bootstrap__ring--outer" />
           <div className="local-bootstrap__ring local-bootstrap__ring--mid" />
           <div className="local-bootstrap__ring local-bootstrap__ring--inner" />
-          <div className="local-bootstrap__core">
+          <div className="local-bootstrap__core local-bootstrap__core--logo">
             <img
-              className="local-bootstrap__core-logo"
+              className="local-bootstrap__logo"
               src={fiveDLabsLogo}
-              alt="5D Labs logo"
+              alt="5D Labs"
+              draggable={false}
             />
           </div>
-          <div className="local-bootstrap__bars">
-            {Array.from({ length: 20 }).map((_, index) => (
-              <span key={index} />
-            ))}
-          </div>
         </section>
+
+        {isIntro ? bars : null}
 
         <section
           className={`local-bootstrap__copy${
@@ -977,6 +1032,11 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
           }`}
         >
           <div className="local-bootstrap__eyebrow">5D Labs local stack</div>
+          {previewBanner ? (
+            <div className="local-bootstrap__preview-banner" role="status">
+              {previewBanner}
+            </div>
+          ) : null}
           <h1>
             {state === "credentials"
               ? setupScreen === "intro"
@@ -996,7 +1056,10 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
                   className="primary-btn"
                   type="button"
                   title="Configure source, CLI agents, providers, and harness"
-                  onClick={() => setSetupScreen("profiles")}
+                  onClick={() => {
+                    setPreviewBanner(null);
+                    setSetupScreen("profiles");
+                  }}
                 >
                   Start setup
                 </button>

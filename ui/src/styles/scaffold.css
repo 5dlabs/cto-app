@@ -139,7 +139,7 @@ kbd { font-family: "JetBrains Mono", ui-monospace, monospace; }
 
 .sidebar {
   display: flex; flex-direction: column;
-  padding: 10px 8px;
+  padding: 10px 8px 4px;
   gap: 14px;
   background: var(--bg-chrome, #10131a);
   border-right: 1px solid var(--border-subtle, #1e232e);

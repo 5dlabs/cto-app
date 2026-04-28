@@ -1,20 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  IconPuzzle,
-  IconCurrency,
-  IconBolt,
-  IconMic,
   IconCheck,
-  IconSparkles,
-  IconActivity,
   IconCpu,
   IconDatabase,
   IconRefresh,
 } from "./icons";
 import { invokeTauri, isTauriCommandAvailable } from "../api/tauri";
-import { APPLICATIONS, type ExtensionModule } from "./data";
-
-type Tab = "runtime" | "extensions";
 
 type ResourceAmount = {
   cpuMilliCores?: number | null;
@@ -323,10 +314,6 @@ function formatRuntimeBudget(allocation?: RuntimeAllocation | null) {
 }
 
 export function ApplicationsView() {
-  const [tab, setTab] = useState<Tab>("runtime");
-  const [enabled, setEnabled] = useState<Record<string, boolean>>(() =>
-    Object.fromEntries(APPLICATIONS.map((m) => [m.key, !!m.active])),
-  );
   const [metricsReport, setMetricsReport] = useState<LocalStackResourceMetricsReport | null>(null);
   const [metricsLoading, setMetricsLoading] = useState(false);
   const [metricsError, setMetricsError] = useState<string | null>(null);
@@ -377,10 +364,8 @@ export function ApplicationsView() {
   }, []);
 
   useEffect(() => {
-    if (tab === "runtime") {
-      void refreshMetrics();
-    }
-  }, [refreshMetrics, tab]);
+    void refreshMetrics();
+  }, [refreshMetrics]);
 
   const allPods = metricsReport?.pods ?? EMPTY_PODS;
   const namespaces = useMemo(
@@ -529,75 +514,7 @@ export function ApplicationsView() {
 
   return (
     <div className="section">
-      <div className="tabs">
-        <button
-          type="button"
-          className={`tab${tab === "runtime" ? " tab--active" : ""}`}
-          onClick={() => setTab("runtime")}
-        >
-          <IconActivity size={12} /> Runtime
-          <span className="tab__count">{metricsLoading && !metricsReport ? "…" : allPods.length}</span>
-        </button>
-        <button
-          type="button"
-          className={`tab${tab === "extensions" ? " tab--active" : ""}`}
-          onClick={() => setTab("extensions")}
-        >
-          <IconPuzzle size={12} /> Extensions
-          <span className="tab__count">{APPLICATIONS.length}</span>
-        </button>
-      </div>
-
-      {tab === "extensions" ? (
-        <>
-          <div className="chart-card">
-            <div className="section__head">
-              <div>
-                <div className="section__eyebrow">Applications store</div>
-                <div className="section__title">Extensions you can deploy</div>
-                <div className="section__sub">
-                  Optional vertical packs — each ships with its own agents, prompts, and dashboards.
-                  Enable to install into this workspace; disable to archive without losing state.
-                </div>
-              </div>
-            </div>
-            <div className="ext-grid">
-              {APPLICATIONS.map((m) => (
-                <ExtCard
-                  key={m.key}
-                  module={m}
-                  on={enabled[m.key]}
-                  onToggle={(v) =>
-                    setEnabled((prev) => ({ ...prev, [m.key]: v }))
-                  }
-                />
-              ))}
-            </div>
-          </div>
-
-          <div className="chart-card">
-            <div className="section__head">
-              <div>
-                <div className="section__eyebrow">Build your own</div>
-                <div className="section__title">Publish an extension</div>
-                <div className="section__sub">
-                  Bundle agents, skills, and dashboards as a signed 5D extension package. Optionally
-                  publish on-chain for verified distribution.
-                </div>
-              </div>
-              <div className="row">
-                <button type="button" className="ghost-btn">
-                  <IconSparkles size={12} /> Docs
-                </button>
-                <button type="button" className="primary-btn">
-                  New extension
-                </button>
-              </div>
-            </div>
-          </div>
-        </>
-      ) : (
-        <>
+      <>
           <div className="runtime-stats">
             <div className="runtime-stat">
               <div className="runtime-stat__eyebrow">Pods</div>
@@ -883,59 +800,7 @@ export function ApplicationsView() {
               ))}
             </div>
           </div>
-        </>
-      )}
-    </div>
-  );
-}
-
-function ExtCard({
-  module,
-  on,
-  onToggle,
-}: {
-  module: ExtensionModule;
-  on: boolean;
-  onToggle: (v: boolean) => void;
-}) {
-  const Icon =
-    module.key === "accounting"
-      ? IconCurrency
-      : module.key === "marketing"
-        ? IconSparkles
-        : module.key === "rms"
-          ? IconBolt
-          : IconMic;
-  return (
-    <div className="ext-card">
-      <div className="ext-card__head">
-        <div className="ext-card__icon">
-          <Icon size={18} />
-        </div>
-        <div>
-          <div className="ext-card__name">{module.name}</div>
-          <div className="tiny muted">{module.short}</div>
-        </div>
-      </div>
-      <p className="ext-card__desc">{module.description}</p>
-      <div className="ext-card__foot">
-        <span className={`chip chip--${on ? "success" : "warn"}`}>
-          {on ? (
-            <>
-              <IconCheck size={10} /> Enabled
-            </>
-          ) : (
-            "Disabled"
-          )}
-        </span>
-        <button
-          type="button"
-          className={on ? "ghost-btn" : "primary-btn"}
-          onClick={() => onToggle(!on)}
-        >
-          {on ? "Disable" : "Enable"}
-        </button>
-      </div>
+      </>
     </div>
   );
 }
