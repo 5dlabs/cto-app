@@ -3,14 +3,14 @@ import { useEffect, useRef } from "react";
 /**
  * LemonSlice agent IDs — two separate agents, never mix them up.
  *
- * PRODUCT (teams) Morgan — agent_3adc6522f21cc204
- *   Historical hosted LemonSlice widget agent. Desktop does not use it as an
- *   implicit fallback because the account-side avatar can drift.
+ * PRODUCT (teams) Morgan — agent_66794fa7a43ef7dd
+ *   Current Operations-backed LemonSlice/LiveKit Morgan agent. Desktop does not
+ *   use it as an implicit fallback because the account-side avatar can drift.
  *
  * INVESTOR Morgan — agent_0b8ca791bd37c632
  *   Used on /pitch CTA on the marketing site; not used inside the app.
  */
-export const PRODUCT_MORGAN_AGENT_ID = "agent_3adc6522f21cc204";
+export const PRODUCT_MORGAN_AGENT_ID = "agent_66794fa7a43ef7dd";
 export const INVESTOR_MORGAN_AGENT_ID = "agent_0b8ca791bd37c632";
 export const CONFIGURED_PRODUCT_MORGAN_AGENT_ID =
   import.meta.env.VITE_LEMONSLICE_PRODUCT_MORGAN_AGENT_ID?.trim() || "";
