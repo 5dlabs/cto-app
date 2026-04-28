@@ -87,7 +87,9 @@ LiveKit/LemonSlice avatar embed, defaulting to
 `VITE_MORGAN_AVATAR_EMBED_URL`, or set that variable to `local`, `none`, or
 `off` to use the local generated Morgan avatar fallback. The older hosted
 LemonSlice widget remains opt-in via
-`VITE_LEMONSLICE_PRODUCT_MORGAN_AGENT_ID`.
+`VITE_LEMONSLICE_PRODUCT_MORGAN_AGENT_ID`; when used for Morgan, point it at
+`agent_66794fa7a43ef7dd`. The default iframe is resolved by the hosted
+Operations/LiveKit configuration rather than by local Kind secrets.
 
 ### Optional local observability
 
