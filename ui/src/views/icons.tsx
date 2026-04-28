@@ -11,6 +11,7 @@ export interface IconProps {
 
 interface BaseProps extends IconProps {
   d?: string;
+  strokeWidth?: number;
 }
 
 function Icon({
@@ -18,6 +19,7 @@ function Icon({
   size = 16,
   stroke = "currentColor",
   fill = "none",
+  strokeWidth = 1.6,
   className,
   style,
   children,
@@ -30,7 +32,7 @@ function Icon({
       viewBox="0 0 24 24"
       fill={fill}
       stroke={stroke}
-      strokeWidth={1.6}
+      strokeWidth={strokeWidth}
       strokeLinecap="round"
       strokeLinejoin="round"
       className={className}
@@ -99,6 +101,35 @@ export const IconSearch = (p: IconProps) => (
 );
 export const IconCommand = (p: IconProps) => (
   <Icon {...p} d="M18 3a3 3 0 1 0-3 3v3M6 3a3 3 0 1 1 3 3v3m0 6v3a3 3 0 1 1-3-3h12a3 3 0 1 1-3 3v-3M9 9h6v6H9z" />
+);
+export const IconOpenAI = (p: IconProps) => (
+  <Icon {...p} strokeWidth={1.45}>
+    <path d="M12 3.1c1.28 0 2.42.65 3.08 1.64 1.2-.11 2.43.38 3.18 1.48.75 1.08.82 2.4.3 3.47.84.73 1.34 1.8 1.34 3.02 0 1.36-.72 2.58-1.82 3.23-.05 1.2-.7 2.36-1.84 3.03-1.12.66-2.45.62-3.48.02A3.78 3.78 0 0 1 9.67 20c-1.3 0-2.45-.66-3.12-1.67-1.18.08-2.38-.42-3.12-1.48-.73-1.06-.8-2.36-.3-3.42A3.9 3.9 0 0 1 1.8 10.4c0-1.34.7-2.55 1.78-3.21.06-1.2.72-2.35 1.84-3.01 1.12-.66 2.43-.62 3.46-.03A3.78 3.78 0 0 1 12 3.1z" />
+    <path d="M8.68 4.16 15.9 8.3v7.36l-6.57 3.78" />
+    <path d="m15.08 4.74-7.1 4.1-3.58 6.22" />
+    <path d="m18.55 9.69-7.12 4.1H4.26" />
+    <path d="m18.08 15.94-7.22-4.18V4.3" />
+    <path d="m12.76 18.99-3.6-6.17 3.58-6.2" />
+  </Icon>
+);
+export const IconClaude = (p: IconProps) => (
+  <Icon {...p} fill="currentColor" stroke="none">
+    <path d="M12 2.7 3.15 21h3.2l1.8-3.95h7.63L17.57 21h3.28L12 2.7Zm-2.68 11.82L12 8.65l2.68 5.87H9.32Z" />
+  </Icon>
+);
+export const IconCursor = (p: IconProps) => (
+  <Icon {...p} strokeWidth={1.45}>
+    <path d="M4 4l16 5.9-7.2 2.2L10.6 20 4 4z" fill="currentColor" stroke="none" />
+    <path d="m12.8 12.1 4.6 4.6" />
+  </Icon>
+);
+export const IconOpenClaw = (p: IconProps) => (
+  <Icon {...p} strokeWidth={1.8}>
+    <path d="M6.5 5.5 3 12l3.5 6.5" />
+    <path d="M17.5 5.5 21 12l-3.5 6.5" />
+    <path d="M9.5 8.2 8 12l1.5 3.8" />
+    <path d="M14.5 8.2 16 12l-1.5 3.8" />
+  </Icon>
 );
 export const IconBell = (p: IconProps) => (
   <Icon {...p}>
@@ -192,6 +223,16 @@ export const IconGit = (p: IconProps) => (
     <circle cx="18" cy="12" r="2" />
     <path d="M6 8v8" />
     <path d="M16.5 12A6.5 6.5 0 0 0 10 5.5" />
+  </Icon>
+);
+export const IconGitHub = (p: IconProps) => (
+  <Icon {...p} fill="currentColor" stroke="none">
+    <path d="M12 2.25a9.75 9.75 0 0 0-3.08 19c.49.09.67-.21.67-.48v-1.72c-2.73.59-3.31-1.18-3.31-1.18-.44-1.13-1.09-1.43-1.09-1.43-.89-.61.07-.6.07-.6.99.07 1.51 1.02 1.51 1.02.87 1.5 2.29 1.07 2.85.82.09-.64.34-1.07.62-1.32-2.18-.25-4.47-1.09-4.47-4.86 0-1.07.38-1.95 1.01-2.64-.1-.25-.44-1.25.1-2.6 0 0 .83-.26 2.7 1.01a9.3 9.3 0 0 1 4.92 0c1.88-1.27 2.7-1.01 2.7-1.01.54 1.35.2 2.35.1 2.6.63.69 1.01 1.57 1.01 2.64 0 3.78-2.3 4.61-4.49 4.85.35.3.67.9.67 1.82v2.7c0 .27.18.58.68.48A9.75 9.75 0 0 0 12 2.25z" />
+  </Icon>
+);
+export const IconGitLab = (p: IconProps) => (
+  <Icon {...p} fill="currentColor" stroke="none">
+    <path d="M21.74 13.03 20.7 9.84l-2.06-6.33a.7.7 0 0 0-1.33 0l-2.06 6.33H8.75L6.69 3.51a.7.7 0 0 0-1.33 0L3.3 9.84l-1.04 3.19a1.41 1.41 0 0 0 .51 1.58L12 21.32l9.23-6.71a1.41 1.41 0 0 0 .51-1.58zM12 21.32l3.25-11.48h-6.5L12 21.32z" />
   </Icon>
 );
 export const IconShield = (p: IconProps) => (

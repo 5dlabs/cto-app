@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invokeTauri } from "./tauri";
 
 export type ScmProvider = "github" | "gitlab";
 
@@ -86,25 +86,25 @@ export interface GitHubManifestExchangeResult {
 }
 
 export function listScmConnections(): Promise<ScmConnection[]> {
-  return invoke<ScmConnection[]>("list_scm_connections");
+  return invokeTauri<ScmConnection[]>("list_scm_connections");
 }
 
 export function prepareScmProvisioning(
   request: ScmProvisioningRequest,
 ): Promise<ScmProvisioningPlan> {
-  return invoke<ScmProvisioningPlan>("prepare_scm_provisioning", { request });
+  return invokeTauri<ScmProvisioningPlan>("prepare_scm_provisioning", { request });
 }
 
 export function saveScmConnection(
   connection: ScmConnection,
 ): Promise<ScmConnection[]> {
-  return invoke<ScmConnection[]>("save_scm_connection", { connection });
+  return invokeTauri<ScmConnection[]>("save_scm_connection", { connection });
 }
 
 export function exchangeGithubManifestCode(
   request: GitHubManifestExchangeRequest,
 ): Promise<GitHubManifestExchangeResult> {
-  return invoke<GitHubManifestExchangeResult>("exchange_github_manifest_code", {
+  return invokeTauri<GitHubManifestExchangeResult>("exchange_github_manifest_code", {
     request,
   });
 }
@@ -113,7 +113,7 @@ export function deleteScmConnection(
   provider: ScmProvider,
   connectionId: string,
 ): Promise<ScmConnection[]> {
-  return invoke<ScmConnection[]>("delete_scm_connection", {
+  return invokeTauri<ScmConnection[]>("delete_scm_connection", {
     provider,
     connectionId,
   });
