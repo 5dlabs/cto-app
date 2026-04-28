@@ -7,28 +7,28 @@ import {
   type ComponentType,
   type ReactNode,
 } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 import {
   prepareScmProvisioning,
   saveScmConnection,
   slugifyConnectionId,
   type ScmProvider,
 } from "../api/sourceControlProvisioning";
+import { invokeTauri, isTauriCommandAvailable, listenTauri } from "../api/tauri";
 import { shouldSkipLocalStackBootstrap } from "../runtime";
+import fiveDLabsLogo from "../assets/5d-labs-mark.png";
 import {
-  IconBolt,
-  IconBracket,
+  IconClaude,
   IconCloud,
-  IconCommand,
   IconCpu,
+  IconCursor,
   IconDatabase,
-  IconGit,
+  IconGitHub,
+  IconGitLab,
   IconGlobe,
   IconKey,
+  IconOpenClaw,
+  IconOpenAI,
   IconPackage,
-  IconPuzzle,
-  IconRadio,
   IconSearch,
   IconShield,
   IconSparkles,
@@ -45,16 +45,16 @@ type BootstrapProgress = {
 type BootstrapState = "credentials" | "checking" | "ready" | "failed";
 type SourceHostMode = "hosted" | "self-hosted";
 type SetupScreen = "intro" | "profiles" | "tools" | "harness";
-type HarnessId = "openclaw" | "hermes";
+type HarnessId = "openclaw" | "codex";
 type AiCliId =
-  | "openclaw"
+  | "claude"
+  | "code"
+  | "cursor"
   | "codex"
-  | "claudeCode"
-  | "geminiCli"
-  | "opencode"
-  | "qwenCode"
-  | "githubCli"
-  | "gitlabCli";
+  | "factory"
+  | "gemini"
+  | "copilot"
+  | "kimi";
 type AiProviderId = string;
 type ToolApiKeyName =
   | "EXA_API_KEY"
@@ -217,13 +217,13 @@ const SOURCE_OPTIONS: Array<{
   {
     id: "github",
     name: "GitHub",
-    icon: IconGit,
+    icon: IconGitHub,
     summary: "GitHub repository namespace.",
   },
   {
     id: "gitlab",
     name: "GitLab",
-    icon: IconGit,
+    icon: IconGitLab,
     summary: "GitLab group or namespace.",
   },
 ];
@@ -236,15 +236,15 @@ const HARNESSES: Array<{
 }> = [
   {
     id: "openclaw",
-    name: "OpenCLAW",
-    icon: IconPuzzle,
-    summary: "ACP harness agent for the selected CLI/provider profiles.",
+    name: "OpenClaw",
+    icon: IconOpenClaw,
+    summary: "OpenClaw harness for provider-backed agent sessions.",
   },
   {
-    id: "hermes",
-    name: "Hermes",
-    icon: IconRadio,
-    summary: "Hermes harness agent for the selected CLI/provider profiles.",
+    id: "codex",
+    name: "Codex",
+    icon: IconOpenAI,
+    summary: "Codex harness for OpenAI-backed coding sessions.",
   },
 ];
 
@@ -295,54 +295,52 @@ const TOOL_API_KEYS: ToolApiKeyOption[] = [
 
 const AI_CLIS: AiCliOption[] = [
   {
-    id: "openclaw",
-    name: "OpenCLAW",
-    icon: IconPuzzle,
-    summary: "Reference provider vocabulary and broad ACP profile import.",
+    id: "claude",
+    name: "Claude",
+    icon: IconClaude,
+    summary: "Claude CLI surface for Anthropic and cloud-provider routes.",
+  },
+  {
+    id: "code",
+    name: "OpenCode",
+    icon: IconTerminal,
+    summary: "OpenCode CLI profile.",
+  },
+  {
+    id: "cursor",
+    name: "Cursor",
+    icon: IconCursor,
+    summary: "Cursor agent profile.",
   },
   {
     id: "codex",
     name: "Codex",
-    icon: IconCommand,
+    icon: IconOpenAI,
     summary: "ChatGPT sign-in or OpenAI Responses profiles.",
   },
   {
-    id: "claudeCode",
-    name: "Claude Code",
-    icon: IconTerminal,
-    summary: "Claude subscription, Console key, Bedrock, or Vertex.",
+    id: "factory",
+    name: "Factory",
+    icon: IconPackage,
+    summary: "Factory agent CLI profile.",
   },
   {
-    id: "geminiCli",
-    name: "Gemini CLI",
+    id: "gemini",
+    name: "Gemini",
     icon: IconSparkles,
     summary: "Google login, Gemini API key, or Vertex ADC.",
   },
   {
-    id: "opencode",
-    name: "OpenCode",
-    icon: IconBracket,
-    summary: "Models.dev broker and provider connections.",
+    id: "copilot",
+    name: "Copilot",
+    icon: IconGitHub,
+    summary: "GitHub Copilot coding-agent profile.",
   },
   {
-    id: "qwenCode",
-    name: "Qwen Code",
-    icon: IconBolt,
-    summary: "Qwen plus OpenAI, Anthropic, Gemini, and local profiles.",
-  },
-  {
-    id: "githubCli",
-    name: "GitHub CLI",
-    icon: IconGit,
-    summary: "Source-control helper; does not filter AI providers.",
-    sourceControlOnly: true,
-  },
-  {
-    id: "gitlabCli",
-    name: "GitLab CLI",
+    id: "kimi",
+    name: "Kimi",
     icon: IconShield,
-    summary: "Source-control helper; does not filter AI providers.",
-    sourceControlOnly: true,
+    summary: "Kimi coding-agent profile.",
   },
 ];
 
@@ -384,16 +382,16 @@ const AI_PROVIDERS: AiProviderOption[] = [
     icon: IconSparkles,
     summary: "Claude API and Claude Code subscription auth.",
     auth: "oauth",
-    cliIds: ["openclaw", "claudeCode", "opencode", "qwenCode"],
+    cliIds: ["claude", "code", "cursor", "factory", "copilot", "kimi"],
     models: ["Opus 4.7", "Sonnet 4.6", "Haiku 4.5"],
   },
   {
     id: "openai",
     name: "OpenAI",
-    icon: IconCommand,
+    icon: IconOpenAI,
     summary: "Responses-capable OpenAI and Codex routes.",
     auth: "oauth",
-    cliIds: ["openclaw", "codex", "opencode", "qwenCode"],
+    cliIds: ["code", "cursor", "codex", "factory", "copilot"],
     models: ["GPT-5.5", "GPT-5.4", "GPT-5.3 Codex"],
   },
   {
@@ -402,7 +400,7 @@ const AI_PROVIDERS: AiProviderOption[] = [
     icon: IconSparkles,
     summary: "Gemini API and Google account auth.",
     auth: "oauth",
-    cliIds: ["openclaw", "geminiCli", "opencode", "qwenCode"],
+    cliIds: ["code", "cursor", "factory", "gemini", "copilot"],
     models: ["Gemini 3", "Gemini 2.5 Pro", "Gemini Flash"],
   },
   {
@@ -411,7 +409,7 @@ const AI_PROVIDERS: AiProviderOption[] = [
     icon: IconGlobe,
     summary: "Brokered model catalog with API key routing.",
     auth: "api-key",
-    cliIds: ["openclaw", "opencode", "qwenCode"],
+    cliIds: ["claude", "code", "cursor", "codex", "factory", "gemini", "copilot", "kimi"],
     models: OPENROUTER_MODELS,
   },
   {
@@ -420,7 +418,7 @@ const AI_PROVIDERS: AiProviderOption[] = [
     icon: IconCloud,
     summary: "AWS IAM/SigV4 for Claude and other Bedrock models.",
     auth: "cloud",
-    cliIds: ["openclaw", "claudeCode", "codex", "opencode"],
+    cliIds: ["claude", "code", "cursor", "codex", "factory"],
     models: ["Claude", "Nova", "Llama", "Cohere"],
   },
   {
@@ -429,7 +427,7 @@ const AI_PROVIDERS: AiProviderOption[] = [
     icon: IconPackage,
     summary: "Google cloud credentials, Gemini, and partner Model Garden.",
     auth: "cloud",
-    cliIds: ["openclaw", "claudeCode", "geminiCli", "opencode"],
+    cliIds: ["claude", "code", "cursor", "factory", "gemini"],
     models: ["Gemini", "Claude", "Imagen", "Veo"],
   },
   {
@@ -438,7 +436,7 @@ const AI_PROVIDERS: AiProviderOption[] = [
     icon: IconCpu,
     summary: "Local model runtime with optional OpenAI-compatible endpoint.",
     auth: "local",
-    cliIds: ["openclaw", "codex", "opencode", "qwenCode"],
+    cliIds: ["code", "cursor", "codex", "factory", "kimi"],
     models: ["Local tags", "Qwen", "Llama", "DeepSeek"],
   },
   {
@@ -447,7 +445,7 @@ const AI_PROVIDERS: AiProviderOption[] = [
     icon: IconDatabase,
     summary: "Local OpenAI/Anthropic-compatible runtime.",
     auth: "local",
-    cliIds: ["openclaw", "codex", "claudeCode", "opencode", "qwenCode"],
+    cliIds: ["claude", "code", "cursor", "codex", "factory", "kimi"],
     models: ["Loaded model", "GGUF", "MLX", "OpenAI compat"],
   },
 ];
@@ -652,6 +650,7 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
   const [sourceProvider, setSourceProvider] = useState<ScmProvider>("github");
   const [sourceHostMode, setSourceHostMode] = useState<SourceHostMode>("hosted");
   const [sourceHostUrl, setSourceHostUrl] = useState(SOURCE_DEFAULT_URLS.github);
+  const [sourceHostEditing, setSourceHostEditing] = useState(false);
   const [sourceOwner, setSourceOwner] = useState("5dlabs");
   const [harness, setHarness] = useState<HarnessId | null>(null);
   const [selectedCliIds, setSelectedCliIds] = useState<Partial<Record<AiCliId, true>>>({});
@@ -674,7 +673,6 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
     ownerSource: null,
   });
   const loadedDefaults = useRef(false);
-  const sourceOwnerTouched = useRef(false);
   const toolKeyTouched = useRef<Partial<Record<ToolApiKeyName, true>>>({});
   const metricsInFlight = useRef(false);
   const lastMetricsProgress = useRef(0);
@@ -724,13 +722,12 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
     ],
   );
   const selectedProviderCount = selectedProviders.length;
-  const sourceReady =
-    sourceOwner.trim().length > 0 &&
-    (sourceHostMode === "hosted" || sourceHostUrl.trim().length > 0);
+  const sourceReady = sourceHostMode === "hosted" || sourceHostUrl.trim().length > 0;
   const clisReady = selectedProviderFilterCliIds.length > 0;
   const providersReady = selectedProviderCount > 0;
-  const canContinue = sourceReady && clisReady && providersReady;
-  const canStart = canContinue && harness !== null;
+  const harnessReady = harness !== null;
+  const canContinue = sourceReady && clisReady && harnessReady && providersReady;
+  const canStart = canContinue;
   const selectedCliNames = useMemo(
     () => AI_CLIS.filter((cli) => selectedCliIds[cli.id]).map((cli) => cli.name),
     [selectedCliIds],
@@ -758,7 +755,9 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
     );
 
     try {
-      const report = await invoke<LocalStackResourceMetricsReport>("local_stack_resource_metrics");
+      const report = await invokeTauri<LocalStackResourceMetricsReport>(
+        "local_stack_resource_metrics",
+      );
       setMetrics({ status: "ready", report });
     } catch {
       setMetrics((current) =>
@@ -770,6 +769,8 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
   }, []);
 
   const persistSourceConnection = useCallback(async () => {
+    if (!isTauriCommandAvailable()) return;
+
     const owner = setupProfile.source.owner;
     if (!owner) return;
 
@@ -804,7 +805,7 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
         message: "Installing dependencies...",
         progress: 8,
       });
-      await invoke("bootstrap_local_stack", {
+      await invokeTauri("bootstrap_local_stack", {
         request: buildBootstrapRequest(
           sourceProvider,
           sourceOwner,
@@ -837,7 +838,7 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
   useEffect(() => {
     let unlisten: (() => void) | undefined;
 
-    listen<BootstrapProgress>("local-stack-progress", (event) => {
+    listenTauri<BootstrapProgress>("local-stack-progress", (event) => {
       setProgress(event.payload);
     })
       .then((handler) => {
@@ -855,7 +856,7 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
     loadedDefaults.current = true;
     let cancelled = false;
 
-    void invoke<LocalStackBootstrapDefaults>("local_stack_bootstrap_defaults")
+    void invokeTauri<LocalStackBootstrapDefaults>("local_stack_bootstrap_defaults")
       .then((defaults) => {
         if (cancelled) return;
         setGithubForm({
@@ -865,9 +866,7 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
           owner: defaults.github.owner || "5dlabs",
           ownerSource: defaults.github.ownerSource,
         });
-        if (!sourceOwnerTouched.current) {
-          setSourceOwner(defaults.github.owner || "5dlabs");
-        }
+        setSourceOwner(defaults.github.owner || "5dlabs");
         setToolApiKeys((current) => {
           const next = { ...current };
           for (const tool of TOOL_API_KEYS) {
@@ -958,10 +957,16 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
           <div className="local-bootstrap__ring local-bootstrap__ring--outer" />
           <div className="local-bootstrap__ring local-bootstrap__ring--mid" />
           <div className="local-bootstrap__ring local-bootstrap__ring--inner" />
-          <div className="local-bootstrap__core">5D</div>
+          <div className="local-bootstrap__core">
+            <img
+              className="local-bootstrap__core-logo"
+              src={fiveDLabsLogo}
+              alt="5D Labs logo"
+            />
+          </div>
           <div className="local-bootstrap__bars">
             {Array.from({ length: 20 }).map((_, index) => (
-              <span key={index} style={{ animationDelay: `${index * 70}ms` }} />
+              <span key={index} />
             ))}
           </div>
         </section>
@@ -1031,55 +1036,67 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
                         );
                       })}
                     </div>
-                    <label className="field">
+                    <div className="field">
                       <span className="field__label">Host</span>
-                      <select
-                        className="field__input"
-                        title="Hosted or self-hosted"
-                        value={sourceHostMode}
-                        onChange={(event) =>
-                          setSourceHostMode(event.target.value as SourceHostMode)
-                        }
-                      >
-                        <option value="hosted">Hosted</option>
-                        <option value="self-hosted">Self-hosted</option>
-                      </select>
-                    </label>
-                    <label className="field">
-                      <span className="field__label">
-                        {sourceProvider === "github" ? "Owner" : "Group"}
-                      </span>
-                      <input
-                        className="field__input"
-                        title="Repository namespace"
-                        autoComplete="organization"
-                        value={sourceOwner}
-                        onChange={(event) => {
-                          sourceOwnerTouched.current = true;
-                          setSourceOwner(event.target.value);
-                          setGithubForm((current) => ({
-                            ...current,
-                            owner: event.target.value,
-                            ownerSource: null,
-                          }));
-                        }}
-                      />
-                    </label>
-                    {sourceHostMode === "self-hosted" ? (
-                      <label className="field">
-                        <span className="field__label">URL</span>
-                        <input
-                          className="field__input"
-                          title="Enterprise base URL"
-                          value={sourceHostUrl}
-                          onChange={(event) => setSourceHostUrl(event.target.value)}
-                        />
-                      </label>
-                    ) : null}
+                      <div className="local-bootstrap__host-toggle">
+                        <button
+                          type="button"
+                          className={`local-bootstrap__host-choice${
+                            sourceHostMode === "hosted" ? " is-selected" : ""
+                          }`}
+                          onClick={() => {
+                            setSourceHostMode("hosted");
+                            setSourceHostEditing(false);
+                          }}
+                        >
+                          <span className="local-bootstrap__host-dot" />
+                          <span>Hosted</span>
+                        </button>
+                        {sourceHostEditing ? (
+                          <input
+                            className="local-bootstrap__host-input"
+                            title="Enterprise base URL"
+                            autoFocus
+                            value={sourceHostUrl}
+                            onBlur={() => setSourceHostEditing(false)}
+                            onChange={(event) => setSourceHostUrl(event.target.value)}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter") {
+                                event.preventDefault();
+                                setSourceHostEditing(false);
+                              }
+                            }}
+                          />
+                        ) : (
+                          <button
+                            type="button"
+                            className={`local-bootstrap__host-choice local-bootstrap__host-choice--self${
+                              sourceHostMode === "self-hosted" ? " is-selected" : ""
+                            }`}
+                            title={
+                              sourceHostMode === "self-hosted"
+                                ? sourceHostUrl
+                                : "Configure self-hosted source"
+                            }
+                            onClick={() => {
+                              setSourceHostMode("self-hosted");
+                              setSourceHostEditing(true);
+                            }}
+                          >
+                            <span className="local-bootstrap__host-dot" />
+                            <span>
+                              {sourceHostMode === "self-hosted"
+                                ? sourceHostUrl || "Self-hosted URL"
+                                : "Self-hosted"}
+                            </span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
                   </section>
 
-                  <section className="local-bootstrap__panel" title="CLI agents launched by ACP">
-                    <div className="local-bootstrap__panel-title">CLI agents</div>
+                  <section className="local-bootstrap__panel" title="ACP CLIs">
+                    <div className="local-bootstrap__panel-title">ACP CLIs</div>
                     <div className="local-bootstrap__choice-grid local-bootstrap__choice-grid--two">
                       {AI_CLIS.map((cli) => {
                         const CliIcon = cli.icon;
@@ -1107,6 +1124,31 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
                               <CliIcon size={16} />
                             </span>
                             <strong>{cli.name}</strong>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </section>
+
+                  <section className="local-bootstrap__panel" title="Harness agent">
+                    <div className="local-bootstrap__panel-title">Harnesses</div>
+                    <div className="local-bootstrap__choice-grid local-bootstrap__choice-grid--two">
+                      {HARNESSES.map((item) => {
+                        const HarnessIcon = item.icon;
+                        return (
+                          <button
+                            key={item.id}
+                            type="button"
+                            title={item.summary}
+                            className={`local-bootstrap__choice${
+                              harness === item.id ? " is-selected" : ""
+                            }`}
+                            onClick={() => setHarness(item.id)}
+                          >
+                            <span className="local-bootstrap__brand-mark">
+                              <HarnessIcon size={16} />
+                            </span>
+                            <strong>{item.name}</strong>
                           </button>
                         );
                       })}
@@ -1310,11 +1352,11 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
                     <button
                       className="primary-btn"
                       type="button"
-                      title="Choose harness"
+                      title="Start local stack"
                       disabled={!canContinue}
-                      onClick={() => setSetupScreen("harness")}
+                      onClick={() => void runBootstrap()}
                     >
-                      Continue
+                      Start
                     </button>
                   </div>
                 </div>

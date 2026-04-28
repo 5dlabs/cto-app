@@ -10,6 +10,7 @@
   "scripts": {
     "dev": "npm --workspace ui run dev",
     "web:dev": "npm --workspace ui run web:dev",
+    "web:init:dev": "npm --workspace ui run web:init:dev",
     "web:preview": "npm --workspace ui run web:preview",
     "build": "npm --workspace ui run build",
     "preview": "npm --workspace ui run preview",

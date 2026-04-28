@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import {
   IconPuzzle,
   IconCurrency,
@@ -12,6 +11,7 @@ import {
   IconDatabase,
   IconRefresh,
 } from "./icons";
+import { invokeTauri, isTauriCommandAvailable } from "../api/tauri";
 import { APPLICATIONS, type ExtensionModule } from "./data";
 
 type Tab = "runtime" | "extensions";
@@ -349,8 +349,17 @@ export function ApplicationsView() {
     setMetricsLoading(true);
     setMetricsError(null);
 
+    if (!isTauriCommandAvailable()) {
+      setMetricsReport(null);
+      setMetricsLoading(false);
+      setMetricsError("Desktop runtime metrics are only available in the Tauri app.");
+      return;
+    }
+
     try {
-      const report = await invoke<LocalStackResourceMetricsReport>("local_stack_resource_metrics");
+      const report = await invokeTauri<LocalStackResourceMetricsReport>(
+        "local_stack_resource_metrics",
+      );
       if (!mounted.current || metricsRequestId.current !== requestId) {
         return;
       }
