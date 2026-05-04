@@ -72,7 +72,12 @@ jobs:
         run: cargo install tauri-driver --locked
 
       - name: Run Tauri Selenium E2E
-        run: xvfb-run -a npm run e2e:tauri
+        run: |
+          if compgen -G "e2e/tauri/**/*.e2e.mjs" > /dev/null; then
+            xvfb-run -a npm run e2e:tauri
+          else
+            echo "No Tauri Selenium specs found; skipping."
+          fi
 
       - name: Run Kubernetes smoke validation
         if: env.CTO_E2E_START_BOOTSTRAP == '1'

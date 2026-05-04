@@ -6547,8 +6547,8 @@ mod tests {
         agent_keys_secret_manifest, aggregate_resource_metrics, apply_summary_usage,
         argo_application_status_summary, argocd_oci_repository_secret_manifest, base64_encode,
         bootstrap_secret_reference, build_bootstrap_cto_config, collect_gitops_repository_files,
-        collect_gitops_repository_files_from_template_root, copy_text_to_clipboard,
-        cto_agent_keys_values_patch, cto_config_values_patch, embedded_gitops_template_files,
+        collect_gitops_repository_files_from_template_root, cto_agent_keys_values_patch,
+        cto_config_values_patch, embedded_gitops_template_files,
         ensure_bootstrap_gitops_repository, extract_github_user_code,
         extract_github_verification_uri, format_argo_application_status, ghcr_pull_secret_manifest,
         gitops_repository_initialization_required, gitops_repository_owner,
@@ -6557,11 +6557,11 @@ mod tests {
         normalize_bootstrap_scm_secret_manifest, normalize_bootstrap_tool_api_keys,
         parse_cpu_quantity_to_milli, parse_kind_node_container_states, parse_kubelet_summary_usage,
         parse_kubernetes_nodes, parse_kubernetes_pods, parse_memory_quantity_to_bytes,
-        parse_runtime_stats_lines, prepare_origin_transfer_inner, run_tool,
-        terminal_argo_application_error, validate_bootstrap_setup, BootstrapAgentKey,
-        BootstrapAiCli, BootstrapAppMode, BootstrapGithubCredentials, BootstrapGithubRequest,
-        BootstrapHarnessMode, BootstrapHarnessRouting, BootstrapLocalStackRequest,
-        BootstrapModelRoute, BootstrapProviderAuth, BootstrapProviderCredentialConfig,
+        parse_runtime_stats_lines, prepare_origin_transfer_inner, terminal_argo_application_error,
+        validate_bootstrap_setup, BootstrapAgentKey, BootstrapAiCli, BootstrapAppMode,
+        BootstrapGithubCredentials, BootstrapGithubRequest, BootstrapHarnessMode,
+        BootstrapHarnessRouting, BootstrapLocalStackRequest, BootstrapModelRoute,
+        BootstrapProviderAuth, BootstrapProviderCredentialConfig,
         BootstrapProviderCredentialRequest, BootstrapProviderSelection, BootstrapProvidersRequest,
         BootstrapScmRequest, BootstrapSetupAgent, BootstrapSetupHarness, BootstrapSetupProfile,
         BootstrapSetupSource, BootstrapSourceCredentials, BootstrapSourceProvider,
@@ -6656,15 +6656,15 @@ mod tests {
             return;
         }
 
-        let previous = run_tool("pbpaste", &[])
+        let previous = super::run_tool("pbpaste", &[])
             .ok()
             .and_then(|output| String::from_utf8(output.stdout).ok())
             .unwrap_or_default();
         let sentinel = format!("CTO-CLIP-{}", std::process::id());
-        let copy_result = copy_text_to_clipboard(&sentinel);
-        let read_result = run_tool("pbpaste", &[])
+        let copy_result = super::copy_text_to_clipboard(&sentinel);
+        let read_result = super::run_tool("pbpaste", &[])
             .map(|output| String::from_utf8_lossy(&output.stdout).to_string());
-        let _ = copy_text_to_clipboard(&previous);
+        let _ = super::copy_text_to_clipboard(&previous);
 
         copy_result.expect("copy_text_to_clipboard should succeed");
         assert_eq!(read_result.expect("pbpaste should succeed"), sentinel);
