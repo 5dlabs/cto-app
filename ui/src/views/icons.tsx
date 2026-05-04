@@ -159,6 +159,20 @@ export const IconMic = (p: IconProps) => (
     <path d="M12 19v3" />
   </Icon>
 );
+export const IconVolume = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M4 9v6h4l5 4V5L8 9H4z" />
+    <path d="M16 9.5a4 4 0 0 1 0 5" />
+    <path d="M18.5 7a8 8 0 0 1 0 10" />
+  </Icon>
+);
+export const IconVolumeOff = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M4 9v6h4l5 4V5L8 9H4z" />
+    <path d="M17 9l5 5" />
+    <path d="M22 9l-5 5" />
+  </Icon>
+);
 export const IconVideo = (p: IconProps) => (
   <Icon {...p}>
     <rect x="3" y="6" width="13" height="12" rx="2" />
@@ -235,6 +249,31 @@ export const IconGitLab = (p: IconProps) => (
     <path d="M21.74 13.03 20.7 9.84l-2.06-6.33a.7.7 0 0 0-1.33 0l-2.06 6.33H8.75L6.69 3.51a.7.7 0 0 0-1.33 0L3.3 9.84l-1.04 3.19a1.41 1.41 0 0 0 .51 1.58L12 21.32l9.23-6.71a1.41 1.41 0 0 0 .51-1.58zM12 21.32l3.25-11.48h-6.5L12 21.32z" />
   </Icon>
 );
+export const IconGiteaMono = (p: IconProps) => (
+  <Icon {...p} fill="currentColor" stroke="none">
+    <path d="M2.1 7.8c.4-1.7 1.7-2.7 3.7-2.7h12.6c2.1 0 3.4 1 3.5 2.9.2 3.9-1.6 8.7-3.7 11-.8.9-1.7 1.2-2.9 1.2H8.8c-1.2 0-2.2-.5-3-1.4-1-1.1-1.8-2.7-2.5-4.4-1.8-.2-3-1.1-3.2-2.5-.3-1.7.3-3.3 2-4.1Zm1.9 2.1c-.8.3-1.1.9-1 1.6.1.5.6.8 1.5.9-.3-1-.4-1.8-.5-2.5Z" />
+    <path d="M14.1 5.1v5.2l3.3 1.6c1.4.7 2 2.3 1.3 3.7l-1.8 3.7c-.4.6-1 .9-1.7.9H9l3-6.2-1.5-.8-3.4 7c-.5-.2-.9-.5-1.3-.9-1-1.1-1.8-2.7-2.5-4.4-1.8-.2-3-1.1-3.2-2.5-.3-1.7.3-3.3 2-4.1.4-1.7 1.7-2.7 3.7-2.7h6.6V5.1h1.7Z" opacity="0.72" />
+    <path d="M12.4 10.5 8.6 18c-.3.7 0 1.5.7 1.8l5.2 2.5c.7.3 1.5 0 1.8-.7l2.6-5.4c.3-.7 0-1.5-.7-1.8l-5.2-2.5c-.7-.3-1.5 0-1.8.7Z" opacity="0.34" />
+    <path d="M12.7 13.5 10.5 18M13.6 14l2.1 1M15.7 15l-1.7 3.4" stroke="currentColor" strokeWidth="1.05" strokeLinecap="round" opacity="0.72" />
+  </Icon>
+);
+export const IconGitLabFullColor = ({ size = 16, className, style }: IconProps) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    className={className}
+    style={style}
+    aria-hidden="true"
+  >
+    <path d="M12 21.3 2.8 14.6c-.5-.4-.7-1-.5-1.6l1-3.2L5.4 3.5c.2-.6 1.1-.6 1.3 0l2.1 6.3h6.5l2.1-6.3c.2-.6 1.1-.6 1.3 0l2.1 6.3 1 3.2c.2.6 0 1.2-.5 1.6L12 21.3Z" fill="#FC6D26" />
+    <path d="M12 21.3 15.3 9.8H8.8L12 21.3Z" fill="#E24329" opacity="0.9" />
+    <path d="M8.8 9.8 12 21.3 2.8 14.6c-.5-.4-.7-1-.5-1.6l1-3.2h5.5Z" fill="#FCA326" opacity="0.95" />
+    <path d="M15.3 9.8 12 21.3l9.2-6.7c.5-.4.7-1 .5-1.6l-1-3.2h-5.4Z" fill="#FCA326" opacity="0.95" />
+  </svg>
+);
 export const IconShield = (p: IconProps) => (
   <Icon {...p} d="M12 2l8 4v6c0 5-3.5 9-8 10-4.5-1-8-5-8-10V6l8-4z" />
 );
@@ -288,6 +327,148 @@ export const IconUpload = (p: IconProps) => (
     <path d="M17 8l-5-5-5 5M12 3v12" />
   </Icon>
 );
+export const IconInstallDesktop = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="3" y="4" width="18" height="12" rx="2" />
+    <path d="M8 20h8M12 16v4" />
+    <path d="M12 6v7" />
+    <path d="M8.5 9.5L12 13l3.5-3.5" />
+  </Icon>
+);
+export const IconGitea = ({ size = 16, className, style }: IconProps) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    className={className}
+    style={style}
+    aria-hidden="true"
+  >
+    <path
+      d="M2.1 7.8c.4-1.7 1.7-2.7 3.7-2.7h12.6c2.1 0 3.4 1 3.5 2.9.2 3.9-1.6 8.7-3.7 11-.8.9-1.7 1.2-2.9 1.2H8.8c-1.2 0-2.2-.5-3-1.4-1-1.1-1.8-2.7-2.5-4.4-1.8-.2-3-1.1-3.2-2.5-.3-1.7.3-3.3 2-4.1Zm1.9 2.1c-.8.3-1.1.9-1 1.6.1.5.6.8 1.5.9-.3-1-.4-1.8-.5-2.5Z"
+      fill="#85C94B"
+    />
+    <path
+      d="M14.1 5.1v5.2l3.3 1.6c1.4.7 2 2.3 1.3 3.7l-1.8 3.7c-.4.6-1 .9-1.7.9H9l3-6.2-1.5-.8-3.4 7c-.5-.2-.9-.5-1.3-.9-1-1.1-1.8-2.7-2.5-4.4-1.8-.2-3-1.1-3.2-2.5-.3-1.7.3-3.3 2-4.1.4-1.7 1.7-2.7 3.7-2.7h6.6V5.1h1.7Z"
+      fill="#6EAA33"
+      opacity="0.82"
+    />
+    <path
+      d="M12.4 10.5 8.6 18c-.3.7 0 1.5.7 1.8l5.2 2.5c.7.3 1.5 0 1.8-.7l2.6-5.4c.3-.7 0-1.5-.7-1.8l-5.2-2.5c-.7-.3-1.5 0-1.8.7Z"
+      fill="#FFFFFF"
+    />
+    <path d="M12.7 13.5 10.5 18M13.6 14l2.1 1M15.7 15l-1.7 3.4" stroke="#6EAA33" strokeWidth="1.05" strokeLinecap="round" />
+    <circle cx="10.4" cy="18.1" r="1.05" fill="#6EAA33" />
+    <circle cx="13.9" cy="18.3" r="1.05" fill="#6EAA33" />
+  </svg>
+);
+export const Icon5DOrigin = ({ size = 16, className, style }: IconProps) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    className={className}
+    style={style}
+    aria-hidden="true"
+  >
+    <defs>
+      <linearGradient id="origin-five-face" x1="3.2" y1="4.3" x2="14.1" y2="19.8" gradientUnits="userSpaceOnUse">
+        <stop stopColor="#74FFE9" />
+        <stop offset="0.55" stopColor="#35C9FF" />
+        <stop offset="1" stopColor="#958BFF" />
+      </linearGradient>
+      <linearGradient id="origin-d-face" x1="10.9" y1="3.7" x2="21.2" y2="19.1" gradientUnits="userSpaceOnUse">
+        <stop stopColor="#CBA7FF" />
+        <stop offset="0.42" stopColor="#7EA7FF" />
+        <stop offset="1" stopColor="#39F3E1" />
+      </linearGradient>
+      <linearGradient id="origin-core" x1="11.7" y1="5" x2="12.4" y2="19" gradientUnits="userSpaceOnUse">
+        <stop stopColor="#E9FFFC" />
+        <stop offset="0.5" stopColor="#66FFE0" />
+        <stop offset="1" stopColor="#9189FF" />
+      </linearGradient>
+    </defs>
+    <path
+      d="M5.4 4.6h9.1l-.9 3.1H8.2l-.5 2.4h2.8c2.7 0 4.7 1.8 4.7 4.4 0 3-2.4 5-5.7 5-2.2 0-4-.7-5.3-2l1.9-2.7c.9.8 2 1.2 3.2 1.2 1.3 0 2.2-.6 2.2-1.6 0-1.1-.9-1.7-2.5-1.7H4.3L5.4 4.6Z"
+      fill="url(#origin-five-face)"
+    />
+    <path
+      d="M14.2 4.6h2.5c4.1 0 6.8 2.8 6.8 7.2 0 4.3-2.7 7.2-6.8 7.2h-2.5V4.6Zm3.1 3.3v7.8c1.8-.3 2.9-1.8 2.9-3.9 0-2.2-1.1-3.6-2.9-3.9Z"
+      fill="url(#origin-d-face)"
+    />
+    <path
+      d="M12.5 5.4c1.1 1.4 1.7 3.6 1.7 6.5s-.6 5.1-1.7 6.5c-1.1-1.4-1.7-3.6-1.7-6.5s.6-5.1 1.7-6.5Z"
+      fill="#061326"
+      opacity="0.84"
+    />
+    <path
+      d="M12.5 6.7c.6 1.1.9 2.9.9 5.2s-.3 4.1-.9 5.2c-.6-1.1-.9-2.9-.9-5.2s.3-4.1.9-5.2Z"
+      fill="url(#origin-core)"
+    />
+    <path
+      d="M7.8 7.7h5.8M6.2 15.1c.8.7 1.8 1 2.9 1M17.3 7.9c1.8.3 2.9 1.8 2.9 3.9 0 2.2-1.1 3.7-2.9 4"
+      stroke="rgba(255,255,255,0.72)"
+      strokeWidth="0.72"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      opacity="0.58"
+    />
+  </svg>
+);
+
+export const Icon5DOriginDark = ({ size = 16, className, style }: IconProps) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    className={className}
+    style={style}
+    aria-hidden="true"
+  >
+    <path
+      d="M5.4 4.6h9.1l-.9 3.1H8.2l-.5 2.4h2.8c2.7 0 4.7 1.8 4.7 4.4 0 3-2.4 5-5.7 5-2.2 0-4-.7-5.3-2l1.9-2.7c.9.8 2 1.2 3.2 1.2 1.3 0 2.2-.6 2.2-1.6 0-1.1-.9-1.7-2.5-1.7H4.3L5.4 4.6Z"
+      fill="#061326"
+    />
+    <path
+      d="M14.2 4.6h2.5c4.1 0 6.8 2.8 6.8 7.2 0 4.3-2.7 7.2-6.8 7.2h-2.5V4.6Zm3.1 3.3v7.8c1.8-.3 2.9-1.8 2.9-3.9 0-2.2-1.1-3.6-2.9-3.9Z"
+      fill="#0B2447"
+    />
+    <path
+      d="M12.5 5.4c1.1 1.4 1.7 3.6 1.7 6.5s-.6 5.1-1.7 6.5c-1.1-1.4-1.7-3.6-1.7-6.5s.6-5.1 1.7-6.5Z"
+      fill="#0E7490"
+      opacity="0.92"
+    />
+    <path
+      d="M12.5 6.7c.6 1.1.9 2.9.9 5.2s-.3 4.1-.9 5.2c-.6-1.1-.9-2.9-.9-5.2s.3-4.1.9-5.2Z"
+      fill="#155E75"
+    />
+    <path
+      d="M7.8 7.7h5.8M6.2 15.1c.8.7 1.8 1 2.9 1M17.3 7.9c1.8.3 2.9 1.8 2.9 3.9 0 2.2-1.1 3.7-2.9 4"
+      stroke="#35C9FF"
+      strokeWidth="0.72"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      opacity="0.54"
+    />
+  </svg>
+);
+
+export const Icon5DOriginMono = (p: IconProps) => (
+  <Icon {...p} fill="currentColor" stroke="none">
+    <path d="M5.4 4.6h9.1l-.9 3.1H8.2l-.5 2.4h2.8c2.7 0 4.7 1.8 4.7 4.4 0 3-2.4 5-5.7 5-2.2 0-4-.7-5.3-2l1.9-2.7c.9.8 2 1.2 3.2 1.2 1.3 0 2.2-.6 2.2-1.6 0-1.1-.9-1.7-2.5-1.7H4.3L5.4 4.6Z" />
+    <path d="M14.2 4.6h2.5c4.1 0 6.8 2.8 6.8 7.2 0 4.3-2.7 7.2-6.8 7.2h-2.5V4.6Zm3.1 3.3v7.8c1.8-.3 2.9-1.8 2.9-3.9 0-2.2-1.1-3.6-2.9-3.9Z" opacity="0.82" />
+    <path d="M12.5 5.4c1.1 1.4 1.7 3.6 1.7 6.5s-.6 5.1-1.7 6.5c-1.1-1.4-1.7-3.6-1.7-6.5s.6-5.1 1.7-6.5Z" opacity="0.48" />
+    <path d="M12.5 6.7c.6 1.1.9 2.9.9 5.2s-.3 4.1-.9 5.2c-.6-1.1-.9-2.9-.9-5.2s.3-4.1.9-5.2Z" opacity="0.72" />
+    <path d="M7.8 7.7h5.8M6.2 15.1c.8.7 1.8 1 2.9 1M17.3 7.9c1.8.3 2.9 1.8 2.9 3.9 0 2.2-1.1 3.7-2.9 4" stroke="currentColor" strokeWidth="0.72" strokeLinecap="round" strokeLinejoin="round" opacity="0.34" />
+  </Icon>
+);
+
 export const IconCheck = (p: IconProps) => <Icon {...p} d="M20 6L9 17l-5-5" />;
 export const IconCoin = (p: IconProps) => (
   <Icon {...p}>
