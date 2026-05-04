@@ -76,6 +76,7 @@ jobs:
             librsvg2-dev \
             patchelf \
             libssl-dev \
+            libasound2-dev \
             build-essential \
             curl \
             wget \
