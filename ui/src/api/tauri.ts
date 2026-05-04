@@ -5,6 +5,7 @@ type TauriUnlisten = () => void;
 
 let coreModulePromise: Promise<typeof import("@tauri-apps/api/core")> | null = null;
 let eventModulePromise: Promise<typeof import("@tauri-apps/api/event")> | null = null;
+let shellModulePromise: Promise<typeof import("@tauri-apps/plugin-shell")> | null = null;
 
 const MOCK_BOOTSTRAP_DEFAULTS = {
   github: {
@@ -38,8 +39,8 @@ const MOCK_LOCAL_STACK_RESOURCE_METRICS = {
   },
   nodes: [{ name: "cto-app-control-plane" }],
   pods: [
-    { namespace: "cto-system", name: "cto-controller-0" },
-    { namespace: "cto-system", name: "morgan-0" },
+    { namespace: "cto", name: "cto-controller-0" },
+    { namespace: "cto", name: "morgan-0" },
     { namespace: "argocd", name: "argocd-server-0" },
   ],
   totals: {
@@ -115,6 +116,19 @@ async function invokeBootstrapPreview<T>(command: string, args?: TauriInvokeArgs
       return MOCK_BOOTSTRAP_DEFAULTS as T;
     case "local_stack_resource_metrics":
       return MOCK_LOCAL_STACK_RESOURCE_METRICS as T;
+    case "reset_local_stack_bootstrap":
+      return {
+        removedSetupProfile: true,
+        deletedKindCluster: true,
+      } as T;
+    case "audio_output_status":
+      return {
+        hasOutputDevice: true,
+        outputDeviceName: "Browser preview",
+        outputVolumePercent: null,
+        outputMuted: null,
+        warning: null,
+      } as T;
     case "bootstrap_local_stack":
       await sleep(900);
       return undefined as T;
@@ -137,6 +151,76 @@ async function invokeBootstrapPreview<T>(command: string, args?: TauriInvokeArgs
       return [buildMockScmConnection(args)] as T;
     case "list_scm_connections":
       return [] as T;
+    case "detect_secret_sources":
+      return {
+        providers: [
+          {
+            provider: "onepassword",
+            label: "1Password",
+            detected: false,
+            available: false,
+            version: null,
+            reason: "Browser preview",
+            primaryAction: "Paste instead",
+          },
+        ],
+        manualFallbackAvailable: true,
+        message: "Browser preview keeps saved access optional; paste instead remains available.",
+      } as T;
+    case "preview_secret_source_matches":
+      return {
+        provider: "onepassword",
+        discovery: "metadata-only",
+        matches: [],
+        warnings: ["Browser preview does not read vault metadata."],
+      } as T;
+    case "apply_secret_source_matches":
+      return {
+        provider: "onepassword",
+        applied: [],
+        rawValuesPersisted: false,
+        message: "Access connected",
+      } as T;
+    case "probe_gitlab_coderun_auth":
+      return {
+        provider: "gitlab",
+        baseUrl: "https://gitlab.com",
+        apiEndpoint: "https://gitlab.com/api/v4/user",
+        ok: false,
+        status: 0,
+        username: null,
+        userId: null,
+        selectedAgents: ["rex", "blaze", "pass", "cipher"],
+        requiredScopes: ["api", "read_api", "read_repository", "write_repository"],
+        secretName: "cto-agent-keys",
+        secretKey: "GITLAB_TOKEN",
+        redactedTokenPreview: "[REDACTED]",
+        redaction: "[REDACTED]",
+        nextSteps: [],
+      } as T;
+    case "prepare_origin_transfer":
+      return {
+        engine: "standard",
+        mode: "mirror",
+        appName: "origin-standard",
+        appLabel: "5D Origin Gitea",
+        sourceProvider: "github",
+        sourceConnectionId: "preview",
+        repositories: [],
+        actionPlan: [],
+        manifestPreview: "[REDACTED] browser preview",
+        redaction: "[REDACTED]",
+        warnings: [],
+      } as T;
+    case "provision_origin_application":
+      return {
+        engine: "standard",
+        appName: "origin-standard",
+        applied: false,
+        dryRun: true,
+        manifestPreview: "[REDACTED] browser preview",
+        message: "Origin application dry-run is ready for approval",
+      } as T;
     default:
       throw tauriUnavailableError(command);
   }
@@ -150,6 +234,11 @@ async function loadCoreModule() {
 async function loadEventModule() {
   eventModulePromise ??= import("@tauri-apps/api/event");
   return eventModulePromise;
+}
+
+async function loadShellModule() {
+  shellModulePromise ??= import("@tauri-apps/plugin-shell");
+  return shellModulePromise;
 }
 
 export async function invokeTauri<T>(
@@ -182,4 +271,22 @@ export async function listenTauri<T>(
 
 export function isTauriCommandAvailable(): boolean {
   return isTauriRuntime() || isLocalStackBootstrapPreview();
+}
+
+export async function openExternalUrl(url: string): Promise<void> {
+  const target = url.trim();
+  if (!target) {
+    throw new Error("Cannot open an empty setup URL.");
+  }
+
+  if (isTauriRuntime()) {
+    const { open } = await loadShellModule();
+    await open(target);
+    return;
+  }
+
+  const opened = window.open(target, "_blank", "noopener,noreferrer");
+  if (!opened) {
+    throw new Error("The browser blocked the setup window. Allow popups or copy the setup URL.");
+  }
 }

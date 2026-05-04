@@ -2,7 +2,7 @@
   "name": "cto-app",
   "version": "0.1.0",
   "private": true,
-  "description": "CTO Desktop — Tauri shell + React UI",
+  "description": "CTO — Tauri shell + React UI",
   "license": "MIT",
   "workspaces": [
     "ui"
@@ -17,10 +17,21 @@
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
-    "mcp:tauri": "node ./node_modules/tauri-plugin-mcp-server/build/index.js"
+    "e2e:tauri": "mocha e2e/tauri/**/*.e2e.mjs",
+    "e2e:local-stack-cycle": "node scripts/e2e/local-stack-cycle.mjs",
+    "e2e:local-stack-intent": "CTO_E2E_INTENT_TEST=1 node scripts/e2e/local-stack-cycle.mjs --reset",
+    "e2e:local-stack-clean-slate": "node scripts/e2e/clean-slate-cycle.mjs",
+    "e2e:k8s-smoke": "node scripts/e2e/kind-platform-smoke.mjs",
+    "mcp:tauri": "node ./node_modules/tauri-plugin-mcp-server/build/index.js",
+    "scenario:morgan-videos": "node scripts/generate-morgan-scenario-videos.mjs",
+    "icons:openclaw-svgs": "node scripts/sync-openclaw-provider-svgs.mjs"
   },
   "devDependencies": {
+    "@scenario-labs/sdk": "^1.2.0",
     "@tauri-apps/cli": "^2.1.0",
+    "chai": "^5.2.1",
+    "mocha": "^11.7.1",
+    "selenium-webdriver": "^4.34.0",
     "tauri-plugin-mcp-server": "^0.1.0"
   }
 }
