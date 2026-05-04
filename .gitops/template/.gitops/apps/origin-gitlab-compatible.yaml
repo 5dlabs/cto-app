@@ -1,0 +1,98 @@
+---
+# 5D Origin GitLab-compatible — GitLab CE path for teams that need GitLab semantics.
+#
+# Optional app: not part of the Client Cluster baseline. Morgan provisions it only
+# after a hosted GitHub/GitLab Source connection exists and the user approves a
+# mirror-first 5D Origin plan. This lane has a heavier footprint than Standard.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: origin-gitlab-compatible
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: origin-gitlab-compatible
+    app.kubernetes.io/part-of: platform
+    app.kubernetes.io/component: source-control
+    cto.5dlabs.ai/origin-engine: gitlab-compatible
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://charts.gitlab.io/
+    chart: gitlab
+    targetRevision: 9.6.0
+    helm:
+      releaseName: origin-gitlab-compatible
+      valuesObject:
+        global:
+          edition: ce
+          hosts:
+            domain: cto.local
+            gitlab:
+              name: gitlab-origin.cto.local
+            registry:
+              name: registry-origin.cto.local
+            minio:
+              name: minio-origin.cto.local
+          ingress:
+            class: nginx
+            configureCertmanager: false
+            tls:
+              enabled: false
+          kas:
+            enabled: false
+          appConfig:
+            defaultProjectsFeatures:
+              builds: true
+              containerRegistry: false
+          psql:
+            password:
+              secret: origin-gitlab-compatible-postgresql
+              key: postgresql-password
+          redis:
+            password:
+              enabled: false
+        certmanager:
+          install: false
+        nginx-ingress:
+          enabled: false
+        prometheus:
+          install: false
+        gitlab-runner:
+          install: false
+        registry:
+          enabled: false
+        minio:
+          persistence:
+            storageClass: standard
+            size: 10Gi
+        postgresql:
+          persistence:
+            storageClass: standard
+            size: 20Gi
+        redis:
+          master:
+            persistence:
+              storageClass: standard
+              size: 4Gi
+        gitlab:
+          webservice:
+            minReplicas: 1
+            maxReplicas: 1
+            ingress:
+              tls:
+                enabled: false
+          sidekiq:
+            minReplicas: 1
+            maxReplicas: 1
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cto
+  syncPolicy:
+    automated:
+      prune: false
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

@@ -1,0 +1,354 @@
+name: CTO GitOps template update
+
+# Manual-only by design. This updater never runs on push or schedule because
+# client repositories must opt in to approved 5D Labs template changes.
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: Release/update channel to apply.
+        required: true
+        default: stable
+        type: choice
+        options:
+          - stable
+          - beta
+          - nightly
+      template_version:
+        description: Optional release tag override. Leave empty to resolve the latest channel release.
+        required: false
+        default: ""
+        type: string
+      dry_run:
+        description: Preview changes without committing or opening a pull request.
+        required: true
+        default: true
+        type: boolean
+      open_pull_request:
+        description: Open or update a pull request when changes are available.
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: cto-gitops-update
+  cancel-in-progress: false
+
+jobs:
+  update:
+    name: Apply approved template update
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+    steps:
+      - name: Check out client repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve template release
+        id: release
+        shell: bash
+        env:
+          CHANNEL: ${{ inputs.channel }}
+          TEMPLATE_VERSION: ${{ inputs.template_version }}
+        run: |
+          set -euo pipefail
+
+          SOURCE_REPO="$(node <<'NODE'
+          const fs = require('fs');
+          const metadata = JSON.parse(fs.readFileSync('.cto/template.json', 'utf8'));
+          const source = metadata.releaseSource || {};
+          if (source.owner && source.repo) {
+            console.log(`${source.owner}/${source.repo}`);
+          } else {
+            console.log(source.repository || metadata.source?.repository || '5dlabs/cto-app');
+          }
+          NODE
+          )"
+          ARTIFACT_NAME="$(CHANNEL="${CHANNEL}" node <<'NODE'
+          const fs = require('fs');
+          const metadata = JSON.parse(fs.readFileSync('.cto/template.json', 'utf8'));
+          const source = metadata.releaseSource || {};
+          const channel = process.env.CHANNEL;
+          const channelConfig = source.channels?.[channel] || {};
+          console.log(channelConfig.artifactName || source.artifactName || 'cto-gitops-template.tar.gz');
+          NODE
+          )"
+          CONFIGURED_NIGHTLY_TAG="$(node <<'NODE'
+          const fs = require('fs');
+          const metadata = JSON.parse(fs.readFileSync('.cto/template.json', 'utf8'));
+          const source = metadata.releaseSource || {};
+          console.log(source.channels?.nightly?.tag || source.nightlyTag || '');
+          NODE
+          )"
+
+          if [ -n "${TEMPLATE_VERSION}" ]; then
+            TAG="${TEMPLATE_VERSION}"
+          elif [ "${CHANNEL}" = "nightly" ] && [ -n "${CONFIGURED_NIGHTLY_TAG}" ]; then
+            TAG="${CONFIGURED_NIGHTLY_TAG}"
+          else
+            RELEASES_JSON="$(gh release list --repo "${SOURCE_REPO}" --limit 100 --json tagName,isPrerelease,publishedAt)"
+            TAG="$(CHANNEL="${CHANNEL}" RELEASES_JSON="${RELEASES_JSON}" node <<'NODE'
+          const channel = process.env.CHANNEL;
+          const releases = JSON.parse(process.env.RELEASES_JSON || '[]')
+            .filter((release) => release.tagName)
+            .sort((a, b) => new Date(b.publishedAt || 0) - new Date(a.publishedAt || 0));
+          let selected;
+          if (channel === 'stable') {
+            selected = releases.find((release) => !release.isPrerelease);
+          } else if (channel === 'nightly') {
+            selected = releases.find((release) => /nightly/i.test(release.tagName))
+              || releases.find((release) => release.isPrerelease)
+              || releases[0];
+          } else {
+            selected = releases[0];
+          }
+          process.stdout.write(selected?.tagName || '');
+          NODE
+          )"
+          fi
+
+          if [ -z "${TAG}" ]; then
+            echo "::error::Unable to resolve a ${CHANNEL} template release from ${SOURCE_REPO}."
+            exit 1
+          fi
+
+          echo "source_repo=${SOURCE_REPO}" >> "${GITHUB_OUTPUT}"
+          echo "artifact_name=${ARTIFACT_NAME}" >> "${GITHUB_OUTPUT}"
+          echo "tag=${TAG}" >> "${GITHUB_OUTPUT}"
+          echo "Resolved ${SOURCE_REPO}@${TAG} (${ARTIFACT_NAME}) for channel ${CHANNEL}."
+
+      - name: Download and extract template artifact
+        id: artifact
+        shell: bash
+        env:
+          SOURCE_REPO: ${{ steps.release.outputs.source_repo }}
+          ARTIFACT_NAME: ${{ steps.release.outputs.artifact_name }}
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          WORK_DIR="${RUNNER_TEMP:-${GITHUB_WORKSPACE}/.cto-update-work}/cto-template-update-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          DOWNLOAD_DIR="${WORK_DIR}/download"
+          EXTRACT_DIR="${WORK_DIR}/extract"
+          mkdir -p "${DOWNLOAD_DIR}" "${EXTRACT_DIR}"
+
+          gh release download "${TAG}" \
+            --repo "${SOURCE_REPO}" \
+            --pattern "${ARTIFACT_NAME}" \
+            --dir "${DOWNLOAD_DIR}" \
+            --clobber
+
+          ARCHIVE="${DOWNLOAD_DIR}/${ARTIFACT_NAME}"
+          if [ ! -f "${ARCHIVE}" ]; then
+            ARCHIVE="$(find "${DOWNLOAD_DIR}" -maxdepth 1 -type f -name "${ARTIFACT_NAME}" -print -quit)"
+          fi
+          if [ -z "${ARCHIVE}" ] || [ ! -f "${ARCHIVE}" ]; then
+            echo "::error::Release artifact ${ARTIFACT_NAME} was not downloaded from ${SOURCE_REPO}@${TAG}."
+            exit 1
+          fi
+
+          tar -xzf "${ARCHIVE}" -C "${EXTRACT_DIR}"
+          TEMPLATE_METADATA="$(find "${EXTRACT_DIR}" -path '*/.cto/template.json' -type f -print -quit)"
+          if [ -z "${TEMPLATE_METADATA}" ]; then
+            echo "::error::The template artifact must contain .cto/template.json."
+            exit 1
+          fi
+
+          TEMPLATE_ROOT="$(dirname "$(dirname "${TEMPLATE_METADATA}")")"
+          echo "work_dir=${WORK_DIR}" >> "${GITHUB_OUTPUT}"
+          echo "template_root=${TEMPLATE_ROOT}" >> "${GITHUB_OUTPUT}"
+          echo "Extracted template root: ${TEMPLATE_ROOT}"
+
+      - name: Overlay managed template files
+        shell: bash
+        env:
+          TEMPLATE_ROOT: ${{ steps.artifact.outputs.template_root }}
+        run: |
+          set -euo pipefail
+
+          node <<'NODE'
+          const fs = require('fs');
+          const path = require('path');
+
+          const workspace = process.env.GITHUB_WORKSPACE;
+          const sourceRoot = process.env.TEMPLATE_ROOT;
+          const currentMetadataPath = path.join(workspace, '.cto/template.json');
+          const nextMetadataPath = path.join(sourceRoot, '.cto/template.json');
+
+          function readJson(filePath) {
+            return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+          }
+
+          function normalizeRepoPath(rawPath) {
+            if (typeof rawPath !== 'string' || rawPath.trim() === '') {
+              throw new Error(`Invalid managed path: ${rawPath}`);
+            }
+            const withoutDot = rawPath.replace(/\\/g, '/').replace(/^\.\/+/, '');
+            if (withoutDot.startsWith('/') || withoutDot.includes('\0')) {
+              throw new Error(`Refusing unsafe managed path: ${rawPath}`);
+            }
+            const normalized = path.posix.normalize(withoutDot);
+            if (normalized === '.' || normalized === '..' || normalized.startsWith('../')) {
+              throw new Error(`Refusing unsafe managed path: ${rawPath}`);
+            }
+            return normalized;
+          }
+
+          function normalizePrefix(rawPath) {
+            return normalizeRepoPath(rawPath).replace(/\/+$/, '');
+          }
+
+          function isUnderPrefix(repoPath, prefix) {
+            return repoPath === prefix || repoPath.startsWith(`${prefix}/`);
+          }
+
+          function isSecretPath(repoPath) {
+            return repoPath === '.env'
+              || repoPath.startsWith('.env.')
+              || repoPath.includes('/.env')
+              || /(^|\/)secrets?(\/|$)/i.test(repoPath)
+              || /(^|\/)[^/]*secret[^/]*$/i.test(repoPath);
+          }
+
+          function assertWithinRoot(root, target) {
+            const resolvedRoot = path.resolve(root);
+            const resolvedTarget = path.resolve(target);
+            if (resolvedTarget !== resolvedRoot && !resolvedTarget.startsWith(`${resolvedRoot}${path.sep}`)) {
+              throw new Error(`Refusing path outside ${root}: ${target}`);
+            }
+          }
+
+          const currentMetadata = readJson(currentMetadataPath);
+          const nextMetadata = readJson(nextMetadataPath);
+          const managedSource = Array.isArray(nextMetadata.managedFiles) && nextMetadata.managedFiles.length > 0
+            ? nextMetadata.managedFiles
+            : currentMetadata.managedFiles || [];
+          const managedFiles = Array.from(new Set([...managedSource, '.cto/template.json'].map(normalizeRepoPath))).sort();
+          const customerOwnedPaths = Array.from(new Set([
+            '.gitops/values/',
+            '.gitops/overrides/',
+            ...(currentMetadata.customerOwnedPaths || []),
+            ...(nextMetadata.customerOwnedPaths || []),
+          ].map(normalizePrefix)));
+
+          for (const repoPath of managedFiles) {
+            if (customerOwnedPaths.some((prefix) => isUnderPrefix(repoPath, prefix)) || isSecretPath(repoPath)) {
+              console.log(`Preserving customer-owned or secret path: ${repoPath}`);
+              continue;
+            }
+
+            const sourcePath = path.join(sourceRoot, repoPath);
+            const destinationPath = path.join(workspace, repoPath);
+            assertWithinRoot(sourceRoot, sourcePath);
+            assertWithinRoot(workspace, destinationPath);
+
+            if (!fs.existsSync(sourcePath)) {
+              console.log(`Managed file is absent from the artifact; leaving current file unchanged: ${repoPath}`);
+              continue;
+            }
+
+            const stats = fs.lstatSync(sourcePath);
+            if (stats.isSymbolicLink()) {
+              throw new Error(`Refusing to copy symlink from template artifact: ${repoPath}`);
+            }
+            if (!stats.isFile()) {
+              throw new Error(`Managed path must be a file in the template artifact: ${repoPath}`);
+            }
+
+            fs.mkdirSync(path.dirname(destinationPath), { recursive: true });
+            fs.copyFileSync(sourcePath, destinationPath);
+            console.log(`Updated managed file: ${repoPath}`);
+          }
+          NODE
+
+      - name: Inspect update diff
+        id: diff
+        shell: bash
+        env:
+          WORK_DIR: ${{ steps.artifact.outputs.work_dir }}
+        run: |
+          set -euo pipefail
+          rm -rf "${WORK_DIR}"
+
+          STATUS="$(git status --porcelain --untracked-files=all)"
+          if [ -z "${STATUS}" ]; then
+            echo "has_changes=false" >> "${GITHUB_OUTPUT}"
+            echo "No template updates are available."
+            exit 0
+          fi
+
+          echo "has_changes=true" >> "${GITHUB_OUTPUT}"
+          echo "Template update changed these paths:"
+          printf '%s\n' "${STATUS}"
+          git --no-pager diff --stat || true
+
+      - name: Dry-run summary
+        if: steps.diff.outputs.has_changes == 'true' && inputs.dry_run
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Dry run requested; no commit or pull request will be created."
+          git --no-pager diff --stat || true
+          git --no-pager diff -- . ':!*.lock' || true
+
+      - name: Require pull request mode
+        if: steps.diff.outputs.has_changes == 'true' && !inputs.dry_run && !inputs.open_pull_request
+        shell: bash
+        run: |
+          # Safer default: never commit updater output directly to the current branch.
+          echo "::error::Template updates were found, but open_pull_request=false. For safety, this workflow does not commit to the current branch. Re-run with open_pull_request=true, or use dry_run=true to preview only."
+          exit 1
+
+      - name: Open or update pull request
+        if: steps.diff.outputs.has_changes == 'true' && !inputs.dry_run && inputs.open_pull_request
+        shell: bash
+        env:
+          CHANNEL: ${{ inputs.channel }}
+          SOURCE_REPO: ${{ steps.release.outputs.source_repo }}
+          ARTIFACT_NAME: ${{ steps.release.outputs.artifact_name }}
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          SAFE_TAG="$(printf '%s' "${TAG}" | tr -c 'A-Za-z0-9._-' '-' | sed 's/^-*//; s/-*$//')"
+          BRANCH="cto-template-update/${CHANNEL}-${SAFE_TAG}"
+          BASE_BRANCH="${DEFAULT_BRANCH:-${GITHUB_REF_NAME}}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "${BRANCH}"
+          git add -A -- .
+          git commit -m "Update CTO GitOps template to ${TAG}"
+          git push --force-with-lease origin "${BRANCH}"
+
+          TITLE="Update CTO GitOps template to ${TAG}"
+          BODY="$(cat <<BODY
+          Updates this client-owned CTO GitOps repository from the approved 5D Labs template release.
+
+          - Source: ${SOURCE_REPO}@${TAG}
+          - Artifact: ${ARTIFACT_NAME}
+          - Channel: ${CHANNEL}
+          - Preserves customer-owned paths such as .gitops/values/** and .gitops/overrides/**
+          - Does not manage secrets
+          BODY
+          )"
+
+          PR_NUMBER="$(gh pr list --repo "${GITHUB_REPOSITORY}" --head "${BRANCH}" --state open --json number --jq '.[0].number // ""')"
+          if [ -n "${PR_NUMBER}" ]; then
+            gh pr edit "${PR_NUMBER}" --repo "${GITHUB_REPOSITORY}" --title "${TITLE}" --body "${BODY}"
+            echo "Updated existing pull request #${PR_NUMBER}."
+          else
+            gh pr create \
+              --repo "${GITHUB_REPOSITORY}" \
+              --head "${BRANCH}" \
+              --base "${BASE_BRANCH}" \
+              --title "${TITLE}" \
+              --body "${BODY}"
+          fi

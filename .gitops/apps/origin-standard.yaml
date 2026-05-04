@@ -1,0 +1,74 @@
+---
+# 5D Origin Standard — lightweight CTO-managed source mirror and agent-native CI layer.
+#
+# Optional app: not part of the Client Cluster baseline. Morgan provisions it only
+# after a hosted GitHub/GitLab Source connection exists and the user approves a
+# mirror-first 5D Origin plan.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: origin-standard
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: origin-standard
+    app.kubernetes.io/part-of: platform
+    app.kubernetes.io/component: source-control
+    cto.5dlabs.ai/origin-engine: standard
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://dl.gitea.com/charts/
+    chart: gitea
+    targetRevision: 12.3.0
+    helm:
+      releaseName: origin-standard
+      valuesObject:
+        namespaceOverride: cto
+        ingress:
+          enabled: true
+          className: nginx
+          hosts:
+            - host: origin.cto.local
+              paths:
+                - path: /
+                  pathType: Prefix
+        gitea:
+          admin:
+            existingSecret: origin-standard-admin
+          config:
+            server:
+              ROOT_URL: http://origin.cto.local/
+            service:
+              DISABLE_REGISTRATION: true
+        postgresql-ha:
+          enabled: false
+        postgresql:
+          enabled: true
+          primary:
+            persistence:
+              storageClass: standard
+              size: 8Gi
+        redis-cluster:
+          enabled: false
+        redis:
+          enabled: true
+          master:
+            persistence:
+              storageClass: standard
+              size: 2Gi
+        persistence:
+          enabled: true
+          storageClass: standard
+          size: 10Gi
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cto
+  syncPolicy:
+    automated:
+      prune: false
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
