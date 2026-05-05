@@ -8,7 +8,7 @@ fn app_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }
 
-/// Runs the CTO Desktop Tauri application.
+/// Runs the CTO Tauri application.
 ///
 /// # Panics
 ///
@@ -37,7 +37,7 @@ pub fn run() {
     #[cfg(debug_assertions)]
     {
         builder = builder.plugin(tauri_plugin_mcp::init_with_config(
-            tauri_plugin_mcp::PluginConfig::new("CTO Desktop".to_string())
+            tauri_plugin_mcp::PluginConfig::new("CTO".to_string())
                 .start_socket_server(true)
                 .socket_path(std::path::PathBuf::from("/tmp/tauri-mcp.sock"))
                 .default_webview_label("main".to_string()),
@@ -57,15 +57,25 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             app_version,
             bootstrap::bootstrap_local_stack,
+            bootstrap::prepare_local_stack_dependencies,
             bootstrap::bootstrap_probe,
+            bootstrap::audio_output_status,
+            bootstrap::github_cli_oauth,
             bootstrap::local_stack_bootstrap_defaults,
             bootstrap::local_stack_resource_metrics,
+            bootstrap::reset_local_stack_bootstrap,
+            bootstrap::detect_secret_sources,
+            bootstrap::preview_secret_source_matches,
+            bootstrap::apply_secret_source_matches,
+            bootstrap::prepare_origin_transfer,
+            bootstrap::provision_origin_application,
             scm_auth::delete_scm_connection,
             scm_auth::exchange_github_manifest_code,
+            scm_auth::probe_gitlab_coderun_auth,
             scm_auth::list_scm_connections,
             scm_auth::prepare_scm_provisioning,
             scm_auth::save_scm_connection
         ])
         .run(tauri::generate_context!())
-        .expect("error while running CTO Desktop");
+        .expect("error while running CTO");
 }

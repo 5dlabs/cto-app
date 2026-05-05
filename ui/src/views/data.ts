@@ -356,6 +356,14 @@ export const APPLICATIONS: ExtensionModule[] = [
     active: true,
   },
   {
+    key: "legal",
+    name: "Legal",
+    short: "Contracts, compliance, policy review",
+    description:
+      "Contract drafting and review workflows, compliance checklist automation, and policy lifecycle management with auditable agent actions.",
+    active: false,
+  },
+  {
     key: "rms",
     name: "RMS (Sigma 1)",
     short: "Risk management overlay for trading",

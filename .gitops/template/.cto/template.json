@@ -1,0 +1,62 @@
+{
+  "templateVersion": "0.1.0",
+  "channel": "stable",
+  "releaseSource": {
+    "owner": "5dlabs",
+    "repo": "cto-app",
+    "repository": "5dlabs/cto-app",
+    "artifactName": "cto-gitops-template.tar.gz",
+    "channels": {
+      "stable": {
+        "allowPrereleases": false
+      },
+      "beta": {
+        "allowPrereleases": true
+      },
+      "nightly": {
+        "allowPrereleases": true,
+        "tag": "nightly"
+      }
+    }
+  },
+  "source": {
+    "repository": "5dlabs/cto-app",
+    "path": ".gitops/template",
+    "description": "Client-owned CTO Desktop GitOps repository seed template."
+  },
+  "generatedRepository": {
+    "defaultName": "cto-gitops",
+    "root": "."
+  },
+  "managedFiles": [
+    ".cto/template.json",
+    ".github/workflows/cto-update.yml",
+    ".gitops/apps/README.md",
+    ".gitops/apps/cto.yaml",
+    ".gitops/apps/qdrant.yaml",
+    ".gitops/apps/morgan.yaml",
+    ".gitops/apps/voice-bridge.yaml",
+    ".gitops/apps/observability.yaml"
+  ],
+  "customerOwnedPaths": [
+    ".gitops/values/",
+    ".gitops/overrides/"
+  ],
+  "updateWorkflow": {
+    "path": ".github/workflows/cto-update.yml",
+    "name": "CTO GitOps template update",
+    "manualOnly": true,
+    "defaultChannel": "stable",
+    "inputs": [
+      "channel",
+      "template_version",
+      "dry_run",
+      "open_pull_request"
+    ]
+  },
+  "placeholders": {
+    "customerSlug": "{{CUSTOMER_SLUG}}",
+    "clusterName": "{{CLUSTER_NAME}}",
+    "gitopsRepository": "{{GITOPS_REPOSITORY}}"
+  }
+}

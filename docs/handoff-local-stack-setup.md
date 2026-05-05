@@ -10,6 +10,7 @@ This branch moves CTO Desktop from a desktop-only bootstrap flow toward a design
 - **CLI/provider profile model:** The UI represents all eight researched CLI surfaces: OpenCLAW, Codex, Claude Code, Gemini CLI, OpenCode, Qwen Code, GitHub CLI, and GitLab CLI. GitHub CLI and GitLab CLI are source-control helpers and do not filter AI providers.
 - **Provider/model stress case:** OpenRouter has a larger hardcoded model list for layout stress testing. Provider cards support multiple selected models and scroll internally so large catalogs do not push actions off-screen.
 - **Browser-only design mode:** `npm run web:dev` serves the React UI directly in a browser and skips the Rust/Kind bootstrap gate outside Tauri. The same bypass can be forced with `VITE_CTO_SKIP_LOCAL_STACK_BOOTSTRAP=1`.
+- **Browser init preview (wizard UI):** `npm run web:init:dev` serves the bootstrap hero plus setup screens (`VITE_CTO_INIT_PREVIEW=1`) without calling Rust provisioning; use port **5174** by default (`web:dev` stays on **5173**).
 - **Morgan/voice UI:** Morgan has local avatar/voice bridge integration work in progress, with a new voice-bridge chart and local ingress paths under `/morgan`.
 - **Research MCP routing:** Local Morgan routes research MCP tools through the central `cto-tools` service. The `cto` chart now starts Exa, Firecrawl, and Tavily MCP servers there, and Morgan requests them through `remoteTools` globs instead of per-agent local MCP entries.
 - **Tools SDK path:** Morgan now renders `/workspace/.cto-tools/mcp.mjs`/`mcp.ts` from the agent chart. Code-execution tasks can import `callTool`, `listTools`, `describeTool`, and `escalate` to call the central `cto-tools` service without relying on native tool-call plumbing. The SDK is Node-compatible because the desktop agent image has Node 22 but not Deno.
@@ -59,8 +60,11 @@ Backend/cluster requirements:
 ## How to run
 
 ```bash
-# Browser-only UI for design work
+# Browser-only UI for design work (shell; skips bootstrap wizard)
 npm run web:dev
+
+# Browser-only first-run wizard (no Rust provisioning)
+npm run web:init:dev
 
 # Full desktop app with Rust/Tauri bootstrap
 PATH="$(/opt/homebrew/bin/rustup which cargo | xargs dirname):$PATH" npm run tauri:dev

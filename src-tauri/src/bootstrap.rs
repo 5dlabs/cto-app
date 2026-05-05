@@ -1,17 +1,22 @@
+use cpal::traits::{DeviceTrait, HostTrait};
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ffi::OsString;
 use std::fmt::Write as _;
-use std::io::Write;
-use std::path::PathBuf;
+use std::fs::{self, OpenOptions};
+use std::io::{BufRead, BufReader, Read, Write};
+use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
-use std::sync::OnceLock;
+use std::sync::mpsc;
+use std::sync::{Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::{Emitter, Manager, Window};
 
 static ACTIVE_RUNTIME: OnceLock<RuntimeKind> = OnceLock::new();
+static ACTIVE_BOOTSTRAP_LOG_PATH: OnceLock<Mutex<Option<PathBuf>>> = OnceLock::new();
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 enum RuntimeKind {
@@ -53,11 +58,22 @@ const ARGOCD_HELM_CHART: &str = "argo/argo-cd";
 const ARGOCD_HELM_RELEASE: &str = "argocd";
 const ARGOCD_NAMESPACE: &str = "argocd";
 const ARGOCD_VALUES: &str = include_str!("../../.gitops/charts/argocd/values.yaml");
-const CTO_NAMESPACE: &str = "cto-system";
+const CTO_NAMESPACE: &str = "cto";
+const CTO_ARGO_APP_NAME: &str = "cto";
+const MORGAN_ARGO_APP_NAME: &str = "morgan";
+const MORGAN_CTO_CONFIG_PATH: &str = "/workspace/cto-config.json";
 const CTO_AGENT_KEYS_SECRET: &str = "cto-agent-keys";
+const CTO_GITOPS_REPO_NAME: &str = "cto-gitops";
+const GHCR_PULL_SECRET: &str = "ghcr-pull-secret";
+const GHCR_REGISTRY: &str = "ghcr.io";
+const OPENCLAW_DISCORD_TOKENS_SECRET: &str = "openclaw-discord-tokens";
 const GITHUB_TOKEN_SECRET_KEY: &str = "GITHUB_TOKEN";
+const GITLAB_TOKEN_SECRET_KEY: &str = "GITLAB_TOKEN";
+const MAX_BOOTSTRAP_SCM_SECRET_MANIFEST_BYTES: usize = 64 * 1024;
 const BOOTSTRAP_GITHUB_PAT_ENV: &str = "CTO_GITHUB_PAT";
 const BOOTSTRAP_GITHUB_OWNER_ENV: &str = "CTO_GITHUB_OWNER";
+const BOOTSTRAP_DEV_LOG_DIR: &str = ".local/bootstrap-runs";
+const BOOTSTRAP_LOG_MAX_OUTPUT_CHARS: usize = 8 * 1024;
 const BOOTSTRAP_TOOL_API_KEY_ENV_NAMES: &[&str] = &[
     "EXA_API_KEY",
     "FIRECRAWL_API_KEY",
@@ -66,6 +82,19 @@ const BOOTSTRAP_TOOL_API_KEY_ENV_NAMES: &[&str] = &[
     "CONTEXT7_API_KEY",
     "PERPLEXITY_API_KEY",
 ];
+const SECRET_SOURCE_PROVIDER_ONEPASSWORD: &str = "onepassword";
+const SECRET_SOURCE_CANONICAL_TARGETS: &[(&str, &str)] = &[
+    ("GITHUB_TOKEN", "source.github.token"),
+    ("GITLAB_TOKEN", "source.gitlab.token"),
+    ("OPENAI_API_KEY", "provider.openai.apiKey"),
+    ("OPENROUTER_API_KEY", "provider.openrouter.apiKey"),
+    ("EXA_API_KEY", "tool.exa.apiKey"),
+    ("FIRECRAWL_API_KEY", "tool.firecrawl.apiKey"),
+    ("TAVILY_API_KEY", "tool.tavily.apiKey"),
+    ("DISCORD_BOT_TOKEN", "agent.discord.botToken"),
+];
+const ORIGIN_STANDARD_APP_NAME: &str = "origin-standard";
+const ORIGIN_GITLAB_COMPATIBLE_APP_NAME: &str = "origin-gitlab-compatible";
 
 // CTO platform + Qdrant + Morgan Argo Applications, published by
 // .github/workflows/publish-chart.yml to ghcr.io.
@@ -73,6 +102,59 @@ const CTO_APP_MANIFEST: &str = include_str!("../../.gitops/apps/cto.yaml");
 const QDRANT_APP_MANIFEST: &str = include_str!("../../.gitops/apps/qdrant.yaml");
 const MORGAN_APP_MANIFEST: &str = include_str!("../../.gitops/apps/morgan.yaml");
 const VOICE_BRIDGE_APP_MANIFEST: &str = include_str!("../../.gitops/apps/voice-bridge.yaml");
+const ORIGIN_STANDARD_APP_MANIFEST: &str = include_str!("../../.gitops/apps/origin-standard.yaml");
+const ORIGIN_GITLAB_COMPATIBLE_APP_MANIFEST: &str =
+    include_str!("../../.gitops/apps/origin-gitlab-compatible.yaml");
+const GITOPS_TEMPLATE_FILES: &[(&str, &str)] = &[
+    (
+        ".cto/template.json",
+        include_str!("../../.gitops/template/.cto/template.json"),
+    ),
+    (
+        ".github/workflows/cto-update.yml",
+        include_str!("../../.gitops/template/.github/workflows/cto-update.yml"),
+    ),
+    (
+        ".gitops/apps/README.md",
+        include_str!("../../.gitops/template/.gitops/apps/README.md"),
+    ),
+    (
+        ".gitops/apps/cto.yaml",
+        include_str!("../../.gitops/template/.gitops/apps/cto.yaml"),
+    ),
+    (
+        ".gitops/apps/morgan.yaml",
+        include_str!("../../.gitops/template/.gitops/apps/morgan.yaml"),
+    ),
+    (
+        ".gitops/apps/observability.yaml",
+        include_str!("../../.gitops/template/.gitops/apps/observability.yaml"),
+    ),
+    (
+        ".gitops/apps/qdrant.yaml",
+        include_str!("../../.gitops/template/.gitops/apps/qdrant.yaml"),
+    ),
+    (
+        ".gitops/apps/voice-bridge.yaml",
+        include_str!("../../.gitops/template/.gitops/apps/voice-bridge.yaml"),
+    ),
+    (
+        ".gitops/apps/origin-standard.yaml",
+        include_str!("../../.gitops/template/.gitops/apps/origin-standard.yaml"),
+    ),
+    (
+        ".gitops/apps/origin-gitlab-compatible.yaml",
+        include_str!("../../.gitops/template/.gitops/apps/origin-gitlab-compatible.yaml"),
+    ),
+    (
+        ".gitops/overrides/.gitkeep",
+        include_str!("../../.gitops/template/.gitops/overrides/.gitkeep"),
+    ),
+    (
+        ".gitops/values/.gitkeep",
+        include_str!("../../.gitops/template/.gitops/values/.gitkeep"),
+    ),
+];
 const BOOTSTRAP_TEST_MODE_ENV: &str = "CTO_BOOTSTRAP_TEST_MODE";
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -150,6 +232,8 @@ const FULL_BOOTSTRAP_APPS: [BootstrapAppManifest; 4] = [
     MORGAN_BOOTSTRAP_APP,
     VOICE_BRIDGE_BOOTSTRAP_APP,
 ];
+const CLIENT_CLUSTER_BASELINE_APPS: [BootstrapAppManifest; 2] =
+    [CTO_BOOTSTRAP_APP, QDRANT_BOOTSTRAP_APP];
 const CONTROLLER_ONLY_BOOTSTRAP_APPS: [BootstrapAppManifest; 1] = [CTO_BOOTSTRAP_APP];
 
 #[derive(Clone, Serialize)]
@@ -178,11 +262,272 @@ pub struct BootstrapReport {
     tools: Vec<ToolStatus>,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AudioOutputStatus {
+    has_output_device: bool,
+    output_device_name: Option<String>,
+    output_volume_percent: Option<u8>,
+    output_muted: Option<bool>,
+    warning: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitHubCliOAuthResult {
+    token: String,
+    username: Option<String>,
+    accounts: Vec<GitHubCliAccount>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitHubCliAccount {
+    login: String,
+    kind: GitHubCliAccountKind,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum GitHubCliAccountKind {
+    User,
+    Organization,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitHubCliOAuthPrompt {
+    message: String,
+    verification_uri: Option<String>,
+    user_code: Option<String>,
+    copied_to_clipboard: bool,
+    clipboard_error: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SecretSourceProviderStatus {
+    provider: String,
+    label: String,
+    detected: bool,
+    available: bool,
+    version: Option<String>,
+    reason: Option<String>,
+    primary_action: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SecretSourceDetectionResult {
+    providers: Vec<SecretSourceProviderStatus>,
+    manual_fallback_available: bool,
+    message: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SecretSourcePreviewRequest {
+    provider: String,
+    #[serde(default)]
+    targets: Vec<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SecretSourceMatchPreview {
+    provider: String,
+    purpose: String,
+    target_secret_name: String,
+    target_secret_key: String,
+    provider_ref: String,
+    label: String,
+    confidence: String,
+    redacted_value_preview: String,
+    approval_required: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SecretSourcePreviewResult {
+    provider: String,
+    discovery: String,
+    matches: Vec<SecretSourceMatchPreview>,
+    warnings: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SecretSourceApplyRequest {
+    provider: String,
+    approved: bool,
+    matches: Vec<SecretSourceApplySelection>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SecretSourceApplySelection {
+    purpose: String,
+    target_secret_key: String,
+    provider_ref: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SecretSourceAppliedReference {
+    purpose: String,
+    target_secret_name: String,
+    target_secret_key: String,
+    provider_ref: String,
+    status: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SecretSourceApplyResult {
+    provider: String,
+    applied: Vec<SecretSourceAppliedReference>,
+    raw_values_persisted: bool,
+    message: String,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum OriginEngine {
+    Standard,
+    GitlabCompatible,
+}
+
+impl OriginEngine {
+    const fn app_name(self) -> &'static str {
+        match self {
+            Self::Standard => ORIGIN_STANDARD_APP_NAME,
+            Self::GitlabCompatible => ORIGIN_GITLAB_COMPATIBLE_APP_NAME,
+        }
+    }
+
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Standard => "5D Origin Gitea",
+            Self::GitlabCompatible => "5D Origin GitLab",
+        }
+    }
+
+    const fn manifest(self) -> &'static str {
+        match self {
+            Self::Standard => ORIGIN_STANDARD_APP_MANIFEST,
+            Self::GitlabCompatible => ORIGIN_GITLAB_COMPATIBLE_APP_MANIFEST,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum OriginTransferMode {
+    Mirror,
+    Migrate,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OriginTransferRequest {
+    pub engine: OriginEngine,
+    pub source_provider: String,
+    pub source_connection_id: String,
+    #[serde(default)]
+    pub repositories: Vec<String>,
+    pub mode: Option<OriginTransferMode>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OriginTransferPlan {
+    pub engine: OriginEngine,
+    pub mode: OriginTransferMode,
+    pub app_name: String,
+    pub app_label: String,
+    pub source_provider: String,
+    pub source_connection_id: String,
+    pub repositories: Vec<String>,
+    pub action_plan: Vec<String>,
+    pub manifest_preview: String,
+    pub redaction: String,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OriginProvisionRequest {
+    pub engine: OriginEngine,
+    pub approved: bool,
+    pub dry_run: Option<bool>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OriginProvisionResult {
+    pub engine: OriginEngine,
+    pub app_name: String,
+    pub applied: bool,
+    pub dry_run: bool,
+    pub manifest_preview: String,
+    pub message: String,
+}
+
+#[derive(Clone, Debug)]
+struct GitOpsFile {
+    path: String,
+    content: String,
+}
+
+#[derive(Deserialize)]
+struct GitHubUserResponse {
+    login: String,
+}
+
+#[derive(Deserialize)]
+struct GitHubRepoResponse {
+    html_url: String,
+}
+
+#[derive(Deserialize)]
+struct GitHubRefObject {
+    sha: String,
+}
+
+#[derive(Deserialize)]
+struct GitHubRefResponse {
+    object: GitHubRefObject,
+}
+
+#[derive(Deserialize)]
+struct GitHubCommitTree {
+    sha: String,
+}
+
+#[derive(Deserialize)]
+struct GitHubCommitResponse {
+    sha: String,
+    tree: GitHubCommitTree,
+}
+
+#[derive(Deserialize)]
+struct GitHubBlobResponse {
+    sha: String,
+}
+
+#[derive(Deserialize)]
+struct GitHubTreeResponse {
+    sha: String,
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BootstrapLocalStackRequest {
     github: Option<BootstrapGithubRequest>,
+    scm: Option<BootstrapScmRequest>,
     tools: Option<BootstrapToolsRequest>,
+    providers: Option<BootstrapProvidersRequest>,
+    agents: Option<BootstrapAgentsRequest>,
     setup: Option<BootstrapSetupProfile>,
 }
 
@@ -193,6 +538,12 @@ pub struct BootstrapGithubRequest {
     enabled: Option<bool>,
     token: Option<String>,
     owner: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BootstrapScmRequest {
+    github_app_secret_manifest: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -209,11 +560,54 @@ pub struct BootstrapToolApiKeyRequest {
     value: String,
 }
 
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BootstrapProvidersRequest {
+    #[serde(default)]
+    credentials: Vec<BootstrapProviderCredentialRequest>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BootstrapProviderCredentialRequest {
+    provider_id: String,
+    auth: BootstrapProviderAuth,
+    secret_key: Option<String>,
+    value: Option<String>,
+    api_key_secret_key: Option<String>,
+    api_key: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BootstrapAgentsRequest {
+    #[serde(default)]
+    discord_tokens: Vec<BootstrapDiscordTokenRequest>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BootstrapDiscordTokenRequest {
+    id: String,
+    #[serde(default)]
+    enabled: bool,
+    token: Option<String>,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BootstrapSetupProfile {
     source: BootstrapSetupSource,
     harness: BootstrapSetupHarness,
+    #[serde(default)]
+    agents: Vec<BootstrapSetupAgent>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BootstrapSetupAgent {
+    id: String,
+    enabled: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -239,6 +633,8 @@ pub struct BootstrapSetupHarness {
     mode: BootstrapHarnessMode,
     clis: Vec<BootstrapAiCli>,
     providers: Vec<BootstrapProviderSelection>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    routing: Option<BootstrapHarnessRouting>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -249,24 +645,30 @@ pub enum BootstrapHarnessMode {
     Hermes,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 pub enum BootstrapAiCli {
     #[serde(rename = "openclaw")]
     OpenClaw,
     #[serde(rename = "codex")]
     Codex,
-    #[serde(rename = "claudeCode")]
+    #[serde(rename = "claudeCode", alias = "claude")]
     ClaudeCode,
-    #[serde(rename = "geminiCli")]
+    #[serde(rename = "geminiCli", alias = "gemini")]
     GeminiCli,
-    #[serde(rename = "opencode")]
+    #[serde(rename = "opencode", alias = "code")]
     OpenCode,
     #[serde(rename = "qwenCode")]
     QwenCode,
-    #[serde(rename = "githubCli")]
+    #[serde(rename = "githubCli", alias = "copilot")]
     GitHubCli,
     #[serde(rename = "gitlabCli")]
     GitLabCli,
+    #[serde(rename = "cursor")]
+    Cursor,
+    #[serde(rename = "factory")]
+    Factory,
+    #[serde(rename = "kimi")]
+    Kimi,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -274,9 +676,26 @@ pub enum BootstrapAiCli {
 pub struct BootstrapProviderSelection {
     id: String,
     auth: BootstrapProviderAuth,
+    #[serde(default)]
+    cli_ids: Vec<BootstrapAiCli>,
     model: String,
     #[serde(default)]
     models: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BootstrapHarnessRouting {
+    primary: BootstrapModelRoute,
+    #[serde(default)]
+    fallbacks: Vec<BootstrapModelRoute>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Hash, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BootstrapModelRoute {
+    provider_id: String,
+    model: String,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -287,6 +706,8 @@ pub enum BootstrapProviderAuth {
     ApiKey,
     #[serde(rename = "cloud")]
     Cloud,
+    #[serde(rename = "gateway")]
+    Gateway,
     #[serde(rename = "local")]
     Local,
 }
@@ -321,9 +742,76 @@ struct BootstrapGithubCredentials {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+struct BootstrapSourceCredentials {
+    github: Option<BootstrapGithubCredentials>,
+    gitlab_token: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct BootstrapAgentKey {
     name: String,
     value: String,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+struct BootstrapProviderCredentialBundle {
+    agent_keys: Vec<BootstrapAgentKey>,
+    config: BTreeMap<String, BootstrapProviderCredentialConfig>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BootstrapCtoConfig {
+    version: u8,
+    source: BootstrapSetupSource,
+    harness: BootstrapCtoHarnessConfig,
+    clis: BTreeMap<String, BootstrapCtoCliConfig>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BootstrapCtoHarnessConfig {
+    default: BootstrapHarnessMode,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    routing: Option<BootstrapHarnessRouting>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BootstrapCtoCliConfig {
+    id: BootstrapAiCli,
+    default_harness: BootstrapHarnessMode,
+    providers: BTreeMap<String, BootstrapCtoProviderConfig>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BootstrapCtoProviderConfig {
+    id: String,
+    auth: BootstrapProviderAuth,
+    default_model: String,
+    models: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    credential: Option<BootstrapProviderCredentialConfig>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BootstrapProviderCredentialConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    value: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    secret_ref: Option<BootstrapSecretReference>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    api_key_secret_ref: Option<BootstrapSecretReference>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BootstrapSecretReference {
+    name: String,
+    key: String,
+    env: String,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize)]
@@ -490,6 +978,7 @@ type BootstrapResult<T> = Result<T, String>;
 
 #[tauri::command]
 pub fn local_stack_bootstrap_defaults() -> BootstrapLocalStackDefaults {
+    ensure_runtime_tool_paths_on_process();
     BootstrapLocalStackDefaults {
         github: BootstrapGithubDefaults {
             token: env_var_trimmed(BOOTSTRAP_GITHUB_PAT_ENV)
@@ -499,7 +988,7 @@ pub fn local_stack_bootstrap_defaults() -> BootstrapLocalStackDefaults {
                 .or_else(|| env_var_source("GITHUB_TOKEN")),
             owner: env_var_trimmed(BOOTSTRAP_GITHUB_OWNER_ENV)
                 .or_else(|| env_var_trimmed("GITHUB_ORG"))
-                .unwrap_or_else(|| "5dlabs".to_string()),
+                .unwrap_or_default(),
             owner_source: env_var_source(BOOTSTRAP_GITHUB_OWNER_ENV)
                 .or_else(|| env_var_source("GITHUB_ORG")),
         },
@@ -512,15 +1001,68 @@ pub async fn bootstrap_local_stack(
     window: Window,
     request: Option<BootstrapLocalStackRequest>,
 ) -> BootstrapResult<BootstrapReport> {
+    let log_guard = BootstrapRunLogGuard::start(&window);
+    let result = bootstrap_local_stack_impl(window.clone(), request).await;
+    match &result {
+        Ok(_) => append_bootstrap_log("bootstrap completed successfully"),
+        Err(error) => append_bootstrap_log(&format!("bootstrap failed: {error}")),
+    }
+    let _ = log_guard.is_active();
+    drop(log_guard);
+
+    result
+}
+
+#[tauri::command]
+pub async fn prepare_local_stack_dependencies(window: Window) -> BootstrapResult<BootstrapReport> {
+    let log_guard = BootstrapRunLogGuard::start(&window);
+    let result = prepare_local_stack_dependencies_impl(window.clone()).await;
+    match &result {
+        Ok(_) => append_bootstrap_log("local stack dependencies prepared successfully"),
+        Err(error) => append_bootstrap_log(&format!(
+            "local stack dependency preparation failed: {error}"
+        )),
+    }
+    let _ = log_guard.is_active();
+    drop(log_guard);
+
+    result
+}
+
+async fn bootstrap_local_stack_impl(
+    window: Window,
+    request: Option<BootstrapLocalStackRequest>,
+) -> BootstrapResult<BootstrapReport> {
     tracing::info!("bootstrap_local_stack invoked");
     let app_mode = BootstrapAppMode::from_env()?;
-    let github_credentials = normalize_bootstrap_github_credentials(request.as_ref())?;
+    let source_credentials = normalize_bootstrap_source_credentials(request.as_ref())?;
+    let github_credentials = source_credentials.github.as_ref();
+    let scm_secret_manifest = normalize_bootstrap_scm_secret_manifest(request.as_ref())?;
     let tool_api_keys = normalize_bootstrap_tool_api_keys(request.as_ref())?;
-    let agent_keys = bootstrap_agent_keys(github_credentials.as_ref(), &tool_api_keys);
+    let provider_credentials = normalize_bootstrap_provider_credentials(request.as_ref())?;
+    let discord_tokens = normalize_bootstrap_discord_tokens(request.as_ref())?;
+    let agent_keys = bootstrap_agent_keys(
+        &source_credentials,
+        &tool_api_keys,
+        &provider_credentials.agent_keys,
+    )?;
+    let cto_config = build_bootstrap_cto_config(
+        request.as_ref().and_then(|request| request.setup.as_ref()),
+        &provider_credentials.config,
+    )?;
     persist_bootstrap_setup(
         &window,
         request.as_ref().and_then(|request| request.setup.as_ref()),
     )?;
+
+    emit(&window, "gitops", "Preparing GitOps repository...", 10);
+    ensure_bootstrap_gitops_repository(
+        github_credentials,
+        request.as_ref().and_then(|request| request.github.as_ref()),
+        request.as_ref().and_then(|request| request.setup.as_ref()),
+    )
+    .await?;
+
     if app_mode.skips_layered_apps() {
         tracing::warn!(
             "{BOOTSTRAP_TEST_MODE_ENV}={} enabled; qdrant and morgan Argo Applications will not be applied",
@@ -528,20 +1070,76 @@ pub async fn bootstrap_local_stack(
         );
     }
 
-    emit(&window, "runtime", "Detecting container runtime...", 5);
+    let runtime = ensure_local_stack_cluster_dependencies(&window).await?;
+
+    emit(&window, "credentials", "Configuring local API keys...", 82);
+    ensure_namespace(CTO_NAMESPACE)?;
+    apply_bootstrap_scm_secret(scm_secret_manifest.as_deref())?;
+    apply_bootstrap_agent_keys(&agent_keys)?;
+    apply_bootstrap_argocd_oci_repository(github_credentials)?;
+    apply_bootstrap_ghcr_pull_secret(github_credentials)?;
+    apply_bootstrap_discord_tokens(&discord_tokens)?;
+
+    let app_message = if app_mode.skips_layered_apps() {
+        "Registering CTO app (test mode)..."
+    } else {
+        "Registering platform apps..."
+    };
+    emit(&window, "tools", app_message, 86);
+    apply_bootstrap_apps(app_mode)?;
+    patch_bootstrap_cto_agent_keys(&agent_keys)?;
+    patch_bootstrap_cto_config(cto_config.as_ref())?;
+    patch_bootstrap_morgan_cto_config(app_mode, cto_config.as_ref())?;
+    patch_bootstrap_github_owner(app_mode, github_credentials)?;
+
+    emit(&window, "gitops", "Waiting for platform apps...", 92);
+    wait_for_bootstrap_apps(app_mode, Duration::from_secs(600))?;
+
+    emit(&window, "ready", "Launching Codex App...", 100);
+
+    Ok(BootstrapReport {
+        os: std::env::consts::OS.to_string(),
+        arch: std::env::consts::ARCH.to_string(),
+        runtime,
+        cluster: CLUSTER_NAME.to_string(),
+        tools: current_tool_statuses(),
+    })
+}
+
+async fn prepare_local_stack_dependencies_impl(window: Window) -> BootstrapResult<BootstrapReport> {
+    tracing::info!("prepare_local_stack_dependencies invoked");
+    let runtime = ensure_local_stack_cluster_dependencies(&window).await?;
+    emit(
+        &window,
+        "baseline",
+        "Client Cluster baseline ready for setup choices.",
+        100,
+    );
+
+    Ok(BootstrapReport {
+        os: std::env::consts::OS.to_string(),
+        arch: std::env::consts::ARCH.to_string(),
+        runtime,
+        cluster: CLUSTER_NAME.to_string(),
+        tools: current_tool_statuses(),
+    })
+}
+
+async fn ensure_local_stack_cluster_dependencies(window: &Window) -> BootstrapResult<String> {
+    emit(window, "runtime", "Detecting container runtime...", 5);
     ensure_runtime_tool_paths_on_process();
 
-    let runtime_kind = ensure_container_runtime(&window)?;
+    let runtime_kind = ensure_container_runtime(window)?;
     let _ = ACTIVE_RUNTIME.set(runtime_kind);
     let runtime = runtime_kind.label().to_string();
 
-    emit(&window, "dependencies", "Installing dependencies...", 16);
-    ensure_host_tools(&window).await?;
+    emit(window, "dependencies", "Installing dependencies...", 16);
+    ensure_host_tools(window).await?;
 
-    emit(&window, "cluster", "Starting local Kubernetes...", 32);
+    emit(window, "cluster", "Starting local Kubernetes...", 32);
     ensure_kind_cluster(runtime_kind)?;
 
-    emit(&window, "ingress", "Configuring ingress...", 52);
+    emit(window, "ingress", "Configuring ingress...", 52);
     apply_remote_manifest_server_side(INGRESS_NGINX_KIND_URL).await?;
     wait_for_rollout(
         "ingress-nginx",
@@ -549,10 +1147,10 @@ pub async fn bootstrap_local_stack(
         "240s",
     )?;
 
-    emit(&window, "metrics", "Installing Lens metrics support...", 60);
+    emit(window, "metrics", "Installing Lens metrics support...", 60);
     install_metrics_server_for_kind().await?;
 
-    emit(&window, "gitops", "Starting GitOps controller...", 68);
+    emit(window, "gitops", "Starting Argo CD...", 68);
     ensure_namespace(ARGOCD_NAMESPACE)?;
     install_argocd()?;
     wait_for_crd("applications.argoproj.io", "120s")?;
@@ -569,30 +1167,50 @@ pub async fn bootstrap_local_stack(
         "statefulset/argocd-application-controller",
         "300s",
     )?;
-
-    emit(&window, "credentials", "Configuring local API keys...", 82);
     ensure_namespace(CTO_NAMESPACE)?;
-    apply_bootstrap_agent_keys(&agent_keys)?;
 
-    let app_message = if app_mode.skips_layered_apps() {
-        "Registering CTO app (test mode)..."
-    } else {
-        "Registering platform apps..."
-    };
-    emit(&window, "tools", app_message, 86);
-    apply_bootstrap_apps(app_mode)?;
-    patch_bootstrap_cto_agent_keys(&agent_keys)?;
-    patch_bootstrap_github_owner(app_mode, github_credentials.as_ref())?;
+    emit(window, "charts", "Installing CTO Helm charts...", 76);
+    apply_client_cluster_baseline_apps()?;
+    emit(window, "charts", "Waiting for CTO Helm charts...", 82);
+    wait_for_client_cluster_baseline_apps(Duration::from_secs(600))?;
 
-    emit(&window, "ready", "Launching Codex App...", 100);
+    Ok(runtime)
+}
 
-    Ok(BootstrapReport {
-        os: std::env::consts::OS.to_string(),
-        arch: std::env::consts::ARCH.to_string(),
-        runtime,
-        cluster: CLUSTER_NAME.to_string(),
-        tools: current_tool_statuses(),
-    })
+#[tauri::command]
+pub fn detect_secret_sources() -> SecretSourceDetectionResult {
+    detect_secret_sources_inner()
+}
+
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+pub fn preview_secret_source_matches(
+    request: SecretSourcePreviewRequest,
+) -> BootstrapResult<SecretSourcePreviewResult> {
+    preview_secret_source_matches_inner(&request)
+}
+
+#[tauri::command]
+pub fn apply_secret_source_matches(
+    request: SecretSourceApplyRequest,
+) -> BootstrapResult<SecretSourceApplyResult> {
+    apply_secret_source_matches_inner(request)
+}
+
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+pub fn prepare_origin_transfer(
+    request: OriginTransferRequest,
+) -> BootstrapResult<OriginTransferPlan> {
+    prepare_origin_transfer_inner(&request)
+}
+
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+pub fn provision_origin_application(
+    request: OriginProvisionRequest,
+) -> BootstrapResult<OriginProvisionResult> {
+    provision_origin_application_inner(&request)
 }
 
 #[tauri::command]
@@ -605,6 +1223,78 @@ pub fn bootstrap_probe() -> BootstrapReport {
         cluster: CLUSTER_NAME.to_string(),
         tools: current_tool_statuses(),
     }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResetLocalStackBootstrapReport {
+    removed_setup_profile: bool,
+    deleted_kind_cluster: bool,
+}
+
+#[tauri::command]
+pub async fn reset_local_stack_bootstrap(
+    window: Window,
+) -> BootstrapResult<ResetLocalStackBootstrapReport> {
+    tokio::task::spawn_blocking(move || reset_local_stack_bootstrap_blocking(&window))
+        .await
+        .map_err(|error| format!("local stack reset task failed: {error}"))?
+}
+
+fn reset_local_stack_bootstrap_blocking(
+    window: &Window,
+) -> BootstrapResult<ResetLocalStackBootstrapReport> {
+    ensure_runtime_tool_paths_on_process();
+    let removed_setup_profile = remove_bootstrap_setup_profile(window)?;
+    let deleted_kind_cluster = delete_bootstrap_kind_cluster()?;
+
+    Ok(ResetLocalStackBootstrapReport {
+        removed_setup_profile,
+        deleted_kind_cluster,
+    })
+}
+
+#[tauri::command]
+pub fn audio_output_status() -> AudioOutputStatus {
+    let host = cpal::default_host();
+    let output_device = host.default_output_device();
+    let output_device_name = output_device
+        .as_ref()
+        .and_then(|device| device.name().ok())
+        .filter(|name| !name.trim().is_empty());
+    let has_output_device = output_device.is_some();
+    let volume = system_output_volume();
+    let output_muted = system_output_muted();
+    let warning = if !has_output_device {
+        Some("No active audio output device was detected. Connect or enable speakers or headphones so you can hear Morgan.".to_string())
+    } else if output_muted == Some(true) {
+        Some(
+            "System audio appears to be muted. Unmute your output so you can hear Morgan."
+                .to_string(),
+        )
+    } else if volume == Some(0) {
+        Some(
+            "System output volume appears to be set to zero. Turn it up so you can hear Morgan."
+                .to_string(),
+        )
+    } else {
+        None
+    };
+
+    AudioOutputStatus {
+        has_output_device,
+        output_device_name,
+        output_volume_percent: volume,
+        output_muted,
+        warning,
+    }
+}
+
+#[tauri::command]
+pub async fn github_cli_oauth(window: Window) -> BootstrapResult<GitHubCliOAuthResult> {
+    tokio::task::spawn_blocking(move || github_cli_oauth_blocking(&window))
+        .await
+        .map_err(|error| format!("GitHub OAuth task failed: {error}"))?
 }
 
 #[tauri::command]
@@ -1230,12 +1920,60 @@ fn runtime_stats_tool(runtime: RuntimeKind) -> &'static str {
 }
 
 fn command_failure_message(label: &str, output: &Output) -> String {
-    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let label = sanitize_bootstrap_command_label(label);
+    let stderr = sanitize_bootstrap_log_text(String::from_utf8_lossy(&output.stderr).trim());
     if stderr.is_empty() {
         format!("{label} failed with status {}", output.status)
     } else {
         format!("{label} failed: {stderr}")
     }
+}
+
+#[cfg(target_os = "macos")]
+fn system_output_volume() -> Option<u8> {
+    let output = Command::new("osascript")
+        .args(["-e", "output volume of (get volume settings)"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .parse::<u8>()
+        .ok()
+}
+
+#[cfg(not(target_os = "macos"))]
+fn system_output_volume() -> Option<u8> {
+    None
+}
+
+#[cfg(target_os = "macos")]
+fn system_output_muted() -> Option<bool> {
+    let output = Command::new("osascript")
+        .args(["-e", "output muted of (get volume settings)"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    match String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "true" => Some(true),
+        "false" => Some(false),
+        _ => None,
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn system_output_muted() -> Option<bool> {
+    None
 }
 
 fn multiply_u64(value: u64, multiplier: u64) -> Option<u64> {
@@ -1948,6 +2686,7 @@ fn detect_runtime_kind() -> Option<RuntimeKind> {
 }
 
 fn emit(window: &Window, stage: &str, message: &str, progress: u8) {
+    append_bootstrap_log(&format!("progress {progress:>3}% [{stage}] {message}"));
     let _ = window.emit(
         "local-stack-progress",
         BootstrapProgress {
@@ -1956,6 +2695,241 @@ fn emit(window: &Window, stage: &str, message: &str, progress: u8) {
             progress,
         },
     );
+}
+
+struct BootstrapRunLogGuard {
+    path: Option<PathBuf>,
+}
+
+impl BootstrapRunLogGuard {
+    fn start(window: &Window) -> Self {
+        match create_bootstrap_run_log(window) {
+            Ok(path) => {
+                set_active_bootstrap_log_path(Some(path.clone()));
+                append_bootstrap_log("bootstrap run log started");
+                tracing::info!("Bootstrap run log: {}", path.display());
+                Self { path: Some(path) }
+            }
+            Err(error) => {
+                tracing::warn!("Failed to create bootstrap run log: {error}");
+                Self { path: None }
+            }
+        }
+    }
+
+    fn is_active(&self) -> bool {
+        self.path.is_some()
+    }
+}
+
+impl Drop for BootstrapRunLogGuard {
+    fn drop(&mut self) {
+        append_bootstrap_log("bootstrap run log closed");
+        set_active_bootstrap_log_path(None);
+    }
+}
+
+fn create_bootstrap_run_log(window: &Window) -> BootstrapResult<PathBuf> {
+    let dir = bootstrap_run_log_dir(window)?;
+    fs::create_dir_all(&dir).map_err(|error| {
+        format!(
+            "failed to create bootstrap run log directory {}: {error}",
+            dir.display()
+        )
+    })?;
+    let path = dir.join(format!("bootstrap-{}.log", bootstrap_log_timestamp()));
+    fs::write(
+        &path,
+        format!(
+            "CTO local stack bootstrap log\nstarted={}\nrepo={}\n\n",
+            bootstrap_log_timestamp(),
+            find_repo_root_for_bootstrap_logs().map_or_else(
+                || "unavailable".to_string(),
+                |path| path.display().to_string()
+            )
+        ),
+    )
+    .map_err(|error| {
+        format!(
+            "failed to create bootstrap run log {}: {error}",
+            path.display()
+        )
+    })?;
+    Ok(path)
+}
+
+fn bootstrap_run_log_dir(window: &Window) -> BootstrapResult<PathBuf> {
+    if let Some(repo_root) = find_repo_root_for_bootstrap_logs() {
+        return Ok(repo_root.join(BOOTSTRAP_DEV_LOG_DIR));
+    }
+
+    Ok(window
+        .app_handle()
+        .path()
+        .app_log_dir()
+        .map_err(|error| format!("failed to resolve app log dir: {error}"))?
+        .join("bootstrap-runs"))
+}
+
+fn find_repo_root_for_bootstrap_logs() -> Option<PathBuf> {
+    let mut current = std::env::current_dir().ok()?;
+    loop {
+        if current.join("package.json").is_file() && current.join("src-tauri").is_dir() {
+            return Some(current);
+        }
+        if !current.pop() {
+            return None;
+        }
+    }
+}
+
+fn active_bootstrap_log_path() -> &'static Mutex<Option<PathBuf>> {
+    ACTIVE_BOOTSTRAP_LOG_PATH.get_or_init(|| Mutex::new(None))
+}
+
+fn set_active_bootstrap_log_path(path: Option<PathBuf>) {
+    match active_bootstrap_log_path().lock() {
+        Ok(mut active_path) => *active_path = path,
+        Err(error) => tracing::warn!("Failed to lock bootstrap log path: {error}"),
+    }
+}
+
+fn append_bootstrap_log(message: &str) {
+    let path = match active_bootstrap_log_path().lock() {
+        Ok(active_path) => active_path.clone(),
+        Err(error) => {
+            tracing::warn!("Failed to lock bootstrap log path: {error}");
+            None
+        }
+    };
+    let Some(path) = path else {
+        return;
+    };
+
+    match OpenOptions::new().create(true).append(true).open(&path) {
+        Ok(mut file) => {
+            if let Err(error) = writeln!(file, "[{}] {message}", bootstrap_log_timestamp()) {
+                tracing::warn!("Failed to write bootstrap log {}: {error}", path.display());
+            }
+        }
+        Err(error) => tracing::warn!("Failed to open bootstrap log {}: {error}", path.display()),
+    }
+}
+
+fn bootstrap_log_timestamp() -> String {
+    let duration = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default();
+    format!("{}.{:03}", duration.as_secs(), duration.subsec_millis())
+}
+
+fn log_command_output(label: &str, output: &Output) {
+    let label = sanitize_bootstrap_command_label(label);
+    let status = output
+        .status
+        .code()
+        .map_or_else(|| "signal".to_string(), |code| code.to_string());
+    append_bootstrap_log(&format!("command `{label}` exited with status {status}"));
+
+    if output.status.success() || !should_log_command_streams(&label) {
+        return;
+    }
+
+    append_command_stream(&label, "stdout", &output.stdout);
+    append_command_stream(&label, "stderr", &output.stderr);
+}
+
+fn should_log_command_streams(label: &str) -> bool {
+    !(label == "pbpaste" || label.starts_with("gh "))
+}
+
+fn append_command_stream(label: &str, stream: &str, bytes: &[u8]) {
+    if bytes.is_empty() {
+        return;
+    }
+    let text = sanitize_bootstrap_log_text(&String::from_utf8_lossy(bytes));
+    let text = truncate_log_text(&text, BOOTSTRAP_LOG_MAX_OUTPUT_CHARS);
+    append_bootstrap_log(&format!("command `{label}` {stream}:\n{text}"));
+}
+
+fn sanitize_bootstrap_command_label(label: &str) -> String {
+    let lower = label.to_ascii_lowercase();
+    if lower.contains("github_token")
+        || lower.contains("agentkeys")
+        || lower.contains("stringdata")
+        || lower.contains("--patch")
+        || lower.contains(" -p ")
+        || lower.contains("github_pat_")
+        || lower.contains("gho_")
+        || lower.contains("ghp_")
+        || lower.contains("ghs_")
+        || lower.contains("ghu_")
+        || lower.contains("ghr_")
+    {
+        return redact_kubectl_patch_label(label);
+    }
+
+    label.to_string()
+}
+
+fn redact_kubectl_patch_label(label: &str) -> String {
+    if label.starts_with("kubectl ") && label.contains(" patch ") {
+        let parts = label.split_whitespace().collect::<Vec<_>>();
+        let namespace = parts
+            .windows(2)
+            .find_map(|window| (window[0] == "-n").then_some(window[1]));
+        let resource = parts
+            .windows(2)
+            .find_map(|window| (window[0] == "patch").then_some(window[1]));
+        let name =
+            resource.and_then(|_| parts.get(parts.iter().position(|part| *part == "patch")? + 2));
+        return match (namespace, resource, name) {
+            (Some(namespace), Some(resource), Some(name)) => {
+                format!("kubectl -n {namespace} patch {resource} {name} [payload redacted]")
+            }
+            _ => "kubectl patch [payload redacted]".to_string(),
+        };
+    }
+
+    "[command redacted]".to_string()
+}
+
+fn sanitize_bootstrap_log_text(raw: &str) -> String {
+    raw.lines()
+        .map(|line| {
+            let lower = line.to_ascii_lowercase();
+            if lower.contains("authorization:")
+                || lower.contains("access_token")
+                || lower.contains("refresh_token")
+                || lower.contains("github_token")
+                || lower.contains("api_key")
+                || lower.contains("apikey")
+                || lower.contains("secret")
+                || lower.contains("token:")
+                || lower.contains("github_pat_")
+                || lower.contains("ghp_")
+                || lower.contains("gho_")
+                || lower.contains("ghs_")
+                || lower.contains("ghu_")
+                || lower.contains("ghr_")
+            {
+                "[redacted sensitive line]"
+            } else {
+                line
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn truncate_log_text(text: &str, max_chars: usize) -> String {
+    let mut chars = text.chars();
+    let truncated = chars.by_ref().take(max_chars).collect::<String>();
+    if chars.next().is_some() {
+        format!("{truncated}\n[truncated]")
+    } else {
+        truncated
+    }
 }
 
 fn env_var_trimmed(name: &str) -> Option<String> {
@@ -1982,6 +2956,360 @@ fn bootstrap_tool_key_defaults() -> BTreeMap<String, BootstrapToolKeyDefaults> {
             )
         })
         .collect()
+}
+
+fn prepare_origin_transfer_inner(
+    request: &OriginTransferRequest,
+) -> BootstrapResult<OriginTransferPlan> {
+    let source_provider = request.source_provider.trim().to_ascii_lowercase();
+    if !matches!(source_provider.as_str(), "github" | "gitlab") {
+        return Err(
+            "5D Origin transfer requires an existing GitHub or GitLab Source connection"
+                .to_string(),
+        );
+    }
+    let source_connection_id = request.source_connection_id.trim();
+    validate_origin_slug(source_connection_id, "sourceConnectionId")?;
+    let mode = request.mode.unwrap_or(OriginTransferMode::Mirror);
+    let repositories = request
+        .repositories
+        .iter()
+        .map(|repo| repo.trim())
+        .filter(|repo| !repo.is_empty())
+        .map(sanitize_origin_repository)
+        .collect::<BootstrapResult<Vec<_>>>()?;
+    let app_name = request.engine.app_name().to_string();
+    let manifest_preview = redacted_origin_manifest_preview(request.engine.manifest());
+    let mut warnings = vec![
+        "Mirror-first plan: hosted GitHub/GitLab remains the source of truth until the user explicitly migrates.".to_string(),
+        "No provider tokens or repository credentials are included in this dry-run preview.".to_string(),
+    ];
+    if request.engine == OriginEngine::GitlabCompatible {
+        warnings.push("GitLab is heavier than Gitea and should be provisioned only after the Client Cluster baseline is healthy.".to_string());
+    }
+
+    Ok(OriginTransferPlan {
+        engine: request.engine,
+        mode,
+        app_name,
+        app_label: request.engine.label().to_string(),
+        source_provider,
+        source_connection_id: source_connection_id.to_string(),
+        repositories,
+        action_plan: vec![
+            "Confirm the existing hosted Source connection is ready.".to_string(),
+            format!("Create or update the {} Argo Application.", request.engine.app_name()),
+            "Configure repository mirrors; do not cut over writes unless migrate is explicitly selected.".to_string(),
+            "Keep provider credentials in CTO-managed Secrets and display only redacted previews.".to_string(),
+        ],
+        manifest_preview,
+        redaction: "[REDACTED]".to_string(),
+        warnings,
+    })
+}
+
+fn provision_origin_application_inner(
+    request: &OriginProvisionRequest,
+) -> BootstrapResult<OriginProvisionResult> {
+    if !request.approved {
+        return Err("approval required before creating a 5D Origin Argo Application".to_string());
+    }
+    let dry_run = request.dry_run.unwrap_or(true);
+    let manifest = request.engine.manifest();
+    if !manifest.contains(&format!("name: {}", request.engine.app_name())) {
+        return Err(format!(
+            "{} manifest does not declare the expected Argo Application name",
+            request.engine.app_name()
+        ));
+    }
+    if !dry_run {
+        let mut command = tool_command("kubectl");
+        command.args(["--context", KIND_CONTEXT, "apply", "-f", "-"]);
+        command.stdin(Stdio::piped());
+        command.stdout(Stdio::piped());
+        command.stderr(Stdio::piped());
+        let mut child = command
+            .spawn()
+            .map_err(|error| format!("failed to start kubectl for Origin app creation: {error}"))?;
+        if let Some(stdin) = child.stdin.as_mut() {
+            stdin
+                .write_all(manifest.as_bytes())
+                .map_err(|error| format!("failed to send Origin manifest to kubectl: {error}"))?;
+        }
+        let output = child
+            .wait_with_output()
+            .map_err(|error| format!("failed to wait for Origin app creation: {error}"))?;
+        if !output.status.success() {
+            return Err(format!(
+                "Origin app creation failed: {}",
+                sanitize_bootstrap_log_text(&String::from_utf8_lossy(&output.stderr)).trim()
+            ));
+        }
+    }
+
+    Ok(OriginProvisionResult {
+        engine: request.engine,
+        app_name: request.engine.app_name().to_string(),
+        applied: !dry_run,
+        dry_run,
+        manifest_preview: redacted_origin_manifest_preview(manifest),
+        message: if dry_run {
+            "Origin application dry-run is ready for approval".to_string()
+        } else {
+            "Origin application created".to_string()
+        },
+    })
+}
+
+fn validate_origin_slug(value: &str, label: &str) -> BootstrapResult<()> {
+    if value.is_empty() || value.len() > 96 {
+        return Err(format!("{label} must be 1-96 characters"));
+    }
+    if value.starts_with('-') || value.ends_with('-') || value.contains("..") {
+        return Err(format!(
+            "{label} has an invalid repository/source identifier shape"
+        ));
+    }
+    if !value
+        .bytes()
+        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'/'))
+    {
+        return Err(format!("{label} contains unsupported characters"));
+    }
+    Ok(())
+}
+
+fn sanitize_origin_repository(value: &str) -> BootstrapResult<String> {
+    validate_origin_slug(value, "repository")?;
+    Ok(value.to_string())
+}
+
+fn redacted_origin_manifest_preview(manifest: &str) -> String {
+    manifest
+        .replace("password:", "password: [REDACTED]")
+        .replace("token:", "token: [REDACTED]")
+}
+
+fn validate_secret_source_provider(provider: &str) -> BootstrapResult<()> {
+    if provider
+        .trim()
+        .eq_ignore_ascii_case(SECRET_SOURCE_PROVIDER_ONEPASSWORD)
+    {
+        Ok(())
+    } else {
+        Err("unsupported secret source provider; only onepassword quick connect is available locally".to_string())
+    }
+}
+
+fn canonical_secret_target(key: &str) -> Option<(&'static str, &'static str)> {
+    SECRET_SOURCE_CANONICAL_TARGETS
+        .iter()
+        .copied()
+        .find(|(target_key, _)| target_key.eq_ignore_ascii_case(key.trim()))
+}
+
+fn secret_source_targets(requested: &[String]) -> Vec<(&'static str, &'static str)> {
+    if requested.is_empty() {
+        return SECRET_SOURCE_CANONICAL_TARGETS.to_vec();
+    }
+
+    let requested = requested
+        .iter()
+        .map(|target| target.trim().to_ascii_uppercase())
+        .collect::<HashSet<_>>();
+    SECRET_SOURCE_CANONICAL_TARGETS
+        .iter()
+        .copied()
+        .filter(|(key, purpose)| {
+            requested.contains(*key) || requested.contains(&purpose.to_ascii_uppercase())
+        })
+        .collect()
+}
+
+fn detect_secret_sources_inner() -> SecretSourceDetectionResult {
+    // Contract probe: op --version
+    let output = run_tool("op", &["--version"]);
+    let (detected, available, version, reason) = match output {
+        Ok(output) if output.status.success() => {
+            let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            (true, true, (!version.is_empty()).then_some(version), None)
+        }
+        Ok(output) => (
+            true,
+            false,
+            None,
+            Some(
+                sanitize_bootstrap_log_text(&String::from_utf8_lossy(&output.stderr))
+                    .trim()
+                    .to_string(),
+            ),
+        ),
+        Err(error) => (false, false, None, Some(error)),
+    };
+
+    SecretSourceDetectionResult {
+        providers: vec![SecretSourceProviderStatus {
+            provider: SECRET_SOURCE_PROVIDER_ONEPASSWORD.to_string(),
+            label: "1Password".to_string(),
+            detected,
+            available,
+            version,
+            reason,
+            primary_action: if available {
+                "Use saved access"
+            } else {
+                "Paste instead"
+            }
+            .to_string(),
+        }],
+        manual_fallback_available: true,
+        message: if available {
+            "1Password quick connect is available; review matches before connecting.".to_string()
+        } else {
+            "No optional saved-access provider is ready; paste instead remains available."
+                .to_string()
+        },
+    }
+}
+
+fn preview_secret_source_matches_inner(
+    request: &SecretSourcePreviewRequest,
+) -> BootstrapResult<SecretSourcePreviewResult> {
+    validate_secret_source_provider(&request.provider)?;
+    let targets = secret_source_targets(&request.targets);
+    let mut command = tool_command("op");
+    command.args(["item", "list", "--format", "json"]);
+    // Metadata-only discovery: `op item list` enumerates items without reading fields.
+    let output = run_command(command, "op item list --format json")?;
+    if !output.status.success() {
+        return Err(format!(
+            "1Password metadata discovery failed; paste instead is still available: {}",
+            sanitize_bootstrap_log_text(&String::from_utf8_lossy(&output.stderr)).trim()
+        ));
+    }
+    let raw_items = serde_json::from_slice::<Value>(&output.stdout)
+        .map_err(|error| format!("Failed to parse 1Password item metadata: {error}"))?;
+    let items = raw_items.as_array().cloned().unwrap_or_default();
+    let mut matches = Vec::new();
+    for (target_key, purpose) in targets {
+        let target_lower = target_key.to_ascii_lowercase();
+        if let Some(item) = items.iter().find(|item| {
+            let title = item
+                .get("title")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_ascii_lowercase();
+            title.contains(&target_lower) || title.contains(&target_lower.replace('_', " "))
+        }) {
+            let id = item
+                .get("id")
+                .or_else(|| item.get("uuid"))
+                .and_then(Value::as_str)
+                .unwrap_or(target_key);
+            let title = item
+                .get("title")
+                .and_then(Value::as_str)
+                .unwrap_or(target_key);
+            matches.push(SecretSourceMatchPreview {
+                provider: SECRET_SOURCE_PROVIDER_ONEPASSWORD.to_string(),
+                purpose: purpose.to_string(),
+                target_secret_name: CTO_AGENT_KEYS_SECRET.to_string(),
+                target_secret_key: target_key.to_string(),
+                provider_ref: format!("op://{id}"),
+                label: title.to_string(),
+                confidence: "name-match".to_string(),
+                redacted_value_preview: "[REDACTED]".to_string(),
+                approval_required: true,
+            });
+        }
+    }
+
+    Ok(SecretSourcePreviewResult {
+        provider: SECRET_SOURCE_PROVIDER_ONEPASSWORD.to_string(),
+        discovery: "metadata-only".to_string(),
+        matches,
+        warnings: vec![
+            "Review before connecting; raw values are not read until approval is submitted."
+                .to_string(),
+            "Paste instead remains available for any missing key.".to_string(),
+        ],
+    })
+}
+
+fn apply_secret_source_matches_inner(
+    request: SecretSourceApplyRequest,
+) -> BootstrapResult<SecretSourceApplyResult> {
+    validate_secret_source_provider(&request.provider)?;
+    if !request.approved {
+        return Err("approval required before reading selected 1Password fields".to_string());
+    }
+    if request.matches.is_empty() {
+        return Err("at least one approved saved-access match is required".to_string());
+    }
+
+    let mut agent_keys = Vec::new();
+    let mut applied = Vec::new();
+    for selection in request.matches {
+        let (target_key, purpose) = canonical_secret_target(&selection.target_secret_key)
+            .ok_or_else(|| {
+                format!(
+                    "unsupported saved-access target key: {}",
+                    selection.target_secret_key
+                )
+            })?;
+        let provider_ref = selection.provider_ref.trim();
+        if !provider_ref.starts_with("op://") {
+            return Err("1Password providerRef must use op:// provenance".to_string());
+        }
+        let item_id = provider_ref.trim_start_matches("op://");
+        let mut command = tool_command("op");
+        command.args([
+            "item",
+            "get",
+            item_id,
+            "--fields",
+            "label=password",
+            "--reveal",
+        ]);
+        // Approved field read: raw value is held only in memory long enough to build/apply the Kubernetes Secret.
+        let output = run_command(command, "op item get [approved field redacted]")?;
+        if !output.status.success() {
+            return Err(format!(
+                "1Password approved field read failed for {target_key}: {}",
+                sanitize_bootstrap_log_text(&String::from_utf8_lossy(&output.stderr)).trim()
+            ));
+        }
+        let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        validate_bootstrap_secret_value(&value, target_key)?;
+        if value.is_empty() {
+            return Err(format!(
+                "1Password returned an empty value for {target_key}"
+            ));
+        }
+        agent_keys.push(BootstrapAgentKey {
+            name: target_key.to_string(),
+            value,
+        });
+        applied.push(SecretSourceAppliedReference {
+            purpose: if selection.purpose.trim().is_empty() {
+                purpose.to_string()
+            } else {
+                selection.purpose.trim().to_string()
+            },
+            target_secret_name: CTO_AGENT_KEYS_SECRET.to_string(),
+            target_secret_key: target_key.to_string(),
+            provider_ref: provider_ref.to_string(),
+            status: "applied".to_string(),
+        });
+    }
+
+    apply_bootstrap_agent_keys(&agent_keys)?;
+    Ok(SecretSourceApplyResult {
+        provider: SECRET_SOURCE_PROVIDER_ONEPASSWORD.to_string(),
+        applied,
+        raw_values_persisted: false,
+        message: "Access connected".to_string(),
+    })
 }
 
 fn normalize_bootstrap_github_credentials(
@@ -2019,12 +3347,90 @@ fn normalize_bootstrap_github_credentials(
         .filter(|value| !value.is_empty())
         .map(validate_github_owner)
         .transpose()?;
-
     if token.is_none() && owner.is_none() {
+        tracing::info!("No GitHub token or owner configured for bootstrap");
         return Ok(None);
     }
+    tracing::info!(
+        github_token_present = token.is_some(),
+        owner = owner.as_deref().unwrap_or("unset"),
+        "Normalized GitHub bootstrap credentials (token value not logged)"
+    );
 
     Ok(Some(BootstrapGithubCredentials { token, owner }))
+}
+
+fn normalize_bootstrap_source_credentials(
+    request: Option<&BootstrapLocalStackRequest>,
+) -> BootstrapResult<BootstrapSourceCredentials> {
+    let github = normalize_bootstrap_github_credentials(request)?;
+    let gitlab_token = request
+        .and_then(|request| request.tools.as_ref())
+        .into_iter()
+        .flat_map(|tools| tools.api_keys.iter())
+        .find(|key| {
+            key.name
+                .trim()
+                .eq_ignore_ascii_case(GITLAB_TOKEN_SECRET_KEY)
+        })
+        .map(|key| key.value.trim())
+        .filter(|value| !value.is_empty())
+        .map(validate_gitlab_token)
+        .transpose()?;
+
+    if gitlab_token.is_some() {
+        tracing::info!("Normalized GitLab bootstrap token (token value not logged)");
+    }
+
+    Ok(BootstrapSourceCredentials {
+        github,
+        gitlab_token,
+    })
+}
+
+fn normalize_bootstrap_scm_secret_manifest(
+    request: Option<&BootstrapLocalStackRequest>,
+) -> BootstrapResult<Option<String>> {
+    let Some(manifest) = request
+        .and_then(|request| request.scm.as_ref())
+        .and_then(|scm| scm.github_app_secret_manifest.as_deref())
+        .map(str::trim)
+        .filter(|manifest| !manifest.is_empty())
+    else {
+        return Ok(None);
+    };
+
+    if manifest.len() > MAX_BOOTSTRAP_SCM_SECRET_MANIFEST_BYTES {
+        return Err(format!(
+            "GitHub App Secret manifest must be at most {MAX_BOOTSTRAP_SCM_SECRET_MANIFEST_BYTES} bytes"
+        ));
+    }
+    if manifest
+        .chars()
+        .any(|character| character.is_control() && !matches!(character, '\n' | '\r' | '\t'))
+    {
+        return Err("GitHub App Secret manifest must not contain control characters".to_string());
+    }
+
+    let normalized = manifest.replace("\r\n", "\n").replace('\r', "\n");
+    let namespace_required = format!("namespace: {CTO_NAMESPACE}");
+    for required in [
+        "kind: Secret",
+        namespace_required.as_str(),
+        "cto.5dlabs.ai/scm-provider: github",
+        "app-id: |-",
+        "client-id: |-",
+        "client-secret: |-",
+        "private-key: |-",
+    ] {
+        if !normalized.contains(required) {
+            return Err(format!(
+                "GitHub App Secret manifest is missing required field: {required}"
+            ));
+        }
+    }
+
+    Ok(Some(format!("{}\n", normalized.trim_end())))
 }
 
 fn normalize_bootstrap_tool_api_keys(
@@ -2068,15 +3474,213 @@ fn default_bootstrap_tool_api_key_requests() -> Vec<BootstrapToolApiKeyRequest> 
         .collect()
 }
 
+fn normalize_bootstrap_provider_credentials(
+    request: Option<&BootstrapLocalStackRequest>,
+) -> BootstrapResult<BootstrapProviderCredentialBundle> {
+    let requested_credentials = request
+        .and_then(|request| request.providers.as_ref())
+        .map_or_else(Vec::new, |providers| providers.credentials.clone());
+    let mut agent_keys = BTreeMap::new();
+    let mut config = BTreeMap::new();
+
+    for credential in requested_credentials {
+        let provider_id = validate_bootstrap_provider_id(&credential.provider_id)?;
+        let value = credential
+            .value
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
+        let api_key = credential
+            .api_key
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
+
+        if let Some(value) = value.as_deref() {
+            validate_bootstrap_secret_value(value, &format!("{provider_id} provider value"))?;
+        }
+        if let Some(api_key) = api_key.as_deref() {
+            validate_bootstrap_secret_value(api_key, &format!("{provider_id} provider API key"))?;
+        }
+
+        let mut credential_config = BootstrapProviderCredentialConfig {
+            value: None,
+            secret_ref: None,
+            api_key_secret_ref: None,
+        };
+
+        match credential.auth {
+            BootstrapProviderAuth::ApiKey => {
+                if let Some(value) = value {
+                    let secret_key = validate_bootstrap_agent_key_name(
+                        credential.secret_key.as_deref().ok_or_else(|| {
+                            format!("{provider_id} API key credential requires a secretKey")
+                        })?,
+                    )?;
+                    insert_bootstrap_agent_key(&mut agent_keys, &secret_key, value)?;
+                    credential_config.secret_ref = Some(bootstrap_secret_reference(secret_key));
+                }
+            }
+            BootstrapProviderAuth::Gateway | BootstrapProviderAuth::Local => {
+                credential_config.value = value;
+                if let Some(api_key) = api_key {
+                    let secret_key = validate_bootstrap_agent_key_name(
+                        credential.api_key_secret_key.as_deref().ok_or_else(|| {
+                            format!("{provider_id} provider API key requires an apiKeySecretKey")
+                        })?,
+                    )?;
+                    insert_bootstrap_agent_key(&mut agent_keys, &secret_key, api_key)?;
+                    credential_config.api_key_secret_ref =
+                        Some(bootstrap_secret_reference(secret_key));
+                }
+            }
+            BootstrapProviderAuth::OAuth | BootstrapProviderAuth::Cloud => {
+                credential_config.value = value;
+            }
+        }
+
+        if (credential_config.value.is_some()
+            || credential_config.secret_ref.is_some()
+            || credential_config.api_key_secret_ref.is_some())
+            && config
+                .insert(provider_id.clone(), credential_config)
+                .is_some()
+        {
+            return Err(format!(
+                "duplicate provider credential entry for {provider_id}"
+            ));
+        }
+    }
+
+    Ok(BootstrapProviderCredentialBundle {
+        agent_keys: agent_keys
+            .into_iter()
+            .map(|(name, value)| BootstrapAgentKey { name, value })
+            .collect(),
+        config,
+    })
+}
+
+fn insert_bootstrap_agent_key(
+    keys: &mut BTreeMap<String, String>,
+    name: &str,
+    value: String,
+) -> BootstrapResult<()> {
+    if keys.insert(name.to_string(), value).is_some() {
+        return Err(format!("duplicate API key entry for {name}"));
+    }
+    Ok(())
+}
+
+fn bootstrap_secret_reference(key: String) -> BootstrapSecretReference {
+    BootstrapSecretReference {
+        name: CTO_AGENT_KEYS_SECRET.to_string(),
+        env: key.clone(),
+        key,
+    }
+}
+
+fn normalize_bootstrap_discord_tokens(
+    request: Option<&BootstrapLocalStackRequest>,
+) -> BootstrapResult<Vec<BootstrapAgentKey>> {
+    let requested_tokens = request
+        .and_then(|request| request.agents.as_ref())
+        .map_or_else(Vec::new, |agents| agents.discord_tokens.clone());
+
+    let mut normalized = BTreeMap::new();
+    for token in requested_tokens {
+        if !token.enabled {
+            continue;
+        }
+        let name = validate_bootstrap_discord_agent_id(&token.id)?;
+        let Some(value) = token
+            .token
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        else {
+            continue;
+        };
+        validate_bootstrap_secret_value(value, &format!("{name} Discord bot token"))?;
+        if normalized.contains_key(&name) {
+            return Err(format!("duplicate Discord bot token entry for {name}"));
+        }
+        normalized.insert(name, value.to_string());
+    }
+
+    Ok(normalized
+        .into_iter()
+        .map(|(name, value)| BootstrapAgentKey { name, value })
+        .collect())
+}
+
 fn validate_bootstrap_tool_api_key_name(raw: &str) -> BootstrapResult<String> {
     let name = raw.trim().to_ascii_uppercase();
-    if BOOTSTRAP_TOOL_API_KEY_ENV_NAMES
-        .iter()
-        .any(|allowed| *allowed == name)
+    if name == GITLAB_TOKEN_SECRET_KEY
+        || BOOTSTRAP_TOOL_API_KEY_ENV_NAMES
+            .iter()
+            .any(|allowed| *allowed == name)
     {
         Ok(name)
     } else {
         Err(format!("unsupported tool API key: {raw}"))
+    }
+}
+
+fn validate_bootstrap_agent_key_name(raw: &str) -> BootstrapResult<String> {
+    let name = raw.trim().to_ascii_uppercase();
+    if name.is_empty()
+        || name
+            .chars()
+            .any(|ch| !(ch.is_ascii_uppercase() || ch.is_ascii_digit() || ch == '_'))
+        || name.chars().next().is_some_and(|ch| ch.is_ascii_digit())
+    {
+        return Err(format!("invalid API key name: {raw}"));
+    }
+    Ok(name)
+}
+
+fn validate_bootstrap_provider_id(raw: &str) -> BootstrapResult<String> {
+    let id = raw.trim().to_ascii_lowercase();
+    if id.is_empty()
+        || id
+            .chars()
+            .any(|ch| !(ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '-'))
+    {
+        return Err(format!("invalid provider id: {raw}"));
+    }
+    Ok(id)
+}
+
+fn validate_bootstrap_discord_agent_id(raw: &str) -> BootstrapResult<String> {
+    let id = raw.trim().to_ascii_lowercase();
+    let valid = matches!(
+        id.as_str(),
+        "morgan"
+            | "rex"
+            | "grizz"
+            | "nova"
+            | "viper"
+            | "blaze"
+            | "tap"
+            | "spark"
+            | "cleo"
+            | "cipher"
+            | "tess"
+            | "stitch"
+            | "atlas"
+            | "bolt"
+            | "block"
+            | "vex"
+            | "angie"
+            | "glitch"
+    );
+    if valid {
+        Ok(id)
+    } else {
+        Err(format!("unsupported Discord agent token: {raw}"))
     }
 }
 
@@ -2088,18 +3692,108 @@ fn validate_bootstrap_secret_value(value: &str, label: &str) -> BootstrapResult<
 }
 
 fn bootstrap_agent_keys(
-    github_credentials: Option<&BootstrapGithubCredentials>,
+    source_credentials: &BootstrapSourceCredentials,
     tool_api_keys: &[BootstrapAgentKey],
-) -> Vec<BootstrapAgentKey> {
-    let mut keys = Vec::new();
-    if let Some(token) = github_credentials.and_then(|credentials| credentials.token.as_ref()) {
-        keys.push(BootstrapAgentKey {
-            name: GITHUB_TOKEN_SECRET_KEY.to_string(),
-            value: token.clone(),
-        });
+    provider_api_keys: &[BootstrapAgentKey],
+) -> BootstrapResult<Vec<BootstrapAgentKey>> {
+    let mut keys = BTreeMap::new();
+    if let Some(token) = source_credentials
+        .github
+        .as_ref()
+        .and_then(|credentials| credentials.token.as_ref())
+    {
+        insert_bootstrap_agent_key(&mut keys, GITHUB_TOKEN_SECRET_KEY, token.clone())?;
     }
-    keys.extend(tool_api_keys.iter().cloned());
-    keys
+    if let Some(token) = source_credentials.gitlab_token.as_ref() {
+        insert_bootstrap_agent_key(&mut keys, GITLAB_TOKEN_SECRET_KEY, token.clone())?;
+    }
+    for key in tool_api_keys.iter().chain(provider_api_keys.iter()) {
+        insert_bootstrap_agent_key(&mut keys, &key.name, key.value.clone())?;
+    }
+    Ok(keys
+        .into_iter()
+        .map(|(name, value)| BootstrapAgentKey { name, value })
+        .collect())
+}
+
+fn build_bootstrap_cto_config(
+    setup: Option<&BootstrapSetupProfile>,
+    provider_credentials: &BTreeMap<String, BootstrapProviderCredentialConfig>,
+) -> BootstrapResult<Option<BootstrapCtoConfig>> {
+    let Some(setup) = setup else {
+        return Ok(None);
+    };
+
+    validate_bootstrap_setup(setup)?;
+    let selected_clis = setup.harness.clis.iter().copied().collect::<HashSet<_>>();
+    let mut clis = setup
+        .harness
+        .clis
+        .iter()
+        .copied()
+        .map(|cli| {
+            (
+                bootstrap_cli_id(cli).to_string(),
+                BootstrapCtoCliConfig {
+                    id: cli,
+                    default_harness: setup.harness.mode,
+                    providers: BTreeMap::new(),
+                },
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+
+    for provider in &setup.harness.providers {
+        let provider_clis = if provider.cli_ids.is_empty() {
+            setup.harness.clis.clone()
+        } else {
+            provider.cli_ids.clone()
+        };
+        for cli in provider_clis {
+            if !selected_clis.contains(&cli) {
+                continue;
+            }
+            let Some(cli_config) = clis.get_mut(bootstrap_cli_id(cli)) else {
+                continue;
+            };
+            cli_config.providers.insert(
+                provider.id.clone(),
+                BootstrapCtoProviderConfig {
+                    id: provider.id.clone(),
+                    auth: provider.auth,
+                    default_model: provider.model.clone(),
+                    models: provider.models.clone(),
+                    credential: provider_credentials.get(&provider.id).cloned(),
+                },
+            );
+        }
+    }
+
+    Ok(Some(BootstrapCtoConfig {
+        version: 1,
+        source: setup.source.clone(),
+        harness: BootstrapCtoHarnessConfig {
+            default: setup.harness.mode,
+            routing: setup.harness.routing.clone(),
+        },
+        clis,
+    }))
+}
+
+fn bootstrap_cli_id(cli: BootstrapAiCli) -> &'static str {
+    match cli {
+        BootstrapAiCli::OpenClaw => "openclaw",
+        BootstrapAiCli::Codex => "codex",
+        BootstrapAiCli::ClaudeCode => "claudeCode",
+        BootstrapAiCli::GeminiCli => "geminiCli",
+        BootstrapAiCli::OpenCode => "opencode",
+        BootstrapAiCli::QwenCode => "qwenCode",
+        BootstrapAiCli::GitHubCli => "githubCli",
+        BootstrapAiCli::GitLabCli => "gitlabCli",
+        BootstrapAiCli::Cursor => "cursor",
+        BootstrapAiCli::Factory => "factory",
+        BootstrapAiCli::Kimi => "kimi",
+    }
 }
 
 fn persist_bootstrap_setup(
@@ -2132,8 +3826,21 @@ fn bootstrap_setup_path(window: &Window) -> BootstrapResult<PathBuf> {
     Ok(dir.join("setup.json"))
 }
 
+fn remove_bootstrap_setup_profile(window: &Window) -> BootstrapResult<bool> {
+    let path = bootstrap_setup_path(window)?;
+    if !path.exists() {
+        return Ok(false);
+    }
+
+    std::fs::remove_file(&path)
+        .map_err(|error| format!("failed to remove {}: {error}", path.display()))?;
+    Ok(true)
+}
+
 fn validate_bootstrap_setup(setup: &BootstrapSetupProfile) -> BootstrapResult<()> {
-    validate_nonempty_text(&setup.source.owner, "source owner")?;
+    if !setup.source.owner.trim().is_empty() {
+        validate_nonempty_text(&setup.source.owner, "source owner")?;
+    }
     validate_bootstrap_connection_id(&setup.source.connection_id)?;
     validate_bootstrap_base_url(&setup.source.base_url)?;
 
@@ -2143,15 +3850,56 @@ fn validate_bootstrap_setup(setup: &BootstrapSetupProfile) -> BootstrapResult<()
     if setup.harness.providers.is_empty() {
         return Err("bootstrap setup requires at least one provider/model selection".to_string());
     }
+    let mut selected_routes = HashSet::new();
     for provider in &setup.harness.providers {
         validate_nonempty_text(&provider.id, "provider id")?;
         validate_nonempty_text(&provider.model, "provider model")?;
+        selected_routes.insert(BootstrapModelRoute {
+            provider_id: provider.id.clone(),
+            model: provider.model.clone(),
+        });
         for model in &provider.models {
             validate_nonempty_text(model, "provider model")?;
+            selected_routes.insert(BootstrapModelRoute {
+                provider_id: provider.id.clone(),
+                model: model.clone(),
+            });
         }
+    }
+    if let Some(routing) = &setup.harness.routing {
+        validate_bootstrap_model_route(&routing.primary, "primary harness model")?;
+        if !selected_routes.contains(&routing.primary) {
+            return Err(
+                "primary harness model must match one selected provider/model pair".to_string(),
+            );
+        }
+        if routing.fallbacks.is_empty() {
+            return Err("harness routing requires at least one fallback model".to_string());
+        }
+
+        let mut fallback_routes = HashSet::new();
+        for fallback in &routing.fallbacks {
+            validate_bootstrap_model_route(fallback, "fallback harness model")?;
+            if !selected_routes.contains(fallback) {
+                return Err(
+                    "fallback harness model must match a selected provider/model pair".to_string(),
+                );
+            }
+            if !fallback_routes.insert(fallback) {
+                return Err("harness routing fallback models must be unique".to_string());
+            }
+        }
+    }
+    for agent in &setup.agents {
+        validate_bootstrap_discord_agent_id(&agent.id)?;
     }
 
     Ok(())
+}
+
+fn validate_bootstrap_model_route(route: &BootstrapModelRoute, label: &str) -> BootstrapResult<()> {
+    validate_nonempty_text(&route.provider_id, &format!("{label} provider id"))?;
+    validate_nonempty_text(&route.model, &format!("{label} name"))
 }
 
 fn validate_nonempty_text(value: &str, label: &str) -> BootstrapResult<()> {
@@ -2197,6 +3945,13 @@ fn validate_github_token(token: &str) -> BootstrapResult<String> {
     Ok(token.to_string())
 }
 
+fn validate_gitlab_token(token: &str) -> BootstrapResult<String> {
+    if token.chars().any(char::is_control) {
+        return Err("GitLab token must not contain control characters or newlines".to_string());
+    }
+    Ok(token.to_string())
+}
+
 fn validate_github_owner(owner: &str) -> BootstrapResult<String> {
     let valid = owner.len() <= 100
         && owner
@@ -2211,6 +3966,424 @@ fn validate_github_owner(owner: &str) -> BootstrapResult<String> {
         );
     }
     Ok(owner.to_string())
+}
+
+fn github_cli_oauth_blocking(window: &Window) -> BootstrapResult<GitHubCliOAuthResult> {
+    if find_tool_binary("gh").is_none() {
+        return Err(
+            "GitHub OAuth requires the GitHub CLI (`gh`). Install it or use the PAT fallback."
+                .to_string(),
+        );
+    }
+
+    let gh_config = TemporaryGithubCliConfigDir::new()?;
+    run_gh_browser_auth(
+        window,
+        &[
+            "auth",
+            "login",
+            "--hostname",
+            "github.com",
+            "--web",
+            "--git-protocol",
+            "https",
+            "--scopes",
+            "repo,workflow,admin:org",
+            "--insecure-storage",
+        ],
+        gh_config.path(),
+    )?;
+
+    let token_output = run_gh_with_config(
+        gh_config.path(),
+        &["auth", "token", "--hostname", "github.com"],
+    )?;
+    if !token_output.status.success() {
+        return Err(command_failure_message("gh auth token", &token_output));
+    }
+    let token = validate_github_token(String::from_utf8_lossy(&token_output.stdout).trim())?;
+    tracing::info!("GitHub CLI authorization returned a token (token value not logged)");
+
+    let username_output = run_gh_with_config(gh_config.path(), &["api", "user", "--jq", ".login"])?;
+    let username = if username_output.status.success() {
+        Some(
+            String::from_utf8_lossy(&username_output.stdout)
+                .trim()
+                .to_string(),
+        )
+        .filter(|value| !value.is_empty())
+    } else {
+        tracing::warn!("GitHub CLI token was retrieved, but username lookup failed");
+        None
+    };
+    tracing::info!(
+        username = username.as_deref().unwrap_or("unknown"),
+        "GitHub CLI OAuth flow completed successfully"
+    );
+    let accounts = github_cli_oauth_accounts(gh_config.path(), username.as_deref());
+
+    Ok(GitHubCliOAuthResult {
+        token,
+        username,
+        accounts,
+    })
+}
+
+fn github_cli_oauth_accounts(config_dir: &Path, username: Option<&str>) -> Vec<GitHubCliAccount> {
+    let mut accounts = Vec::new();
+    if let Some(username) = username {
+        accounts.push(GitHubCliAccount {
+            login: username.to_string(),
+            kind: GitHubCliAccountKind::User,
+        });
+    }
+
+    let org_output = run_gh_with_config(
+        config_dir,
+        &[
+            "api",
+            "user/memberships/orgs",
+            "--paginate",
+            "--jq",
+            ".[] | select(.state == \"active\") | .organization.login",
+        ],
+    );
+    match org_output {
+        Ok(output) if output.status.success() => {
+            for line in String::from_utf8_lossy(&output.stdout).lines() {
+                let login = line.trim();
+                if login.is_empty()
+                    || accounts
+                        .iter()
+                        .any(|account| account.login.eq_ignore_ascii_case(login))
+                {
+                    continue;
+                }
+                accounts.push(GitHubCliAccount {
+                    login: login.to_string(),
+                    kind: GitHubCliAccountKind::Organization,
+                });
+            }
+        }
+        Ok(_) | Err(_) => {
+            tracing::warn!("GitHub CLI OAuth completed, but organization membership lookup failed");
+        }
+    }
+    accounts
+}
+
+struct TemporaryGithubCliConfigDir {
+    path: PathBuf,
+}
+
+impl TemporaryGithubCliConfigDir {
+    fn new() -> BootstrapResult<Self> {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|error| format!("system clock error: {error}"))?
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("cto-gh-auth-{}-{nanos}", std::process::id()));
+        std::fs::create_dir_all(&path).map_err(|error| {
+            format!("failed to create temporary GitHub auth directory: {error}")
+        })?;
+        Ok(Self { path })
+    }
+
+    fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl Drop for TemporaryGithubCliConfigDir {
+    fn drop(&mut self) {
+        if let Err(error) = std::fs::remove_dir_all(&self.path) {
+            tracing::warn!(
+                path = %self.path.display(),
+                "Failed to remove temporary GitHub auth directory: {error}"
+            );
+        }
+    }
+}
+
+fn gh_command_with_config(config_dir: &Path) -> Command {
+    let mut command = tool_command("gh");
+    command
+        .env("GH_CONFIG_DIR", config_dir)
+        .env_remove("GH_TOKEN")
+        .env_remove("GITHUB_TOKEN")
+        .env_remove("GITHUB_ENTERPRISE_TOKEN");
+    command
+}
+
+fn run_gh_with_config(config_dir: &Path, args: &[&str]) -> BootstrapResult<Output> {
+    let mut command = gh_command_with_config(config_dir);
+    command.args(args);
+    run_command(command, &format!("gh {}", args.join(" ")))
+}
+
+fn run_gh_browser_auth(window: &Window, args: &[&str], config_dir: &Path) -> BootstrapResult<()> {
+    let mut command = gh_command_with_config(config_dir);
+    command
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let label = format!("gh {}", args.join(" "));
+    let mut child = command
+        .spawn()
+        .map_err(|error| format!("Failed to run {label}: {error}"))?;
+
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| format!("Failed to open {label} stdout"))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| format!("Failed to open {label} stderr"))?;
+    let (line_tx, line_rx) = mpsc::channel::<String>();
+    spawn_output_line_reader(stdout, line_tx.clone());
+    spawn_output_line_reader(stderr, line_tx.clone());
+    drop(line_tx);
+
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin
+            .write_all(b"\n")
+            .map_err(|error| format!("Failed to start {label} browser flow: {error}"))?;
+    }
+
+    let mut prompt = GitHubCliOAuthPrompt {
+        message: "Opening GitHub authorization in your browser with a temporary GitHub CLI profile. Morgan will show the device code here if GitHub CLI provides one.".to_string(),
+        verification_uri: None,
+        user_code: None,
+        copied_to_clipboard: false,
+        clipboard_error: None,
+    };
+    emit_github_cli_oauth_prompt(window, &prompt);
+
+    let mut output_lines = Vec::new();
+    let deadline = Instant::now() + Duration::from_secs(120);
+    loop {
+        while let Ok(line) = line_rx.try_recv() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            merge_github_cli_oauth_prompt(&mut prompt, trimmed);
+            emit_github_cli_oauth_prompt(window, &prompt);
+            output_lines.push(trimmed.to_string());
+        }
+
+        match child
+            .try_wait()
+            .map_err(|error| format!("Failed to poll {label}: {error}"))?
+        {
+            Some(status) if status.success() => return Ok(()),
+            Some(status) => {
+                return Err(format!(
+                    "{label} failed with exit code {}: {}",
+                    status
+                        .code()
+                        .map_or_else(|| "unknown".to_string(), |code| code.to_string()),
+                    output_lines.join("\n")
+                ));
+            }
+            None if Instant::now() >= deadline => {
+                let _ = child.kill();
+                return Err(format!(
+                    "GitHub OAuth did not complete within 2 minutes. Close any stale browser prompt, switch to the right profile, and try again. {}",
+                    output_lines.join("\n")
+                ));
+            }
+            None => thread::sleep(Duration::from_millis(250)),
+        }
+    }
+}
+
+fn spawn_output_line_reader<R>(reader: R, line_tx: mpsc::Sender<String>)
+where
+    R: Read + Send + 'static,
+{
+    thread::spawn(move || {
+        for line in BufReader::new(reader).lines().map_while(Result::ok) {
+            let _ = line_tx.send(line);
+        }
+    });
+}
+
+fn merge_github_cli_oauth_prompt(prompt: &mut GitHubCliOAuthPrompt, line: &str) {
+    if let Some(uri) = extract_github_verification_uri(line) {
+        prompt.verification_uri = Some(uri);
+    }
+    if let Some(code) = extract_github_user_code(line) {
+        if prompt.user_code.as_deref() != Some(code.as_str()) {
+            match copy_text_to_clipboard(&code) {
+                Ok(()) => {
+                    prompt.copied_to_clipboard = true;
+                    prompt.clipboard_error = None;
+                }
+                Err(error) => {
+                    prompt.copied_to_clipboard = false;
+                    prompt.clipboard_error = Some(error);
+                }
+            }
+        }
+        prompt.user_code = Some(code);
+    }
+    if line.contains("copy your one-time code")
+        || line.contains("one-time code")
+        || line.contains("device code")
+        || line.contains("login/device")
+    {
+        prompt.message =
+            "Morgan found the GitHub authorization code and copied it to your clipboard. Paste it into the browser window to continue."
+                .to_string();
+    }
+}
+
+fn copy_text_to_clipboard(text: &str) -> BootstrapResult<()> {
+    #[cfg(target_os = "macos")]
+    {
+        let pbcopy_result = write_to_clipboard_command("pbcopy", &[], text)
+            .and_then(|()| verify_macos_clipboard(text));
+        if pbcopy_result.is_ok() {
+            return Ok(());
+        }
+
+        write_to_macos_clipboard_with_osascript(text).and_then(|()| {
+            verify_macos_clipboard(text).map_err(|fallback_error| {
+                format!(
+                    "{}; AppleScript fallback also failed: {fallback_error}",
+                    pbcopy_result
+                        .err()
+                        .unwrap_or_else(|| "pbcopy verification failed".to_string())
+                )
+            })
+        })
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        return write_to_clipboard_command(
+            "powershell",
+            &["-NoProfile", "-Command", "Set-Clipboard"],
+            text,
+        );
+    }
+
+    #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
+    {
+        if find_tool_binary("wl-copy").is_some() {
+            return write_to_clipboard_command("wl-copy", &[], text);
+        }
+        if find_tool_binary("xclip").is_some() {
+            return write_to_clipboard_command("xclip", &["-selection", "clipboard"], text);
+        }
+        Err(
+            "No clipboard helper found. Install wl-copy or xclip, or copy the code manually."
+                .to_string(),
+        )
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn verify_macos_clipboard(expected: &str) -> BootstrapResult<()> {
+    let output = run_tool("pbpaste", &[])?;
+    if !output.status.success() {
+        return Err(command_failure_message("pbpaste", &output));
+    }
+    let actual = String::from_utf8_lossy(&output.stdout);
+    if actual == expected {
+        Ok(())
+    } else {
+        Err("clipboard verification did not match copied GitHub code".to_string())
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn write_to_macos_clipboard_with_osascript(text: &str) -> BootstrapResult<()> {
+    let script = format!(
+        "set the clipboard to \"{}\"",
+        text.replace('\\', "\\\\").replace('"', "\\\"")
+    );
+    let output = Command::new("osascript")
+        .args(["-e", &script])
+        .output()
+        .map_err(|error| format!("Failed to copy GitHub code with osascript: {error}"))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(command_failure_message("osascript clipboard", &output))
+    }
+}
+
+fn write_to_clipboard_command(name: &str, args: &[&str], text: &str) -> BootstrapResult<()> {
+    let mut command = tool_command(name);
+    command
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let label = if args.is_empty() {
+        name.to_string()
+    } else {
+        format!("{} {}", name, args.join(" "))
+    };
+    let mut child = command
+        .spawn()
+        .map_err(|error| format!("Failed to copy GitHub code with {label}: {error}"))?;
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin
+            .write_all(text.as_bytes())
+            .map_err(|error| format!("Failed to write GitHub code to {label}: {error}"))?;
+    }
+    let output = child
+        .wait_with_output()
+        .map_err(|error| format!("Failed to wait for {label}: {error}"))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(command_failure_message(&label, &output))
+    }
+}
+
+fn emit_github_cli_oauth_prompt(window: &Window, prompt: &GitHubCliOAuthPrompt) {
+    let _ = window.emit("github-cli-oauth-prompt", prompt);
+}
+
+fn extract_github_verification_uri(line: &str) -> Option<String> {
+    line.split_whitespace()
+        .map(|part| {
+            part.trim_matches(|ch: char| {
+                ch == '"'
+                    || ch == '\''
+                    || ch == '`'
+                    || ch == '<'
+                    || ch == '>'
+                    || ch == ','
+                    || ch == '.'
+            })
+        })
+        .find(|part| part.starts_with("https://github.com/login/device"))
+        .map(ToString::to_string)
+}
+
+fn extract_github_user_code(line: &str) -> Option<String> {
+    line.split_whitespace()
+        .map(|part| {
+            part.trim_matches(|ch: char| {
+                ch == '"' || ch == '\'' || ch == '`' || ch == ':' || ch == ',' || ch == '.'
+            })
+        })
+        .find(|part| {
+            let len = part.len();
+            (8..=20).contains(&len)
+                && part.contains('-')
+                && part
+                    .chars()
+                    .all(|ch| ch.is_ascii_uppercase() || ch.is_ascii_digit() || ch == '-')
+        })
+        .map(ToString::to_string)
 }
 
 fn current_tool_statuses() -> Vec<ToolStatus> {
@@ -2742,6 +4915,99 @@ fn kind_cluster_exists() -> BootstrapResult<bool> {
     Ok(stdout.lines().any(|line| line.trim() == CLUSTER_NAME))
 }
 
+fn delete_bootstrap_kind_cluster() -> BootstrapResult<bool> {
+    if find_tool_binary("kind").is_none() {
+        tracing::info!("kind is unavailable; skipping local CTO cluster deletion during reset");
+        return Ok(false);
+    }
+
+    if !kind_cluster_exists()? {
+        return Ok(false);
+    }
+
+    let mut list_apps_command = kubectl_command();
+    list_apps_command.args([
+        "-n",
+        ARGOCD_NAMESPACE,
+        "get",
+        "applications.argoproj.io",
+        "-o",
+        "name",
+        "--ignore-not-found",
+    ]);
+    match run_command(list_apps_command, "kubectl list Argo CD Applications") {
+        Ok(output) if output.status.success() => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            for application in stdout
+                .lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty())
+            {
+                let mut patch_command = kubectl_command();
+                patch_command.args([
+                    "-n",
+                    ARGOCD_NAMESPACE,
+                    "patch",
+                    application,
+                    "--type",
+                    "merge",
+                    "--patch",
+                    r#"{"metadata":{"finalizers":[]}}"#,
+                ]);
+                match run_command(
+                    patch_command,
+                    "kubectl patch Argo CD Application finalizers",
+                ) {
+                    Ok(output) if output.status.success() => {}
+                    Ok(output) => tracing::warn!(
+                        "{}",
+                        command_failure_message(
+                            "kubectl patch Argo CD Application finalizers",
+                            &output
+                        )
+                    ),
+                    Err(error) => {
+                        tracing::warn!("Failed to patch Argo CD Application finalizers: {error}");
+                    }
+                }
+            }
+        }
+        Ok(output) => tracing::warn!(
+            "{}",
+            command_failure_message("kubectl list Argo CD Applications", &output)
+        ),
+        Err(error) => tracing::warn!("Failed to list Argo CD Applications before reset: {error}"),
+    }
+
+    let mut delete_apps_command = kubectl_command();
+    delete_apps_command.args([
+        "-n",
+        ARGOCD_NAMESPACE,
+        "delete",
+        "applications.argoproj.io",
+        "--all",
+        "--ignore-not-found",
+        "--wait=false",
+    ]);
+    match run_command(delete_apps_command, "kubectl delete Argo CD Applications") {
+        Ok(output) if output.status.success() => {}
+        Ok(output) => tracing::warn!(
+            "{}",
+            command_failure_message("kubectl delete Argo CD Applications", &output)
+        ),
+        Err(error) => tracing::warn!("Failed to delete Argo CD Applications before reset: {error}"),
+    }
+
+    let mut command = kind_command();
+    command.args(["delete", "cluster", "--name", CLUSTER_NAME]);
+    let output = run_command(command, "kind delete cluster")?;
+    if !output.status.success() {
+        return Err(command_failure_message("kind delete cluster", &output));
+    }
+
+    Ok(true)
+}
+
 async fn apply_remote_manifest_server_side(url: &str) -> BootstrapResult<()> {
     apply_manifest_with_args(
         &download_manifest(url).await?,
@@ -2782,6 +5048,203 @@ fn apply_bootstrap_apps(mode: BootstrapAppMode) -> BootstrapResult<()> {
     Ok(())
 }
 
+fn apply_client_cluster_baseline_apps() -> BootstrapResult<()> {
+    for app in CLIENT_CLUSTER_BASELINE_APPS {
+        tracing::info!(
+            "Applying {} Client Cluster baseline Argo Application",
+            app.name
+        );
+        apply_manifest(app.manifest).map_err(|error| {
+            format!(
+                "Failed to apply {} Client Cluster baseline Argo Application: {error}",
+                app.name
+            )
+        })?;
+    }
+
+    Ok(())
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct ArgoApplicationStatusSummary {
+    sync: Option<String>,
+    health: Option<String>,
+    conditions: Vec<String>,
+}
+
+fn wait_for_bootstrap_apps(mode: BootstrapAppMode, timeout: Duration) -> BootstrapResult<()> {
+    for app in mode.manifests() {
+        wait_for_argocd_application(app.name, timeout)?;
+    }
+
+    Ok(())
+}
+
+fn wait_for_client_cluster_baseline_apps(timeout: Duration) -> BootstrapResult<()> {
+    for app in CLIENT_CLUSTER_BASELINE_APPS {
+        wait_for_argocd_application(app.name, timeout)?;
+    }
+
+    Ok(())
+}
+
+fn wait_for_argocd_application(name: &str, timeout: Duration) -> BootstrapResult<()> {
+    let deadline = Instant::now() + timeout;
+
+    loop {
+        let value = kubectl_json(&[
+            "-n",
+            ARGOCD_NAMESPACE,
+            "get",
+            "application",
+            name,
+            "-o",
+            "json",
+        ])
+        .map_err(|error| format!("Failed to read Argo Application {name}: {error}"))?;
+        let summary = argo_application_status_summary(&value);
+
+        if summary.sync.as_deref() == Some("Synced") && summary.health.as_deref() == Some("Healthy")
+        {
+            tracing::info!("{name} Argo Application is Synced and Healthy");
+            return Ok(());
+        }
+
+        if let Some(message) = terminal_argo_application_error(name, &summary) {
+            return Err(message);
+        }
+
+        if Instant::now() >= deadline {
+            let status = format_argo_application_status(&summary);
+            log_argocd_application_diagnostics(name);
+            return Err(format!(
+                "Timed out waiting for Argo Application {name} to become Synced/Healthy: {status}"
+            ));
+        }
+
+        thread::sleep(Duration::from_secs(5));
+    }
+}
+
+fn argo_application_status_summary(value: &Value) -> ArgoApplicationStatusSummary {
+    let sync = value
+        .pointer("/status/sync/status")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let health = value
+        .pointer("/status/health/status")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let conditions = value
+        .pointer("/status/conditions")
+        .and_then(Value::as_array)
+        .map(|conditions| {
+            conditions
+                .iter()
+                .filter_map(|condition| {
+                    let condition_type = condition.get("type").and_then(Value::as_str)?;
+                    let message = condition
+                        .get("message")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default();
+                    if message.is_empty() {
+                        Some(condition_type.to_string())
+                    } else {
+                        Some(format!("{condition_type}: {message}"))
+                    }
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    ArgoApplicationStatusSummary {
+        sync,
+        health,
+        conditions,
+    }
+}
+
+fn terminal_argo_application_error(
+    name: &str,
+    summary: &ArgoApplicationStatusSummary,
+) -> Option<String> {
+    let condition = summary.conditions.iter().find(|condition| {
+        condition.starts_with("ComparisonError:")
+            || condition.starts_with("SyncError:")
+            || condition.starts_with("InvalidSpecError:")
+    })?;
+    log_argocd_application_diagnostics(name);
+    Some(format!(
+        "Argo Application {name} failed to reconcile: {condition}"
+    ))
+}
+
+fn format_argo_application_status(summary: &ArgoApplicationStatusSummary) -> String {
+    let sync = summary.sync.as_deref().unwrap_or("unknown");
+    let health = summary.health.as_deref().unwrap_or("unknown");
+    if summary.conditions.is_empty() {
+        format!("sync={sync}, health={health}")
+    } else {
+        format!(
+            "sync={sync}, health={health}, conditions={}",
+            summary.conditions.join(" | ")
+        )
+    }
+}
+
+fn log_argocd_application_diagnostics(name: &str) {
+    append_bootstrap_log(&format!(
+        "collecting diagnostics for Argo Application `{name}`"
+    ));
+    log_kubectl_diagnostic(&[
+        "-n",
+        ARGOCD_NAMESPACE,
+        "get",
+        "application",
+        name,
+        "-o",
+        "json",
+    ]);
+    log_kubectl_diagnostic(&[
+        "-n",
+        ARGOCD_NAMESPACE,
+        "get",
+        "applications.argoproj.io",
+        "-o",
+        "wide",
+    ]);
+    log_kubectl_diagnostic(&["-n", ARGOCD_NAMESPACE, "get", "pods", "-o", "wide"]);
+    log_kubectl_diagnostic(&["-n", CTO_NAMESPACE, "get", "pods", "-o", "wide"]);
+    log_kubectl_diagnostic(&[
+        "-n",
+        CTO_NAMESPACE,
+        "get",
+        "events",
+        "--sort-by=.lastTimestamp",
+    ]);
+}
+
+fn log_kubectl_diagnostic(args: &[&str]) {
+    let label = format!("kubectl {}", args.join(" "));
+    match run_kubectl(args) {
+        Ok(output) => {
+            append_command_stream(&label, "stdout", &output.stdout);
+            append_command_stream(&label, "stderr", &output.stderr);
+        }
+        Err(error) => append_bootstrap_log(&format!("diagnostic `{label}` failed: {error}")),
+    }
+}
+
+fn apply_bootstrap_scm_secret(manifest: Option<&str>) -> BootstrapResult<()> {
+    let Some(manifest) = manifest else {
+        return Ok(());
+    };
+
+    tracing::info!("Applying GitHub App source-control Secret to {CTO_NAMESPACE}");
+    apply_manifest(manifest)
+        .map_err(|error| format!("Failed to apply GitHub App source-control Secret: {error}"))
+}
+
 fn apply_bootstrap_agent_keys(agent_keys: &[BootstrapAgentKey]) -> BootstrapResult<()> {
     if agent_keys.is_empty() {
         tracing::warn!(
@@ -2790,13 +5253,120 @@ fn apply_bootstrap_agent_keys(agent_keys: &[BootstrapAgentKey]) -> BootstrapResu
         return Ok(());
     }
 
+    let github_token_present = agent_keys
+        .iter()
+        .any(|key| key.name == GITHUB_TOKEN_SECRET_KEY);
+    let gitlab_token_present = agent_keys
+        .iter()
+        .any(|key| key.name == GITLAB_TOKEN_SECRET_KEY);
     tracing::info!(
-        "Applying {} local API key(s) to {}",
-        agent_keys.len(),
-        CTO_AGENT_KEYS_SECRET
+        secret = CTO_AGENT_KEYS_SECRET,
+        namespace = CTO_NAMESPACE,
+        key_count = agent_keys.len(),
+        github_token_present,
+        gitlab_token_present,
+        "Applying local API key Secret (secret values not logged)"
     );
     apply_manifest(&agent_keys_secret_manifest(agent_keys)?)
-        .map_err(|error| format!("Failed to apply local API key Secret: {error}"))
+        .map_err(|error| format!("Failed to apply local API key Secret: {error}"))?;
+    if github_token_present {
+        tracing::info!(
+            secret = CTO_AGENT_KEYS_SECRET,
+            namespace = CTO_NAMESPACE,
+            key = GITHUB_TOKEN_SECRET_KEY,
+            "GitHub token key stored for local agents (token value not logged)"
+        );
+    } else {
+        tracing::warn!(
+            secret = CTO_AGENT_KEYS_SECRET,
+            namespace = CTO_NAMESPACE,
+            "Local API key Secret applied without a GitHub token"
+        );
+    }
+    if gitlab_token_present {
+        tracing::info!(
+            secret = CTO_AGENT_KEYS_SECRET,
+            namespace = CTO_NAMESPACE,
+            key = GITLAB_TOKEN_SECRET_KEY,
+            "GitLab token key stored for local agents (token value not logged)"
+        );
+    }
+    Ok(())
+}
+
+fn apply_bootstrap_argocd_oci_repository(
+    credentials: Option<&BootstrapGithubCredentials>,
+) -> BootstrapResult<()> {
+    let Some(token) = credentials.and_then(|credentials| credentials.token.as_deref()) else {
+        tracing::warn!(
+            "No GitHub token configured for bootstrap; Argo CD will attempt anonymous GHCR OCI chart pulls"
+        );
+        return Ok(());
+    };
+    let username = credentials
+        .and_then(|credentials| credentials.owner.as_deref())
+        .unwrap_or("x-access-token");
+
+    tracing::info!(
+        secret = "ghcr-helm-charts-repository",
+        namespace = ARGOCD_NAMESPACE,
+        username,
+        "Applying Argo CD GHCR OCI repository credentials (token value not logged)"
+    );
+    apply_manifest(&argocd_oci_repository_secret_manifest(username, token)?)
+        .map_err(|error| format!("Failed to apply Argo CD GHCR repository credentials: {error}"))?;
+    tracing::info!(
+        secret = "ghcr-helm-charts-repository",
+        namespace = ARGOCD_NAMESPACE,
+        "Argo CD GHCR OCI repository credentials applied successfully"
+    );
+    Ok(())
+}
+
+fn apply_bootstrap_ghcr_pull_secret(
+    credentials: Option<&BootstrapGithubCredentials>,
+) -> BootstrapResult<()> {
+    let Some(token) = credentials.and_then(|credentials| credentials.token.as_deref()) else {
+        tracing::warn!(
+            "No GitHub token configured for bootstrap; Kubernetes will attempt anonymous GHCR image pulls"
+        );
+        return Ok(());
+    };
+    let username = credentials
+        .and_then(|credentials| credentials.owner.as_deref())
+        .unwrap_or("x-access-token");
+
+    tracing::info!(
+        secret = GHCR_PULL_SECRET,
+        namespace = CTO_NAMESPACE,
+        username,
+        "Applying GHCR image pull Secret (token value not logged)"
+    );
+    apply_manifest(&ghcr_pull_secret_manifest(username, token)?)
+        .map_err(|error| format!("Failed to apply GHCR image pull Secret: {error}"))?;
+    tracing::info!(
+        secret = GHCR_PULL_SECRET,
+        namespace = CTO_NAMESPACE,
+        "GHCR image pull Secret applied successfully"
+    );
+    Ok(())
+}
+
+fn apply_bootstrap_discord_tokens(discord_tokens: &[BootstrapAgentKey]) -> BootstrapResult<()> {
+    if discord_tokens.is_empty() {
+        tracing::warn!(
+            "No Discord bot tokens configured for bootstrap; OpenClaw Discord agents will stay disabled until tokens are added"
+        );
+        return Ok(());
+    }
+
+    tracing::info!(
+        "Applying {} Discord bot token(s) to {}",
+        discord_tokens.len(),
+        OPENCLAW_DISCORD_TOKENS_SECRET
+    );
+    apply_manifest(&discord_tokens_secret_manifest(discord_tokens)?)
+        .map_err(|error| format!("Failed to apply Discord bot token Secret: {error}"))
 }
 
 fn patch_bootstrap_cto_agent_keys(agent_keys: &[BootstrapAgentKey]) -> BootstrapResult<()> {
@@ -2811,7 +5381,7 @@ fn patch_bootstrap_cto_agent_keys(agent_keys: &[BootstrapAgentKey]) -> Bootstrap
         ARGOCD_NAMESPACE,
         "patch",
         "application",
-        "cto",
+        CTO_ARGO_APP_NAME,
         "--type",
         "merge",
         "-p",
@@ -2838,6 +5408,98 @@ fn cto_agent_keys_values_patch(agent_keys: &[BootstrapAgentKey]) -> String {
         }
     })
     .to_string()
+}
+
+fn patch_bootstrap_cto_config(config: Option<&BootstrapCtoConfig>) -> BootstrapResult<()> {
+    let Some(config) = config else {
+        return Ok(());
+    };
+
+    tracing::info!("Configuring CTO chart CTO-config.json from setup selections");
+    let patch = cto_config_values_patch(config);
+    run_kubectl(&[
+        "-n",
+        ARGOCD_NAMESPACE,
+        "patch",
+        "application",
+        CTO_ARGO_APP_NAME,
+        "--type",
+        "merge",
+        "-p",
+        &patch,
+    ])
+    .map(|_| ())
+    .map_err(|error| format!("Failed to configure CTO setup config: {error}"))
+}
+
+fn cto_config_values_patch(config: &BootstrapCtoConfig) -> String {
+    json!({
+        "spec": {
+            "source": {
+                "helm": {
+                    "valuesObject": {
+                        "ctoConfig": config
+                    }
+                }
+            }
+        }
+    })
+    .to_string()
+}
+
+fn patch_bootstrap_morgan_cto_config(
+    mode: BootstrapAppMode,
+    config: Option<&BootstrapCtoConfig>,
+) -> BootstrapResult<()> {
+    if mode.skips_layered_apps() {
+        return Ok(());
+    }
+    let Some(config) = config else {
+        return Ok(());
+    };
+
+    tracing::info!("Configuring Morgan workspace CTO config from setup selections");
+    let patch = morgan_cto_config_values_patch(config)?;
+    run_kubectl(&[
+        "-n",
+        ARGOCD_NAMESPACE,
+        "patch",
+        "application",
+        MORGAN_ARGO_APP_NAME,
+        "--type",
+        "merge",
+        "-p",
+        &patch,
+    ])
+    .map(|_| ())
+    .map_err(|error| format!("Failed to configure Morgan CTO setup config: {error}"))
+}
+
+fn morgan_cto_config_values_patch(config: &BootstrapCtoConfig) -> BootstrapResult<String> {
+    let config_json = serde_json::to_string_pretty(config)
+        .map_err(|error| format!("failed to serialize Morgan CTO config: {error}"))?;
+    Ok(json!({
+        "spec": {
+            "source": {
+                "helm": {
+                    "valuesObject": {
+                        "extraEnv": [
+                            {
+                                "name": "CTO_CONFIG_PATH",
+                                "value": MORGAN_CTO_CONFIG_PATH
+                            }
+                        ],
+                        "workspace": {
+                            "files": {
+                                "cto-config.json": config_json
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    })
+    .to_string())
 }
 
 fn patch_bootstrap_github_owner(
@@ -2871,7 +5533,7 @@ fn patch_bootstrap_github_owner(
         ARGOCD_NAMESPACE,
         "patch",
         "application",
-        "morgan",
+        MORGAN_ARGO_APP_NAME,
         "--type",
         "merge",
         "-p",
@@ -2881,9 +5543,439 @@ fn patch_bootstrap_github_owner(
     .map_err(|error| format!("Failed to configure Morgan GitHub owner: {error}"))
 }
 
+async fn ensure_bootstrap_gitops_repository(
+    credentials: Option<&BootstrapGithubCredentials>,
+    github_request: Option<&BootstrapGithubRequest>,
+    setup: Option<&BootstrapSetupProfile>,
+) -> BootstrapResult<()> {
+    let required = gitops_repository_initialization_required(credentials, github_request, setup);
+    let Some(token) = credentials.and_then(|credentials| credentials.token.as_deref()) else {
+        if required {
+            return Err(
+                "GitOps repository initialization requires a GitHub token because a GitHub source/bootstrap was selected"
+                    .to_string(),
+            );
+        }
+        tracing::warn!("No GitHub token configured; skipping GitOps repository initialization");
+        return Ok(());
+    };
+    let Some(owner) = gitops_repository_owner(credentials, setup) else {
+        if required {
+            return Err(format!(
+                "GitOps repository initialization requires a GitHub owner/org for {CTO_GITOPS_REPO_NAME} because a GitHub source/bootstrap was selected"
+            ));
+        }
+        tracing::warn!("No GitHub owner/org configured; skipping GitOps repository initialization");
+        return Ok(());
+    };
+
+    let files = collect_gitops_repository_files()?;
+    let target_repo_url = gitops_repository_html_url(&owner);
+    tracing::info!(
+        owner = %owner,
+        repository = CTO_GITOPS_REPO_NAME,
+        target_repository_url = %target_repo_url,
+        file_count = files.len(),
+        "Resolved GitOps repository bootstrap target (token value not logged)"
+    );
+    if files.is_empty() {
+        if required {
+            return Err(format!(
+                "No GitOps files found to initialize {target_repo_url}; refusing to continue with selected GitHub source/bootstrap"
+            ));
+        }
+        tracing::warn!(
+            "No GitOps files found to commit; skipping GitOps repository initialization"
+        );
+        return Ok(());
+    }
+
+    let client = Client::new();
+    let login = github_api_get::<GitHubUserResponse>(&client, token, "https://api.github.com/user")
+        .await?
+        .login;
+    tracing::info!(
+        github_login = %login,
+        owner = %owner,
+        repository = CTO_GITOPS_REPO_NAME,
+        target_repository_url = %target_repo_url,
+        file_count = files.len(),
+        "Preparing GitOps repository (token value not logged)"
+    );
+
+    let repo_url = ensure_github_repository(&client, token, &login, &owner).await?;
+    commit_gitops_files(&client, token, &owner, &files).await?;
+    tracing::info!(
+        repository_url = %repo_url,
+        owner = %owner,
+        repository = CTO_GITOPS_REPO_NAME,
+        file_count = files.len(),
+        "GitOps repository initialized"
+    );
+    Ok(())
+}
+
+fn gitops_repository_initialization_required(
+    credentials: Option<&BootstrapGithubCredentials>,
+    github_request: Option<&BootstrapGithubRequest>,
+    setup: Option<&BootstrapSetupProfile>,
+) -> bool {
+    setup.is_some_and(|setup| setup.source.provider == BootstrapSourceProvider::GitHub)
+        || credentials.is_some()
+        || github_request.is_some_and(|github| github.enabled != Some(false))
+}
+
+fn gitops_repository_owner(
+    credentials: Option<&BootstrapGithubCredentials>,
+    setup: Option<&BootstrapSetupProfile>,
+) -> Option<String> {
+    setup
+        .and_then(|setup| {
+            (setup.source.provider == BootstrapSourceProvider::GitHub)
+                .then(|| setup.source.owner.trim().to_string())
+        })
+        .filter(|owner| !owner.is_empty())
+        .or_else(|| {
+            credentials
+                .and_then(|credentials| credentials.owner.as_deref())
+                .map(str::trim)
+                .filter(|owner| !owner.is_empty())
+                .map(ToOwned::to_owned)
+        })
+}
+
+async fn ensure_github_repository(
+    client: &Client,
+    token: &str,
+    login: &str,
+    owner: &str,
+) -> BootstrapResult<String> {
+    let repo_api_url = github_repo_api_url(owner);
+    match github_api_get::<GitHubRepoResponse>(client, token, &repo_api_url).await {
+        Ok(repo) => return Ok(repo.html_url),
+        Err(error) if error.contains("404") => {}
+        Err(error) => return Err(error),
+    }
+
+    let create_url = if owner.eq_ignore_ascii_case(login) {
+        "https://api.github.com/user/repos".to_string()
+    } else {
+        format!("https://api.github.com/orgs/{owner}/repos")
+    };
+    let body = json!({
+        "name": CTO_GITOPS_REPO_NAME,
+        "description": "CTO Desktop local GitOps bootstrap repository",
+        "private": true,
+        "auto_init": false
+    });
+    let repo = github_api_send::<GitHubRepoResponse>(
+        client.post(&create_url).json(&body),
+        token,
+        &format!("create GitHub repository {owner}/{CTO_GITOPS_REPO_NAME}"),
+    )
+    .await?;
+    Ok(repo.html_url)
+}
+
+async fn commit_gitops_files(
+    client: &Client,
+    token: &str,
+    owner: &str,
+    files: &[GitOpsFile],
+) -> BootstrapResult<()> {
+    let repo_api_url = github_repo_api_url(owner);
+    let get_ref_url = format!("{repo_api_url}/git/ref/heads/main");
+    let update_ref_url = format!("{repo_api_url}/git/refs/heads/main");
+    let mut files_to_commit = files;
+    let current_ref = match github_api_get::<GitHubRefResponse>(client, token, &get_ref_url).await {
+        Ok(reference) => reference,
+        Err(error) if error.contains("404") || error.contains("409") => {
+            let Some((first_file, remaining_files)) = files.split_first() else {
+                return Ok(());
+            };
+            create_initial_gitops_file(client, token, owner, first_file).await?;
+            files_to_commit = remaining_files;
+            if files_to_commit.is_empty() {
+                return Ok(());
+            }
+            github_api_get::<GitHubRefResponse>(client, token, &get_ref_url).await?
+        }
+        Err(error) => return Err(error),
+    };
+
+    let commit = github_api_get::<GitHubCommitResponse>(
+        client,
+        token,
+        &format!("{repo_api_url}/git/commits/{}", current_ref.object.sha),
+    )
+    .await?;
+    let base_commit_sha = commit.sha;
+    let base_tree_sha = commit.tree.sha;
+
+    let mut tree_entries = Vec::with_capacity(files_to_commit.len());
+    for file in files_to_commit {
+        let blob = github_api_send::<GitHubBlobResponse>(
+            client
+                .post(format!("{repo_api_url}/git/blobs"))
+                .json(&json!({
+                    "content": file.content,
+                    "encoding": "utf-8"
+                })),
+            token,
+            &format!("create GitHub blob {}", file.path),
+        )
+        .await?;
+        tree_entries.push(json!({
+            "path": file.path,
+            "mode": "100644",
+            "type": "blob",
+            "sha": blob.sha
+        }));
+    }
+
+    let tree_body = json!({
+        "base_tree": base_tree_sha,
+        "tree": tree_entries
+    });
+    let tree = github_api_send::<GitHubTreeResponse>(
+        client
+            .post(format!("{repo_api_url}/git/trees"))
+            .json(&tree_body),
+        token,
+        "create GitHub GitOps tree",
+    )
+    .await?;
+
+    let mut commit_body = json!({
+        "message": "Initialize CTO GitOps",
+        "tree": tree.sha
+    });
+    commit_body["parents"] = json!([base_commit_sha]);
+    let commit = github_api_send::<GitHubCommitResponse>(
+        client
+            .post(format!("{repo_api_url}/git/commits"))
+            .json(&commit_body),
+        token,
+        "create GitHub GitOps commit",
+    )
+    .await?;
+
+    github_api_send::<Value>(
+        client.patch(&update_ref_url).json(&json!({
+            "sha": commit.sha,
+            "force": false
+        })),
+        token,
+        "update GitHub GitOps main branch",
+    )
+    .await?;
+
+    Ok(())
+}
+
+async fn create_initial_gitops_file(
+    client: &Client,
+    token: &str,
+    owner: &str,
+    file: &GitOpsFile,
+) -> BootstrapResult<()> {
+    let repo_api_url = github_repo_api_url(owner);
+    github_api_send::<Value>(
+        client
+            .put(format!("{repo_api_url}/contents/{}", file.path))
+            .json(&json!({
+                "message": "Initialize CTO GitOps",
+                "content": base64_encode(file.content.as_bytes()),
+                "branch": "main"
+            })),
+        token,
+        &format!("create initial GitHub GitOps file {}", file.path),
+    )
+    .await
+    .map(|_| ())
+}
+
+fn github_repo_api_url(owner: &str) -> String {
+    format!("https://api.github.com/repos/{owner}/{CTO_GITOPS_REPO_NAME}")
+}
+
+fn gitops_repository_html_url(owner: &str) -> String {
+    format!("https://github.com/{owner}/{CTO_GITOPS_REPO_NAME}")
+}
+
+async fn github_api_get<T: for<'de> Deserialize<'de>>(
+    client: &Client,
+    token: &str,
+    url: &str,
+) -> BootstrapResult<T> {
+    github_api_send(client.get(url), token, &format!("GET {url}")).await
+}
+
+async fn github_api_send<T: for<'de> Deserialize<'de>>(
+    request: reqwest::RequestBuilder,
+    token: &str,
+    action: &str,
+) -> BootstrapResult<T> {
+    let response = request
+        .bearer_auth(token)
+        .header("Accept", "application/vnd.github+json")
+        .header("X-GitHub-Api-Version", "2022-11-28")
+        .header("User-Agent", "cto-desktop")
+        .send()
+        .await
+        .map_err(|error| format!("{action} failed: {error}"))?;
+    let status = response.status();
+    let text = response
+        .text()
+        .await
+        .map_err(|error| format!("{action} failed to read response: {error}"))?;
+    if !status.is_success() {
+        return Err(format!("{action} failed with status {status}: {text}"));
+    }
+    serde_json::from_str(&text).map_err(|error| format!("{action} returned invalid JSON: {error}"))
+}
+
+fn collect_gitops_repository_files() -> BootstrapResult<Vec<GitOpsFile>> {
+    let repo_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .ok_or_else(|| "failed to resolve repository root".to_string())?;
+    let template_dir = repo_root.join(".gitops").join("template");
+    if template_dir.is_dir() {
+        return collect_gitops_repository_files_from_template_root(&template_dir);
+    }
+
+    Ok(embedded_gitops_template_files())
+}
+
+fn collect_gitops_repository_files_from_template_root(
+    template_root: &Path,
+) -> BootstrapResult<Vec<GitOpsFile>> {
+    let mut files = Vec::new();
+    collect_gitops_files_from_dir(template_root, template_root, &mut files)?;
+    files.sort_by(|left, right| left.path.cmp(&right.path));
+    Ok(files)
+}
+
+fn embedded_gitops_template_files() -> Vec<GitOpsFile> {
+    let mut files = GITOPS_TEMPLATE_FILES
+        .iter()
+        .map(|(path, content)| GitOpsFile {
+            path: (*path).to_string(),
+            content: (*content).to_string(),
+        })
+        .collect::<Vec<_>>();
+    files.sort_by(|left, right| left.path.cmp(&right.path));
+    files
+}
+
+fn collect_gitops_files_from_dir(
+    root: &Path,
+    current: &Path,
+    files: &mut Vec<GitOpsFile>,
+) -> BootstrapResult<()> {
+    for entry in fs::read_dir(current)
+        .map_err(|error| format!("failed to read {}: {error}", current.display()))?
+    {
+        let entry = entry
+            .map_err(|error| format!("failed to read {} entry: {error}", current.display()))?;
+        let path = entry.path();
+        if path.is_dir() {
+            collect_gitops_files_from_dir(root, &path, files)?;
+            continue;
+        }
+        if !path.is_file() {
+            continue;
+        }
+        let relative = path
+            .strip_prefix(root)
+            .map_err(|error| format!("failed to relativize {}: {error}", path.display()))?;
+        let relative = relative.to_string_lossy().replace('\\', "/");
+        let content = fs::read_to_string(&path)
+            .map_err(|error| format!("failed to read GitOps file {}: {error}", path.display()))?;
+        files.push(GitOpsFile {
+            path: relative,
+            content,
+        });
+    }
+    Ok(())
+}
+
 fn agent_keys_secret_manifest(agent_keys: &[BootstrapAgentKey]) -> BootstrapResult<String> {
+    secret_manifest(CTO_AGENT_KEYS_SECRET, agent_keys)
+}
+
+fn argocd_oci_repository_secret_manifest(username: &str, token: &str) -> BootstrapResult<String> {
+    validate_bootstrap_secret_value(username, "Argo CD GHCR username")?;
+    validate_bootstrap_secret_value(token, "Argo CD GHCR token")?;
+    let quoted_username = serde_json::to_string(username)
+        .map_err(|error| format!("Failed to render Argo CD GHCR username: {error}"))?;
+    let quoted_token = serde_json::to_string(token)
+        .map_err(|error| format!("Failed to render Argo CD GHCR token: {error}"))?;
+
+    Ok(format!(
+        r#"apiVersion: v1
+kind: Secret
+metadata:
+  name: ghcr-helm-charts-repository
+  namespace: {ARGOCD_NAMESPACE}
+  labels:
+    argocd.argoproj.io/secret-type: repository
+    app.kubernetes.io/name: cto
+    app.kubernetes.io/part-of: platform
+    app.kubernetes.io/managed-by: cto-desktop
+type: Opaque
+stringData:
+  type: helm
+  name: ghcr-helm-charts
+  url: {GHCR_REGISTRY}/5dlabs/helm-charts
+  enableOCI: "true"
+  username: {quoted_username}
+  password: {quoted_token}
+"#
+    ))
+}
+
+fn ghcr_pull_secret_manifest(username: &str, token: &str) -> BootstrapResult<String> {
+    validate_bootstrap_secret_value(username, "GHCR username")?;
+    validate_bootstrap_secret_value(token, "GHCR token")?;
+    let auth = base64_encode(format!("{username}:{token}").as_bytes());
+    let mut auths = serde_json::Map::new();
+    auths.insert(
+        GHCR_REGISTRY.to_string(),
+        json!({
+            "username": username,
+            "password": token,
+            "auth": auth,
+        }),
+    );
+    let docker_config = serde_json::to_string(&json!({ "auths": auths }))
+        .map_err(|error| format!("Failed to render GHCR pull Secret: {error}"))?;
+
+    Ok(format!(
+        r"apiVersion: v1
+kind: Secret
+metadata:
+  name: {GHCR_PULL_SECRET}
+  namespace: {CTO_NAMESPACE}
+  labels:
+    app.kubernetes.io/name: cto
+    app.kubernetes.io/part-of: platform
+    app.kubernetes.io/managed-by: cto-desktop
+type: kubernetes.io/dockerconfigjson
+stringData:
+  .dockerconfigjson: |-
+    {docker_config}
+"
+    ))
+}
+
+fn discord_tokens_secret_manifest(discord_tokens: &[BootstrapAgentKey]) -> BootstrapResult<String> {
+    secret_manifest(OPENCLAW_DISCORD_TOKENS_SECRET, discord_tokens)
+}
+
+fn secret_manifest(name: &str, keys: &[BootstrapAgentKey]) -> BootstrapResult<String> {
     let mut secret_entries = String::new();
-    for key in agent_keys {
+    for key in keys {
         let quoted_value = serde_json::to_string(&key.value)
             .map_err(|error| format!("Failed to render {} Secret value: {error}", key.name))?;
         writeln!(secret_entries, "  {}: {quoted_value}", key.name)
@@ -2894,7 +5986,7 @@ fn agent_keys_secret_manifest(agent_keys: &[BootstrapAgentKey]) -> BootstrapResu
         r"apiVersion: v1
 kind: Secret
 metadata:
-  name: {CTO_AGENT_KEYS_SECRET}
+  name: {name}
   namespace: {CTO_NAMESPACE}
   labels:
     app.kubernetes.io/name: cto
@@ -2905,6 +5997,30 @@ stringData:
 {secret_entries}
 "
     ))
+}
+
+fn base64_encode(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut encoded = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let first = chunk[0];
+        let second = *chunk.get(1).unwrap_or(&0);
+        let third = *chunk.get(2).unwrap_or(&0);
+
+        encoded.push(ALPHABET[(first >> 2) as usize] as char);
+        encoded.push(ALPHABET[(((first & 0b0000_0011) << 4) | (second >> 4)) as usize] as char);
+        if chunk.len() > 1 {
+            encoded.push(ALPHABET[(((second & 0b0000_1111) << 2) | (third >> 6)) as usize] as char);
+        } else {
+            encoded.push('=');
+        }
+        if chunk.len() > 2 {
+            encoded.push(ALPHABET[(third & 0b0011_1111) as usize] as char);
+        } else {
+            encoded.push('=');
+        }
+    }
+    encoded
 }
 
 async fn install_metrics_server_for_kind() -> BootstrapResult<()> {
@@ -3041,6 +6157,8 @@ fn metrics_arg_matches(arg: &str, flag: &str) -> bool {
 fn apply_manifest_with_args(manifest: &str, args: &[&str]) -> BootstrapResult<()> {
     let mut command = kubectl_command();
     command.args(args);
+    let label = format!("kubectl {}", args.join(" "));
+    append_bootstrap_log(&format!("starting `{label}` from stdin manifest"));
 
     let mut child = command
         .stdin(Stdio::piped())
@@ -3059,6 +6177,7 @@ fn apply_manifest_with_args(manifest: &str, args: &[&str]) -> BootstrapResult<()
     let output = child
         .wait_with_output()
         .map_err(|error| format!("Failed to wait for kubectl apply: {error}"))?;
+    log_command_output(&label, &output);
 
     if output.status.success() {
         Ok(())
@@ -3151,10 +6270,23 @@ fn run_kubectl(args: &[&str]) -> BootstrapResult<Output> {
     run_command(command, &format!("kubectl {}", args.join(" ")))
 }
 
+fn kubectl_json(args: &[&str]) -> BootstrapResult<Value> {
+    let output = run_kubectl(args)?;
+    let label = format!("kubectl {}", args.join(" "));
+    if !output.status.success() {
+        return Err(command_failure_message(&label, &output));
+    }
+    serde_json::from_slice::<Value>(&output.stdout)
+        .map_err(|error| format!("Failed to parse {label} JSON: {error}"))
+}
+
 fn run_command(mut command: Command, label: &str) -> BootstrapResult<Output> {
-    command
+    append_bootstrap_log(&format!("starting `{label}`"));
+    let output = command
         .output()
-        .map_err(|error| format!("Failed to run {label}: {error}"))
+        .map_err(|error| format!("Failed to run {label}: {error}"))?;
+    log_command_output(label, &output);
+    Ok(output)
 }
 
 fn kubectl_command() -> Command {
@@ -3234,6 +6366,7 @@ fn install_argocd() -> BootstrapResult<()> {
     let output = child
         .wait_with_output()
         .map_err(|error| format!("helm upgrade wait failed: {error}"))?;
+    log_command_output("helm upgrade --install argocd", &output);
 
     if !output.status.success() {
         return Err(format!(
@@ -3246,9 +6379,11 @@ fn install_argocd() -> BootstrapResult<()> {
 }
 
 fn run_expecting_success(mut command: Command, action: &str) -> BootstrapResult<()> {
+    append_bootstrap_log(&format!("starting `{action}`"));
     let output = command
         .output()
         .map_err(|error| format!("{action} failed to run: {error}"))?;
+    log_command_output(action, &output);
 
     if !output.status.success() {
         return Err(format!(
@@ -3410,19 +6545,34 @@ fn ensure_runtime_tool_paths_on_process() {
 mod tests {
     use super::{
         agent_keys_secret_manifest, aggregate_resource_metrics, apply_summary_usage,
-        cto_agent_keys_values_patch, metrics_server_kind_patch,
-        normalize_bootstrap_github_credentials, normalize_bootstrap_tool_api_keys,
+        argo_application_status_summary, argocd_oci_repository_secret_manifest, base64_encode,
+        bootstrap_secret_reference, build_bootstrap_cto_config, collect_gitops_repository_files,
+        collect_gitops_repository_files_from_template_root, cto_agent_keys_values_patch,
+        cto_config_values_patch, embedded_gitops_template_files,
+        ensure_bootstrap_gitops_repository, extract_github_user_code,
+        extract_github_verification_uri, format_argo_application_status, ghcr_pull_secret_manifest,
+        gitops_repository_initialization_required, gitops_repository_owner,
+        metrics_server_kind_patch, morgan_cto_config_values_patch,
+        normalize_bootstrap_github_credentials, normalize_bootstrap_provider_credentials,
+        normalize_bootstrap_scm_secret_manifest, normalize_bootstrap_tool_api_keys,
         parse_cpu_quantity_to_milli, parse_kind_node_container_states, parse_kubelet_summary_usage,
         parse_kubernetes_nodes, parse_kubernetes_pods, parse_memory_quantity_to_bytes,
-        parse_runtime_stats_lines, validate_bootstrap_setup, BootstrapAgentKey, BootstrapAiCli,
-        BootstrapAppMode, BootstrapGithubRequest, BootstrapHarnessMode, BootstrapLocalStackRequest,
-        BootstrapProviderAuth, BootstrapProviderSelection, BootstrapSetupHarness,
-        BootstrapSetupProfile, BootstrapSetupSource, BootstrapSourceProvider,
-        BootstrapToolApiKeyRequest, BootstrapToolsRequest, KindNodeContainerState,
-        BOOTSTRAP_TEST_MODE_ENV, GITHUB_TOKEN_SECRET_KEY, METRICS_SERVER_KUBELET_INSECURE_TLS_ARG,
+        parse_runtime_stats_lines, prepare_origin_transfer_inner, terminal_argo_application_error,
+        validate_bootstrap_setup, BootstrapAgentKey, BootstrapAiCli, BootstrapAppMode,
+        BootstrapGithubCredentials, BootstrapGithubRequest, BootstrapHarnessMode,
+        BootstrapHarnessRouting, BootstrapLocalStackRequest, BootstrapModelRoute,
+        BootstrapProviderAuth, BootstrapProviderCredentialConfig,
+        BootstrapProviderCredentialRequest, BootstrapProviderSelection, BootstrapProvidersRequest,
+        BootstrapScmRequest, BootstrapSetupAgent, BootstrapSetupHarness, BootstrapSetupProfile,
+        BootstrapSetupSource, BootstrapSourceCredentials, BootstrapSourceProvider,
+        BootstrapToolApiKeyRequest, BootstrapToolsRequest, KindNodeContainerState, OriginEngine,
+        OriginTransferMode, OriginTransferRequest, BOOTSTRAP_TEST_MODE_ENV, CTO_GITOPS_REPO_NAME,
+        GITHUB_TOKEN_SECRET_KEY, GITLAB_TOKEN_SECRET_KEY, METRICS_SERVER_KUBELET_INSECURE_TLS_ARG,
         METRICS_SERVER_KUBELET_PREFERRED_ADDRESS_TYPES_ARG,
     };
     use serde_json::json;
+    use std::collections::BTreeMap;
+    use std::path::Path;
 
     #[test]
     fn bootstrap_test_mode_defaults_to_full_for_empty_or_false_values() {
@@ -3466,6 +6616,98 @@ mod tests {
             .map(|app| app.name)
             .collect();
         assert_eq!(controller_only_names, ["cto"]);
+    }
+
+    #[test]
+    fn extracts_github_device_uri_from_cli_output() {
+        assert_eq!(
+            extract_github_verification_uri("Open this URL: https://github.com/login/device."),
+            Some("https://github.com/login/device".to_string())
+        );
+    }
+
+    #[test]
+    fn extracts_github_device_code_from_cli_output() {
+        assert_eq!(
+            extract_github_user_code("First copy your one-time code: 1234-ABCD"),
+            Some("1234-ABCD".to_string())
+        );
+    }
+
+    #[test]
+    fn extracts_github_device_prompt_from_real_cli_stderr_shape() {
+        let stderr = "\n! First copy your one-time code: ABCD-1234\nOpen this URL to continue in your web browser: https://github.com/login/device\n";
+        let mut code = None;
+        let mut uri = None;
+
+        for line in stderr.lines() {
+            code = code.or_else(|| extract_github_user_code(line));
+            uri = uri.or_else(|| extract_github_verification_uri(line));
+        }
+
+        assert_eq!(code, Some("ABCD-1234".to_string()));
+        assert_eq!(uri, Some("https://github.com/login/device".to_string()));
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn copies_github_code_to_macos_clipboard_when_enabled() {
+        if std::env::var("CTO_TEST_CLIPBOARD").ok().as_deref() != Some("1") {
+            return;
+        }
+
+        let previous = super::run_tool("pbpaste", &[])
+            .ok()
+            .and_then(|output| String::from_utf8(output.stdout).ok())
+            .unwrap_or_default();
+        let sentinel = format!("CTO-CLIP-{}", std::process::id());
+        let copy_result = super::copy_text_to_clipboard(&sentinel);
+        let read_result = super::run_tool("pbpaste", &[])
+            .map(|output| String::from_utf8_lossy(&output.stdout).to_string());
+        let _ = super::copy_text_to_clipboard(&previous);
+
+        copy_result.expect("copy_text_to_clipboard should succeed");
+        assert_eq!(read_result.expect("pbpaste should succeed"), sentinel);
+    }
+
+    #[test]
+    fn argo_application_status_summary_surfaces_comparison_errors() {
+        let app = json!({
+            "status": {
+                "sync": { "status": "Unknown" },
+                "health": { "status": "Healthy" },
+                "conditions": [{
+                    "type": "ComparisonError",
+                    "message": "failed to generate manifest: chart not found"
+                }]
+            }
+        });
+
+        let summary = argo_application_status_summary(&app);
+
+        assert_eq!(summary.sync.as_deref(), Some("Unknown"));
+        assert_eq!(summary.health.as_deref(), Some("Healthy"));
+        assert_eq!(
+            terminal_argo_application_error("cto", &summary).as_deref(),
+            Some(
+                "Argo Application cto failed to reconcile: ComparisonError: failed to generate manifest: chart not found"
+            )
+        );
+    }
+
+    #[test]
+    fn argo_application_status_summary_formats_pending_state() {
+        let summary = argo_application_status_summary(&json!({
+            "status": {
+                "sync": { "status": "OutOfSync" },
+                "health": { "status": "Progressing" }
+            }
+        }));
+
+        assert_eq!(
+            format_argo_application_status(&summary),
+            "sync=OutOfSync, health=Progressing"
+        );
     }
 
     #[test]
@@ -3806,7 +7048,10 @@ not-json
                     token: Some("  github_pat_example  ".to_string()),
                     owner: Some("acme-dev".to_string()),
                 }),
+                scm: None,
                 tools: None,
+                providers: None,
+                agents: None,
                 setup: None,
             }))
             .expect("credentials")
@@ -3825,7 +7070,10 @@ not-json
                     token: Some("github_pat_example".to_string()),
                     owner: Some("acme-dev".to_string()),
                 }),
+                scm: None,
                 tools: None,
+                providers: None,
+                agents: None,
                 setup: None,
             }))
             .expect("credentials");
@@ -3841,7 +7089,10 @@ not-json
                 token: Some("github_pat_example\nextra".to_string()),
                 owner: Some("acme-dev".to_string()),
             }),
+            scm: None,
             tools: None,
+            providers: None,
+            agents: None,
             setup: None,
         }))
         .expect_err("multiline token rejected");
@@ -3849,10 +7100,260 @@ not-json
         assert!(error.contains("GitHub PAT"));
     }
 
+    fn gitops_test_setup(provider: BootstrapSourceProvider, owner: &str) -> BootstrapSetupProfile {
+        BootstrapSetupProfile {
+            source: BootstrapSetupSource {
+                provider,
+                base_url: match provider {
+                    BootstrapSourceProvider::GitHub => "https://github.com".to_string(),
+                    BootstrapSourceProvider::GitLab => "https://gitlab.com".to_string(),
+                },
+                owner: owner.to_string(),
+                connection_id: owner.to_lowercase().replace('/', "-"),
+            },
+            harness: BootstrapSetupHarness {
+                mode: BootstrapHarnessMode::OpenClaw,
+                clis: vec![BootstrapAiCli::OpenClaw],
+                providers: vec![BootstrapProviderSelection {
+                    id: "anthropic".to_string(),
+                    auth: BootstrapProviderAuth::ApiKey,
+                    cli_ids: vec![BootstrapAiCli::OpenClaw],
+                    model: "claude-sonnet-4".to_string(),
+                    models: vec!["claude-sonnet-4".to_string()],
+                }],
+                routing: None,
+            },
+            agents: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn requires_gitops_repository_for_github_source_or_bootstrap() {
+        let github_setup = gitops_test_setup(BootstrapSourceProvider::GitHub, "5DLabsInc");
+        let gitlab_setup = gitops_test_setup(BootstrapSourceProvider::GitLab, "platform/team");
+        let github_request = BootstrapGithubRequest {
+            enabled: Some(true),
+            token: None,
+            owner: None,
+        };
+        let disabled_github_request = BootstrapGithubRequest {
+            enabled: Some(false),
+            token: None,
+            owner: None,
+        };
+        let credentials = BootstrapGithubCredentials {
+            token: Some("github_pat_example".to_string()),
+            owner: None,
+        };
+
+        assert!(gitops_repository_initialization_required(
+            None,
+            None,
+            Some(&github_setup)
+        ));
+        assert!(gitops_repository_initialization_required(
+            None,
+            Some(&github_request),
+            Some(&gitlab_setup)
+        ));
+        assert!(gitops_repository_initialization_required(
+            Some(&credentials),
+            Some(&disabled_github_request),
+            Some(&gitlab_setup)
+        ));
+        assert!(!gitops_repository_initialization_required(
+            None,
+            Some(&disabled_github_request),
+            Some(&gitlab_setup)
+        ));
+        assert!(!gitops_repository_initialization_required(None, None, None));
+    }
+
+    #[tokio::test]
+    async fn github_source_missing_token_fails_gitops_repository_initialization() {
+        let setup = gitops_test_setup(BootstrapSourceProvider::GitHub, "5DLabsInc");
+        let error = ensure_bootstrap_gitops_repository(None, None, Some(&setup))
+            .await
+            .expect_err("missing GitHub token should fail");
+
+        assert!(error.contains("GitHub token"));
+        assert!(!error.contains("github_pat"));
+    }
+
+    #[tokio::test]
+    async fn github_source_missing_owner_fails_gitops_repository_initialization() {
+        let setup = gitops_test_setup(BootstrapSourceProvider::GitHub, "");
+        let credentials = BootstrapGithubCredentials {
+            token: Some("github_pat_example".to_string()),
+            owner: None,
+        };
+        let error = ensure_bootstrap_gitops_repository(Some(&credentials), None, Some(&setup))
+            .await
+            .expect_err("missing GitHub owner should fail");
+
+        assert!(error.contains("GitHub owner/org"));
+        assert!(error.contains(CTO_GITOPS_REPO_NAME));
+        assert!(!error.contains("github_pat_example"));
+    }
+
+    #[tokio::test]
+    async fn non_github_without_credentials_skips_gitops_repository_initialization() {
+        let setup = gitops_test_setup(BootstrapSourceProvider::GitLab, "platform/team");
+
+        ensure_bootstrap_gitops_repository(None, None, Some(&setup))
+            .await
+            .expect("non-GitHub source without credentials remains optional");
+    }
+
+    #[test]
+    fn gitops_repository_owner_prefers_setup_source_owner() {
+        let setup = BootstrapSetupProfile {
+            source: BootstrapSetupSource {
+                provider: BootstrapSourceProvider::GitHub,
+                base_url: "https://github.com".to_string(),
+                owner: "5DLabsInc".to_string(),
+                connection_id: "5dlabsinc".to_string(),
+            },
+            harness: BootstrapSetupHarness {
+                mode: BootstrapHarnessMode::OpenClaw,
+                clis: vec![BootstrapAiCli::OpenClaw],
+                providers: vec![BootstrapProviderSelection {
+                    id: "anthropic".to_string(),
+                    auth: BootstrapProviderAuth::ApiKey,
+                    cli_ids: vec![BootstrapAiCli::OpenClaw],
+                    model: "claude-sonnet-4".to_string(),
+                    models: vec!["claude-sonnet-4".to_string()],
+                }],
+                routing: None,
+            },
+            agents: Vec::new(),
+        };
+        let credentials = BootstrapGithubCredentials {
+            token: Some("github_pat_example".to_string()),
+            owner: Some("simon5dlabs".to_string()),
+        };
+
+        assert_eq!(
+            gitops_repository_owner(Some(&credentials), Some(&setup)).as_deref(),
+            Some("5DLabsInc")
+        );
+    }
+
+    #[test]
+    fn collect_gitops_repository_files_includes_template() {
+        let files = collect_gitops_repository_files().expect("gitops files");
+        let paths = files
+            .iter()
+            .map(|file| file.path.as_str())
+            .collect::<Vec<_>>();
+
+        assert!(paths.contains(&".cto/template.json"));
+        assert!(paths.contains(&".github/workflows/cto-update.yml"));
+        assert!(paths.contains(&".gitops/apps/README.md"));
+        assert!(paths.contains(&".gitops/apps/cto.yaml"));
+        assert!(paths.contains(&".gitops/apps/qdrant.yaml"));
+        assert!(paths.contains(&".gitops/apps/morgan.yaml"));
+        assert!(paths.contains(&".gitops/apps/voice-bridge.yaml"));
+        assert!(paths.contains(&".gitops/apps/observability.yaml"));
+        assert!(paths.contains(&".gitops/overrides/.gitkeep"));
+        assert!(paths.contains(&".gitops/values/.gitkeep"));
+        assert!(
+            paths.iter().all(|path| !path.contains(".gitops/template")),
+            "GitOps repository seed paths should be relative to the template root: {paths:?}"
+        );
+    }
+
+    #[test]
+    fn embedded_gitops_repository_template_matches_source_checkout() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("repository root");
+        let source_files = collect_gitops_repository_files_from_template_root(
+            &repo_root.join(".gitops").join("template"),
+        )
+        .expect("source template files");
+        let embedded_files = embedded_gitops_template_files();
+        let source_files = source_files
+            .iter()
+            .map(|file| (file.path.as_str(), file.content.as_str()))
+            .collect::<BTreeMap<_, _>>();
+        let embedded_files = embedded_files
+            .iter()
+            .map(|file| (file.path.as_str(), file.content.as_str()))
+            .collect::<BTreeMap<_, _>>();
+
+        assert!(embedded_files.contains_key(".cto/template.json"));
+        assert!(embedded_files.contains_key(".github/workflows/cto-update.yml"));
+        assert!(embedded_files.contains_key(".gitops/apps/cto.yaml"));
+        assert!(embedded_files.contains_key(".gitops/apps/qdrant.yaml"));
+        assert!(embedded_files.contains_key(".gitops/apps/morgan.yaml"));
+        assert!(embedded_files.contains_key(".gitops/apps/voice-bridge.yaml"));
+        assert_eq!(source_files, embedded_files);
+    }
+
+    #[test]
+    fn normalizes_bootstrap_scm_secret_manifest() {
+        let manifest = r"
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cto-scm-github-acme-dev
+  namespace: cto
+  labels:
+    cto.5dlabs.ai/scm-provider: github
+type: Opaque
+stringData:
+  app-id: |-
+    12345
+  client-id: |-
+    Iv1.example
+  client-secret: |-
+    secret
+  private-key: |-
+    pem
+";
+        let normalized =
+            normalize_bootstrap_scm_secret_manifest(Some(&BootstrapLocalStackRequest {
+                github: None,
+                scm: Some(BootstrapScmRequest {
+                    github_app_secret_manifest: Some(manifest.to_string()),
+                }),
+                tools: None,
+                providers: None,
+                agents: None,
+                setup: None,
+            }))
+            .expect("manifest")
+            .expect("scm manifest");
+
+        assert!(normalized.contains("name: cto-scm-github-acme-dev"));
+        assert!(normalized.ends_with('\n'));
+    }
+
+    #[test]
+    fn rejects_non_github_bootstrap_scm_secret_manifest() {
+        let error = normalize_bootstrap_scm_secret_manifest(Some(&BootstrapLocalStackRequest {
+            github: None,
+            scm: Some(BootstrapScmRequest {
+                github_app_secret_manifest: Some(
+                    "apiVersion: v1\nkind: Secret\nmetadata:\n  namespace: cto\n".to_string(),
+                ),
+            }),
+            tools: None,
+            providers: None,
+            agents: None,
+            setup: None,
+        }))
+        .expect_err("invalid manifest rejected");
+
+        assert!(error.contains("cto.5dlabs.ai/scm-provider: github"));
+    }
+
     #[test]
     fn normalizes_bootstrap_tool_api_keys() {
         let keys = normalize_bootstrap_tool_api_keys(Some(&BootstrapLocalStackRequest {
             github: None,
+            scm: None,
             tools: Some(BootstrapToolsRequest {
                 api_keys: vec![
                     BootstrapToolApiKeyRequest {
@@ -3865,6 +7366,8 @@ not-json
                     },
                 ],
             }),
+            providers: None,
+            agents: None,
             setup: None,
         }))
         .expect("tool keys");
@@ -3882,17 +7385,85 @@ not-json
     fn rejects_unknown_bootstrap_tool_api_key() {
         let error = normalize_bootstrap_tool_api_keys(Some(&BootstrapLocalStackRequest {
             github: None,
+            scm: None,
             tools: Some(BootstrapToolsRequest {
                 api_keys: vec![BootstrapToolApiKeyRequest {
                     name: "UNKNOWN_API_KEY".to_string(),
                     value: "secret".to_string(),
                 }],
             }),
+            providers: None,
+            agents: None,
             setup: None,
         }))
         .expect_err("unknown key rejected");
 
         assert!(error.contains("unsupported tool API key"));
+    }
+
+    #[test]
+    fn normalizes_bootstrap_provider_credentials() {
+        let credentials =
+            normalize_bootstrap_provider_credentials(Some(&BootstrapLocalStackRequest {
+                github: None,
+                scm: None,
+                tools: None,
+                providers: Some(BootstrapProvidersRequest {
+                    credentials: vec![
+                        BootstrapProviderCredentialRequest {
+                            provider_id: "openrouter".to_string(),
+                            auth: BootstrapProviderAuth::ApiKey,
+                            secret_key: Some("OPENROUTER_API_KEY".to_string()),
+                            value: Some("  sk-or-example  ".to_string()),
+                            api_key_secret_key: None,
+                            api_key: None,
+                        },
+                        BootstrapProviderCredentialRequest {
+                            provider_id: "litellm".to_string(),
+                            auth: BootstrapProviderAuth::Gateway,
+                            secret_key: None,
+                            value: Some("https://litellm.example.com".to_string()),
+                            api_key_secret_key: Some("LITELLM_API_KEY".to_string()),
+                            api_key: Some("  litellm-secret  ".to_string()),
+                        },
+                    ],
+                }),
+                agents: None,
+                setup: None,
+            }))
+            .expect("provider credentials");
+
+        assert_eq!(
+            credentials.agent_keys,
+            vec![
+                BootstrapAgentKey {
+                    name: "LITELLM_API_KEY".to_string(),
+                    value: "litellm-secret".to_string(),
+                },
+                BootstrapAgentKey {
+                    name: "OPENROUTER_API_KEY".to_string(),
+                    value: "sk-or-example".to_string(),
+                },
+            ]
+        );
+        assert_eq!(
+            credentials.config["openrouter"]
+                .secret_ref
+                .as_ref()
+                .map(|secret| secret.key.as_str()),
+            Some("OPENROUTER_API_KEY")
+        );
+        assert_eq!(
+            credentials.config["litellm"].value.as_deref(),
+            Some("https://litellm.example.com")
+        );
+        assert_eq!(
+            credentials.config["litellm"]
+                .api_key_secret_ref
+                .as_ref()
+                .map(|secret| secret.key.as_str()),
+            Some("LITELLM_API_KEY")
+        );
     }
 
     #[test]
@@ -3910,13 +7481,67 @@ not-json
                 providers: vec![BootstrapProviderSelection {
                     id: "anthropic".to_string(),
                     auth: BootstrapProviderAuth::OAuth,
+                    cli_ids: vec![BootstrapAiCli::ClaudeCode],
                     model: "Sonnet 4.6".to_string(),
                     models: vec!["Sonnet 4.6".to_string(), "Haiku 4.5".to_string()],
                 }],
+                routing: Some(BootstrapHarnessRouting {
+                    primary: BootstrapModelRoute {
+                        provider_id: "anthropic".to_string(),
+                        model: "Sonnet 4.6".to_string(),
+                    },
+                    fallbacks: vec![
+                        BootstrapModelRoute {
+                            provider_id: "anthropic".to_string(),
+                            model: "Sonnet 4.6".to_string(),
+                        },
+                        BootstrapModelRoute {
+                            provider_id: "anthropic".to_string(),
+                            model: "Haiku 4.5".to_string(),
+                        },
+                    ],
+                }),
             },
+            agents: Vec::new(),
         };
 
         validate_bootstrap_setup(&setup).expect("valid setup");
+    }
+
+    #[test]
+    fn validates_bootstrap_setup_without_source_owner() {
+        let setup = BootstrapSetupProfile {
+            source: BootstrapSetupSource {
+                provider: BootstrapSourceProvider::GitHub,
+                base_url: "https://github.com".to_string(),
+                owner: String::new(),
+                connection_id: "github".to_string(),
+            },
+            harness: BootstrapSetupHarness {
+                mode: BootstrapHarnessMode::OpenClaw,
+                clis: vec![BootstrapAiCli::Codex],
+                providers: vec![BootstrapProviderSelection {
+                    id: "openai".to_string(),
+                    auth: BootstrapProviderAuth::OAuth,
+                    cli_ids: vec![BootstrapAiCli::Codex],
+                    model: "GPT-5.4".to_string(),
+                    models: vec!["GPT-5.4".to_string()],
+                }],
+                routing: Some(BootstrapHarnessRouting {
+                    primary: BootstrapModelRoute {
+                        provider_id: "openai".to_string(),
+                        model: "GPT-5.4".to_string(),
+                    },
+                    fallbacks: vec![BootstrapModelRoute {
+                        provider_id: "openai".to_string(),
+                        model: "GPT-5.4".to_string(),
+                    }],
+                }),
+            },
+            agents: Vec::new(),
+        };
+
+        validate_bootstrap_setup(&setup).expect("source owner is optional");
     }
 
     #[test]
@@ -3934,14 +7559,91 @@ not-json
                 providers: vec![BootstrapProviderSelection {
                     id: "openrouter".to_string(),
                     auth: BootstrapProviderAuth::ApiKey,
+                    cli_ids: Vec::new(),
                     model: "Auto".to_string(),
                     models: vec!["Auto".to_string()],
                 }],
+                routing: None,
             },
+            agents: Vec::new(),
         };
 
         let error = validate_bootstrap_setup(&setup).expect_err("missing CLI rejected");
         assert!(error.contains("at least one selected CLI"));
+    }
+
+    #[test]
+    fn rejects_setup_with_unselected_primary_harness_model() {
+        let setup = BootstrapSetupProfile {
+            source: BootstrapSetupSource {
+                provider: BootstrapSourceProvider::GitHub,
+                base_url: "https://github.com".to_string(),
+                owner: "acme-dev".to_string(),
+                connection_id: "acme-dev".to_string(),
+            },
+            harness: BootstrapSetupHarness {
+                mode: BootstrapHarnessMode::OpenClaw,
+                clis: vec![BootstrapAiCli::ClaudeCode],
+                providers: vec![BootstrapProviderSelection {
+                    id: "anthropic".to_string(),
+                    auth: BootstrapProviderAuth::OAuth,
+                    cli_ids: vec![BootstrapAiCli::ClaudeCode],
+                    model: "Sonnet 4.6".to_string(),
+                    models: vec!["Sonnet 4.6".to_string()],
+                }],
+                routing: Some(BootstrapHarnessRouting {
+                    primary: BootstrapModelRoute {
+                        provider_id: "openai".to_string(),
+                        model: "gpt-5.5".to_string(),
+                    },
+                    fallbacks: vec![BootstrapModelRoute {
+                        provider_id: "anthropic".to_string(),
+                        model: "Sonnet 4.6".to_string(),
+                    }],
+                }),
+            },
+            agents: Vec::new(),
+        };
+
+        let error = validate_bootstrap_setup(&setup).expect_err("invalid primary rejected");
+        assert!(error.contains("primary harness model"));
+    }
+
+    #[test]
+    fn rejects_setup_with_unselected_fallback_harness_model() {
+        let setup = BootstrapSetupProfile {
+            source: BootstrapSetupSource {
+                provider: BootstrapSourceProvider::GitHub,
+                base_url: "https://github.com".to_string(),
+                owner: "acme-dev".to_string(),
+                connection_id: "acme-dev".to_string(),
+            },
+            harness: BootstrapSetupHarness {
+                mode: BootstrapHarnessMode::OpenClaw,
+                clis: vec![BootstrapAiCli::ClaudeCode],
+                providers: vec![BootstrapProviderSelection {
+                    id: "anthropic".to_string(),
+                    auth: BootstrapProviderAuth::OAuth,
+                    cli_ids: vec![BootstrapAiCli::ClaudeCode],
+                    model: "Sonnet 4.6".to_string(),
+                    models: vec!["Sonnet 4.6".to_string()],
+                }],
+                routing: Some(BootstrapHarnessRouting {
+                    primary: BootstrapModelRoute {
+                        provider_id: "anthropic".to_string(),
+                        model: "Sonnet 4.6".to_string(),
+                    },
+                    fallbacks: vec![BootstrapModelRoute {
+                        provider_id: "anthropic".to_string(),
+                        model: "Haiku 4.5".to_string(),
+                    }],
+                }),
+            },
+            agents: Vec::new(),
+        };
+
+        let error = validate_bootstrap_setup(&setup).expect_err("invalid fallback rejected");
+        assert!(error.contains("fallback harness model"));
     }
 
     #[test]
@@ -3953,7 +7655,7 @@ not-json
         .expect("manifest");
 
         assert!(manifest.contains("name: cto-agent-keys"));
-        assert!(manifest.contains("namespace: cto-system"));
+        assert!(manifest.contains("namespace: cto"));
         assert!(manifest.contains("GITHUB_TOKEN: \"github_pat_example\""));
     }
 
@@ -3965,6 +7667,10 @@ not-json
                 value: "github_pat_example".to_string(),
             },
             BootstrapAgentKey {
+                name: GITLAB_TOKEN_SECRET_KEY.to_string(),
+                value: "glpat_example".to_string(),
+            },
+            BootstrapAgentKey {
                 name: "FIRECRAWL_API_KEY".to_string(),
                 value: "fc_example".to_string(),
             },
@@ -3972,7 +7678,70 @@ not-json
         .expect("manifest");
 
         assert!(manifest.contains("GITHUB_TOKEN: \"github_pat_example\""));
+        assert!(manifest.contains("GITLAB_TOKEN: \"glpat_example\""));
         assert!(manifest.contains("FIRECRAWL_API_KEY: \"fc_example\""));
+    }
+
+    #[test]
+    fn builds_agent_keys_for_github_and_gitlab_source_tokens() {
+        let source_credentials = BootstrapSourceCredentials {
+            github: Some(BootstrapGithubCredentials {
+                token: Some("github_pat_example".to_string()),
+                owner: Some("5dlabs".to_string()),
+            }),
+            gitlab_token: Some("glpat_example".to_string()),
+        };
+        let keys = super::bootstrap_agent_keys(&source_credentials, &[], &[]).expect("agent keys");
+        let by_name = keys
+            .into_iter()
+            .map(|key| (key.name, key.value))
+            .collect::<BTreeMap<_, _>>();
+
+        assert_eq!(
+            by_name.get(GITHUB_TOKEN_SECRET_KEY).map(String::as_str),
+            Some("github_pat_example")
+        );
+        assert_eq!(
+            by_name.get(GITLAB_TOKEN_SECRET_KEY).map(String::as_str),
+            Some("glpat_example")
+        );
+    }
+
+    #[test]
+    fn renders_argocd_oci_repository_secret_manifest() {
+        let manifest = argocd_oci_repository_secret_manifest("kaseonedge", "github_pat_example")
+            .expect("manifest");
+
+        assert!(manifest.contains("name: ghcr-helm-charts-repository"));
+        assert!(manifest.contains("namespace: argocd"));
+        assert!(manifest.contains("argocd.argoproj.io/secret-type: repository"));
+        assert!(manifest.contains("type: helm"));
+        assert!(manifest.contains("url: ghcr.io/5dlabs/helm-charts"));
+        assert!(manifest.contains("enableOCI: \"true\""));
+        assert!(manifest.contains("username: \"kaseonedge\""));
+        assert!(manifest.contains("password: \"github_pat_example\""));
+    }
+
+    #[test]
+    fn renders_ghcr_pull_secret_manifest() {
+        let manifest =
+            ghcr_pull_secret_manifest("kaseonedge", "github_pat_example").expect("manifest");
+
+        assert!(manifest.contains("name: ghcr-pull-secret"));
+        assert!(manifest.contains("namespace: cto"));
+        assert!(manifest.contains("type: kubernetes.io/dockerconfigjson"));
+        assert!(manifest.contains("\"ghcr.io\""));
+        assert!(manifest.contains("\"username\":\"kaseonedge\""));
+        assert!(manifest.contains("\"password\":\"github_pat_example\""));
+        assert!(manifest.contains("\"auth\":\"a2FzZW9uZWRnZTpnaXRodWJfcGF0X2V4YW1wbGU=\""));
+    }
+
+    #[test]
+    fn encodes_base64_with_padding() {
+        assert_eq!(base64_encode(b""), "");
+        assert_eq!(base64_encode(b"user:token"), "dXNlcjp0b2tlbg==");
+        assert_eq!(base64_encode(b"ab"), "YWI=");
+        assert_eq!(base64_encode(b"abc"), "YWJj");
     }
 
     #[test]
@@ -3992,5 +7761,161 @@ not-json
         let agent_keys = &patch["spec"]["source"]["helm"]["valuesObject"]["agentKeys"];
         assert_eq!(agent_keys["EXA_API_KEY"], "exa_example");
         assert_eq!(agent_keys["TAVILY_API_KEY"], "tvly_example");
+    }
+
+    #[test]
+    fn renders_cto_config_values_patch() {
+        let setup = BootstrapSetupProfile {
+            source: BootstrapSetupSource {
+                provider: BootstrapSourceProvider::GitHub,
+                base_url: "https://github.com".to_string(),
+                owner: "acme-dev".to_string(),
+                connection_id: "acme-dev".to_string(),
+            },
+            harness: BootstrapSetupHarness {
+                mode: BootstrapHarnessMode::OpenClaw,
+                clis: vec![BootstrapAiCli::ClaudeCode, BootstrapAiCli::Codex],
+                providers: vec![BootstrapProviderSelection {
+                    id: "openai".to_string(),
+                    auth: BootstrapProviderAuth::ApiKey,
+                    cli_ids: vec![BootstrapAiCli::Codex],
+                    model: "gpt-5.5".to_string(),
+                    models: vec!["gpt-5.5".to_string(), "gpt-5.4".to_string()],
+                }],
+                routing: Some(BootstrapHarnessRouting {
+                    primary: BootstrapModelRoute {
+                        provider_id: "openai".to_string(),
+                        model: "gpt-5.5".to_string(),
+                    },
+                    fallbacks: vec![BootstrapModelRoute {
+                        provider_id: "openai".to_string(),
+                        model: "gpt-5.4".to_string(),
+                    }],
+                }),
+            },
+            agents: Vec::new(),
+        };
+        let mut credentials = BTreeMap::new();
+        credentials.insert(
+            "openai".to_string(),
+            BootstrapProviderCredentialConfig {
+                value: None,
+                secret_ref: Some(bootstrap_secret_reference("OPENAI_API_KEY".to_string())),
+                api_key_secret_ref: None,
+            },
+        );
+
+        let config = build_bootstrap_cto_config(Some(&setup), &credentials)
+            .expect("config")
+            .expect("config present");
+        let patch = serde_json::from_str::<serde_json::Value>(&cto_config_values_patch(&config))
+            .expect("patch json");
+        let cto_config = &patch["spec"]["source"]["helm"]["valuesObject"]["ctoConfig"];
+
+        assert_eq!(cto_config["harness"]["default"], "openclaw");
+        assert!(cto_config["clis"]["claudeCode"]["providers"]
+            .as_object()
+            .expect("claude providers")
+            .is_empty());
+        assert_eq!(
+            cto_config["clis"]["codex"]["providers"]["openai"]["models"][1],
+            "gpt-5.4"
+        );
+        assert_eq!(
+            cto_config["clis"]["codex"]["providers"]["openai"]["credential"]["secretRef"]["key"],
+            "OPENAI_API_KEY"
+        );
+    }
+
+    #[test]
+    fn renders_morgan_cto_config_workspace_patch() {
+        let setup = BootstrapSetupProfile {
+            source: BootstrapSetupSource {
+                provider: BootstrapSourceProvider::GitHub,
+                base_url: "https://github.com".to_string(),
+                owner: "acme-dev".to_string(),
+                connection_id: "acme-dev".to_string(),
+            },
+            harness: BootstrapSetupHarness {
+                mode: BootstrapHarnessMode::Hermes,
+                clis: vec![BootstrapAiCli::ClaudeCode],
+                providers: vec![BootstrapProviderSelection {
+                    id: "anthropic".to_string(),
+                    auth: BootstrapProviderAuth::OAuth,
+                    cli_ids: vec![BootstrapAiCli::ClaudeCode],
+                    model: "claude-sonnet-4.6".to_string(),
+                    models: vec!["claude-sonnet-4.6".to_string()],
+                }],
+                routing: Some(BootstrapHarnessRouting {
+                    primary: BootstrapModelRoute {
+                        provider_id: "anthropic".to_string(),
+                        model: "claude-sonnet-4.6".to_string(),
+                    },
+                    fallbacks: vec![BootstrapModelRoute {
+                        provider_id: "anthropic".to_string(),
+                        model: "claude-sonnet-4.6".to_string(),
+                    }],
+                }),
+            },
+            agents: vec![BootstrapSetupAgent {
+                id: "morgan".to_string(),
+                enabled: true,
+            }],
+        };
+        let config = build_bootstrap_cto_config(Some(&setup), &BTreeMap::new())
+            .expect("config")
+            .expect("config present");
+        let patch = serde_json::from_str::<serde_json::Value>(
+            &morgan_cto_config_values_patch(&config).expect("patch"),
+        )
+        .expect("patch json");
+
+        let values = &patch["spec"]["source"]["helm"]["valuesObject"];
+        assert_eq!(values["extraEnv"][0]["name"], "CTO_CONFIG_PATH");
+        assert_eq!(values["extraEnv"][0]["value"], "/workspace/cto-config.json");
+
+        let config_file = values["workspace"]["files"]["cto-config.json"]
+            .as_str()
+            .expect("config file");
+        let config_file =
+            serde_json::from_str::<serde_json::Value>(config_file).expect("config json");
+        assert_eq!(config_file["harness"]["default"], "hermes");
+        assert_eq!(
+            config_file["harness"]["routing"]["primary"]["model"],
+            "claude-sonnet-4.6"
+        );
+        assert_eq!(
+            config_file["clis"]["claudeCode"]["providers"]["anthropic"]["defaultModel"],
+            "claude-sonnet-4.6"
+        );
+    }
+
+    #[test]
+    fn origin_transfer_defaults_to_mirror_and_redacts_manifest() {
+        let plan = prepare_origin_transfer_inner(&OriginTransferRequest {
+            engine: OriginEngine::Standard,
+            source_provider: "github".to_string(),
+            source_connection_id: "acme-dev".to_string(),
+            repositories: vec!["acme/repo".to_string()],
+            mode: None,
+        })
+        .expect("origin plan");
+        assert_eq!(plan.mode, OriginTransferMode::Mirror);
+        assert_eq!(plan.app_name, "origin-standard");
+        assert_eq!(plan.redaction, "[REDACTED]");
+        assert!(!plan.manifest_preview.contains("token:"));
+    }
+
+    #[test]
+    fn origin_transfer_rejects_missing_hosted_source() {
+        let err = prepare_origin_transfer_inner(&OriginTransferRequest {
+            engine: OriginEngine::GitlabCompatible,
+            source_provider: "origin".to_string(),
+            source_connection_id: "acme-dev".to_string(),
+            repositories: Vec::new(),
+            mode: Some(OriginTransferMode::Migrate),
+        })
+        .expect_err("hosted source required");
+        assert!(err.contains("GitHub or GitLab"));
     }
 }

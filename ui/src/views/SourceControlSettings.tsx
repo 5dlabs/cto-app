@@ -16,11 +16,13 @@ import { IconExternal, IconGit, IconKey, IconLock } from "./icons";
 const PROVIDER_LABELS: Record<ScmProvider, string> = {
   github: "GitHub",
   gitlab: "GitLab",
+  gitea: "Gitea",
 };
 
 const PROVIDER_DEFAULTS: Record<ScmProvider, { baseUrl: string; ownerLabel: string }> = {
   github: { baseUrl: "https://github.com", ownerLabel: "GitHub user or org" },
   gitlab: { baseUrl: "https://gitlab.com", ownerLabel: "GitLab group/user" },
+  gitea: { baseUrl: "", ownerLabel: "Gitea user or org" },
 };
 
 const STATUS_LABELS: Record<ScmConnection["status"], string> = {

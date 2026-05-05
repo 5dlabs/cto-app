@@ -1,7 +1,7 @@
 [package]
 name = "cto-app"
 version = "0.1.0"
-description = "CTO Desktop"
+description = "CTO"
 authors = ["5dlabs"]
 license = "MIT"
 repository = "https://github.com/5dlabs/cto-app"
@@ -34,6 +34,7 @@ thiserror = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+cpal = "0.15"
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]

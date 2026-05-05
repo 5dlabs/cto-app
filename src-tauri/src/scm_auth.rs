@@ -14,6 +14,9 @@ const CONNECTION_ID_MAX_LEN: usize = 48;
 const LOCAL_CALLBACK_BASE_URL: &str = "http://localhost:8080";
 const DEFAULT_SCM_SECRET_NAMESPACE: &str = "bots";
 const GITHUB_API_VERSION: &str = "2022-11-28";
+const GITLAB_CODERUN_AGENTS: &[&str] = &["rex", "blaze", "pass", "cipher"];
+const GITLAB_CODERUN_REQUIRED_SCOPES: &[&str] =
+    &["api", "read_api", "read_repository", "write_repository"];
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum ScmProvider {
@@ -156,6 +159,34 @@ pub struct GitHubManifestExchangeResult {
     pub local_metadata_error: Option<String>,
 }
 
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitLabCodeRunAuthProbeRequest {
+    pub base_url: Option<String>,
+    pub token: String,
+    #[serde(default)]
+    pub agents: Vec<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitLabCodeRunAuthProbeResult {
+    pub provider: String,
+    pub base_url: String,
+    pub api_endpoint: String,
+    pub ok: bool,
+    pub status: u16,
+    pub username: Option<String>,
+    pub user_id: Option<u64>,
+    pub selected_agents: Vec<String>,
+    pub required_scopes: Vec<String>,
+    pub secret_name: String,
+    pub secret_key: String,
+    pub redacted_token_preview: String,
+    pub redaction: String,
+    pub next_steps: Vec<String>,
+}
+
 #[derive(Debug, Deserialize)]
 struct GitHubManifestConversion {
     id: u64,
@@ -228,6 +259,13 @@ pub async fn exchange_github_manifest_code(
         }
     }
     Ok(result)
+}
+
+#[tauri::command]
+pub async fn probe_gitlab_coderun_auth(
+    request: GitLabCodeRunAuthProbeRequest,
+) -> ScmResult<GitLabCodeRunAuthProbeResult> {
+    probe_gitlab_coderun_auth_http(request).await
 }
 
 #[tauri::command]
@@ -355,7 +393,7 @@ fn github_plan(
             "active": false
         },
         "public": false,
-        "request_oauth_on_install": false,
+        "request_oauth_on_install": true,
         "default_permissions": {
             "actions": "read",
             "checks": "read",
@@ -436,6 +474,7 @@ fn github_steps() -> Vec<String> {
         "Copy the generated manifest JSON and create the GitHub App from \
          the matching user/org setup URL.",
         "Install the private app only on the repositories this CTO tenant should manage.",
+        "Authorize CTO during install so GitHub returns the OAuth/manifest code to the local callback.",
         "After GitHub redirects back with a manifest code, exchange it \
          locally and store only this tenant's app credentials in the \
          generated Kubernetes Secret.",
@@ -446,6 +485,7 @@ fn github_warnings() -> Vec<String> {
     strings(&[
         "No shared 5dlabs GitHub App or PAT is used by this plan.",
         "Provider webhooks are disabled by default for localhost callbacks.",
+        "GitHub must redirect back to the local callback before CTO can create or update the tenant GitOps repository.",
     ])
 }
 
@@ -569,6 +609,105 @@ fn gitlab_warnings(is_gitlab_dot_com: bool) -> Vec<String> {
         );
     }
     warnings
+}
+
+async fn probe_gitlab_coderun_auth_http(
+    request: GitLabCodeRunAuthProbeRequest,
+) -> ScmResult<GitLabCodeRunAuthProbeResult> {
+    let base_url = normalize_url(request.base_url.as_deref().unwrap_or("https://gitlab.com"))?;
+    let token = request.token.trim().to_string();
+    if token.is_empty() {
+        return Err("GitLab token is required for CodeRun auth probe".to_string());
+    }
+    if token.chars().any(char::is_control) {
+        return Err("GitLab token must not contain control characters".to_string());
+    }
+    let selected_agents = normalize_coderun_agents(&request.agents)?;
+    let api_endpoint = format!("{base_url}/api/v4/user");
+    let response = Client::new()
+        .get(&api_endpoint)
+        .bearer_auth(&token)
+        .header("Accept", "application/json")
+        .header("User-Agent", "cto-app")
+        .send()
+        .await
+        .map_err(|error| format!("GitLab CodeRun auth probe failed before response: {error}"))?;
+    let status = response.status();
+    let body = response
+        .bytes()
+        .await
+        .map_err(|error| format!("failed to read GitLab CodeRun auth probe response: {error}"))?;
+    let (username, user_id) = if status.is_success() {
+        let parsed = serde_json::from_slice::<Value>(&body).map_err(|error| {
+            format!("failed to parse GitLab CodeRun auth probe response: {error}")
+        })?;
+        (
+            parsed
+                .get("username")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            parsed.get("id").and_then(Value::as_u64),
+        )
+    } else {
+        (None, None)
+    };
+
+    Ok(GitLabCodeRunAuthProbeResult {
+        provider: "gitlab".to_string(),
+        base_url,
+        api_endpoint,
+        ok: status.is_success(),
+        status: status.as_u16(),
+        username,
+        user_id,
+        selected_agents,
+        required_scopes: GITLAB_CODERUN_REQUIRED_SCOPES
+            .iter()
+            .map(|scope| (*scope).to_string())
+            .collect(),
+        secret_name: "cto-agent-keys".to_string(),
+        secret_key: "GITLAB_TOKEN".to_string(),
+        redacted_token_preview: redactedTokenPreview(&token),
+        redaction: "[REDACTED]".to_string(),
+        next_steps: strings(&[
+            "Store the approved token as GITLAB_TOKEN in the tenant-owned CTO agent Secret.",
+            "Use HTTPS remotes with oauth2:${GITLAB_TOKEN}@gitlab.com for CodeRun clone/push jobs.",
+            "Route Rex, Blaze, Pass, and Cipher jobs through the saved GitLab source connection.",
+        ]),
+    })
+}
+
+fn normalize_coderun_agents(agents: &[String]) -> ScmResult<Vec<String>> {
+    if agents.is_empty() {
+        return Ok(GITLAB_CODERUN_AGENTS
+            .iter()
+            .map(|agent| (*agent).to_string())
+            .collect());
+    }
+    let mut selected = Vec::new();
+    for agent in agents {
+        let normalized = agent.trim().to_ascii_lowercase();
+        if !GITLAB_CODERUN_AGENTS.contains(&normalized.as_str()) {
+            return Err(format!(
+                "unsupported CodeRun agent for GitLab auth: {normalized}"
+            ));
+        }
+        if !selected.contains(&normalized) {
+            selected.push(normalized);
+        }
+    }
+    Ok(selected)
+}
+
+#[allow(non_snake_case)]
+fn redactedTokenPreview(token: &str) -> String {
+    let trimmed = token.trim();
+    if trimmed.is_empty() {
+        return "[REDACTED]".to_string();
+    }
+    let suffix = trimmed.chars().rev().take(4).collect::<String>();
+    let suffix = suffix.chars().rev().collect::<String>();
+    format!("[REDACTED]…{suffix}")
 }
 
 fn strings(values: &[&str]) -> Vec<String> {
@@ -969,6 +1108,7 @@ mod tests {
 
         let manifest = plan.github_manifest.expect("manifest");
         assert_eq!(manifest["public"], false);
+        assert_eq!(manifest["request_oauth_on_install"], true);
         assert_eq!(manifest["hook_attributes"]["active"], false);
         assert_eq!(
             manifest["default_permissions"]["contents"],
@@ -1100,6 +1240,19 @@ mod tests {
         assert_eq!(plan.kubernetes_secret_name, "cto-scm-gitlab-acme-gitlab");
         assert_eq!(plan.kubernetes_secret_keys, vec!["token"]);
         assert!(plan.gitlab_application_api_endpoint.is_none());
+    }
+
+    #[test]
+    fn gitlab_coderun_probe_redacts_token_preview_and_agents() {
+        let agents =
+            normalize_coderun_agents(&["Rex".to_string(), "cipher".to_string(), "rex".to_string()])
+                .expect("agents");
+        assert_eq!(agents, vec!["rex", "cipher"]);
+        assert_eq!(
+            redactedTokenPreview("glpat-super-secret-1234"),
+            "[REDACTED]…1234"
+        );
+        assert!(normalize_coderun_agents(&["unknown".to_string()]).is_err());
     }
 
     #[test]

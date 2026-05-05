@@ -15,6 +15,8 @@ import {
   IconUsers,
   IconPalette,
   IconBracket,
+  IconLink,
+  IconPuzzle,
   IconCpu,
   IconTerminal,
   IconChevLeft,
@@ -28,6 +30,10 @@ import { CostView } from "./views/CostView";
 import { QualityView } from "./views/QualityView";
 import { InfrastructureView } from "./views/InfrastructureView";
 import { IntegrationsView } from "./views/IntegrationsView";
+import { DesignView } from "./views/DesignView";
+import { ExtensionsView } from "./views/ExtensionsView";
+import { SkillsView } from "./views/SkillsView";
+import { ToolsView } from "./views/ToolsView";
 import { SettingsView } from "./views/SettingsView";
 import { NewAgentModal } from "./views/NewAgentModal";
 import { AgentsView } from "./views/AgentsView";
@@ -40,12 +46,16 @@ type NavKey =
   | "gitlab"
   | "projects"
   | "agents"
+  | "skills"
+  | "tools"
   | "tasks"
   | "applications"
   | "memory"
   | "cost"
   | "quality"
   | "infrastructure"
+  | "extensions"
+  | "design"
   | "integrations"
   | "settings";
 
@@ -56,21 +66,36 @@ interface NavItem {
   badge?: string;
 }
 
-const primaryNav: NavItem[] = [
-  { key: "morgan", label: "Morgan", icon: IconSparkles },
+const coreNav: NavItem[] = [{ key: "morgan", label: "Morgan", icon: IconSparkles }];
+
+const workspaceNav: NavItem[] = [
   { key: "gitlab", label: "GitLab", icon: IconGit },
   { key: "projects", label: "Projects", icon: IconFolder },
-  { key: "agents", label: "Agents", icon: IconCpu },
   { key: "tasks", label: "Tasks", icon: IconTerminal },
-  { key: "applications", label: "Applications", icon: IconApps },
-  { key: "memory", label: "Memory", icon: IconDocs },
-  { key: "cost", label: "Cost", icon: IconGraph },
-  { key: "quality", label: "Quality", icon: IconBolt },
+];
+
+const designNav: NavItem[] = [{ key: "design", label: "Design", icon: IconPalette }];
+
+const agentPlatformNav: NavItem[] = [
+  { key: "agents", label: "Agents", icon: IconCpu },
+  { key: "skills", label: "Skills", icon: IconSparkles },
+  { key: "tools", label: "Tools", icon: IconCommand },
 ];
 
 const platformNav: NavItem[] = [
+  { key: "memory", label: "Memory", icon: IconDocs },
   { key: "infrastructure", label: "Infrastructure", icon: IconBracket },
-  { key: "integrations", label: "Integrations", icon: IconPalette },
+];
+
+const applicationsNav: NavItem[] = [{ key: "applications", label: "Applications", icon: IconApps }];
+
+const extensionsNav: NavItem[] = [{ key: "extensions", label: "Extensions", icon: IconPuzzle }];
+
+const integrationsNav: NavItem[] = [{ key: "integrations", label: "Integrations", icon: IconLink }];
+
+const performanceNav: NavItem[] = [
+  { key: "cost", label: "Cost", icon: IconGraph },
+  { key: "quality", label: "Quality", icon: IconBolt },
 ];
 
 const TITLES: Record<NavKey, { title: string; sub: string }> = {
@@ -90,13 +115,25 @@ const TITLES: Record<NavKey, { title: string; sub: string }> = {
     title: "Agents",
     sub: "Roster — harness, CLI, and models per agent · manifests optionally on-chain",
   },
+  skills: {
+    title: "Skills",
+    sub: "Reusable agent capabilities, prompts, and execution patterns",
+  },
+  tools: {
+    title: "Tools",
+    sub: "Connected toolchain, MCP surfaces, and runtime capabilities",
+  },
   tasks: {
     title: "Tasks",
     sub: "Open a task to drop into its code-server session — the task CRD's workspace embed",
   },
   applications: {
     title: "Applications",
-    sub: "Extension packs — Accounting, Marketing, RMS, Voice",
+    sub: "Running workloads, pod health, and runtime telemetry (Lens-style)",
+  },
+  extensions: {
+    title: "Extensions",
+    sub: "Install third-party packs like RMS, Accounting, Legal, and Marketing",
   },
   memory: {
     title: "Memory",
@@ -113,6 +150,10 @@ const TITLES: Record<NavKey, { title: string; sub: string }> = {
   infrastructure: {
     title: "Infrastructure",
     sub: "17 5D services across 9 categories · operator-provisioned",
+  },
+  design: {
+    title: "Design",
+    sub: "Tokens, components, and UX language across all platform surfaces",
   },
   integrations: {
     title: "Integrations",
@@ -197,7 +238,43 @@ export default function App() {
             {!isMorganFocus && (
               <nav className="sidebar" aria-label="Primary">
                 <div className="sidebar__group">
-                  {primaryNav.map((item) => (
+                  {coreNav.map((item) => (
+                    <NavButton
+                      key={item.key}
+                      item={item}
+                      active={active === item.key}
+                      onClick={() => navigate(item.key)}
+                    />
+                  ))}
+                </div>
+
+                <div className="sidebar__group">
+                  <div className="sidebar__label">Workspace</div>
+                  {workspaceNav.map((item) => (
+                    <NavButton
+                      key={item.key}
+                      item={item}
+                      active={active === item.key}
+                      onClick={() => navigate(item.key)}
+                    />
+                  ))}
+                </div>
+
+                <div className="sidebar__group">
+                  <div className="sidebar__label">Design System</div>
+                  {designNav.map((item) => (
+                    <NavButton
+                      key={item.key}
+                      item={item}
+                      active={active === item.key}
+                      onClick={() => navigate(item.key)}
+                    />
+                  ))}
+                </div>
+
+                <div className="sidebar__group">
+                  <div className="sidebar__label">Agent Platform</div>
+                  {agentPlatformNav.map((item) => (
                     <NavButton
                       key={item.key}
                       item={item}
@@ -219,7 +296,53 @@ export default function App() {
                   ))}
                 </div>
 
-                <div className="sidebar__spacer" />
+                <div className="sidebar__group">
+                  <div className="sidebar__label">Applications</div>
+                  {applicationsNav.map((item) => (
+                    <NavButton
+                      key={item.key}
+                      item={item}
+                      active={active === item.key}
+                      onClick={() => navigate(item.key)}
+                    />
+                  ))}
+                </div>
+
+                <div className="sidebar__group">
+                  <div className="sidebar__label">Performance</div>
+                  {performanceNav.map((item) => (
+                    <NavButton
+                      key={item.key}
+                      item={item}
+                      active={active === item.key}
+                      onClick={() => navigate(item.key)}
+                    />
+                  ))}
+                </div>
+
+                <div className="sidebar__group">
+                  <div className="sidebar__label">Extensions</div>
+                  {extensionsNav.map((item) => (
+                    <NavButton
+                      key={item.key}
+                      item={item}
+                      active={active === item.key}
+                      onClick={() => navigate(item.key)}
+                    />
+                  ))}
+                </div>
+
+                <div className="sidebar__group">
+                  <div className="sidebar__label">Integrations</div>
+                  {integrationsNav.map((item) => (
+                    <NavButton
+                      key={item.key}
+                      item={item}
+                      active={active === item.key}
+                      onClick={() => navigate(item.key)}
+                    />
+                  ))}
+                </div>
 
                 <div className="sidebar__group">
                   <NavButton
@@ -360,10 +483,16 @@ function OtherViews({
       return <ProjectsView />;
     case "agents":
       return <AgentsView onNewAgent={onNewAgent} />;
+    case "skills":
+      return <SkillsView />;
+    case "tools":
+      return <ToolsView />;
     case "tasks":
       return <TasksView />;
     case "applications":
       return <ApplicationsView />;
+    case "extensions":
+      return <ExtensionsView />;
     case "memory":
       return <MemoryView />;
     case "cost":
@@ -372,6 +501,8 @@ function OtherViews({
       return <QualityView />;
     case "infrastructure":
       return <InfrastructureView />;
+    case "design":
+      return <DesignView />;
     case "integrations":
       return <IntegrationsView />;
     case "settings":
