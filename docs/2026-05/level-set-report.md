@@ -14,10 +14,10 @@
 
 | Item | Status |
 |------|--------|
-| `main` | Update via `cto-avatar-scope-cleanup` worktree (`git pull` there); primary checkout on `feat/hermes-presence-controller-ci` |
-| Open PRs | [#4951](https://github.com/5dlabs/cto/pull/4951) Hermes chart/presence follow-ups (expect merge conflicts with `main`) |
+| `main` | Current at `origin/main`; feature branch merged with `main` (`d085a910`) |
+| Open PRs | [#4951](https://github.com/5dlabs/cto/pull/4951) Hermes chart/gitops follow-ups (rebases on merged `main`) |
 | Offline backup | `~/cto-backup-20260516.bundle` |
-| Local stash | `pre-levelset-avatar-wip-20260516` on `feat/hermes-presence-controller-ci` |
+| Primary checkout | `feat/hermes-presence-controller-ci` synced with `origin` |
 
 ## Branches kept vs deleted
 
@@ -55,17 +55,16 @@
 
 ## Morgan media policy (per level-set)
 
-The Tauri app loads **`/uploads/morgan/{slug}/morgan.mp3`** and **`morgan.mp4`** for slugs in `LocalStackBootstrap` (`01_intro`, `02_source`, … `10_install-start`).
+The desktop app loads **`/uploads/morgan/{slug}/{basename}.mp4`** (and matching `.vtt`) from `LocalStackBootstrap`. Active slugs are **`01_intro` through `13_install-start`** (e.g. `02_saved-access`, `04_source`, `10_provider-auth`), plus conditional basenames such as `onepassword-ready` and `cloudflare-login`.
 
-**Not versioned (`.gitignore` on `main`):**
+**Ops / test only (not shipped in git):**
 
-- A/B and motion-prompt experiments under `ui/public/uploads/morgan/ab/`
-- Superseded folder numbering (`02_saved-access`, `03_endpoint`, … `13_install-start`)
-- All generated **MP4** lip-sync renders (regenerate via voice-bridge + Pruna)
-- Branch-condition MP3 clips not wired in UI yet
-- `.local/`, `.firecrawl/`, `ui/public/uploads/deliberation/`
+- `ab/`, `motion-prompt/`, `scenario-ledger.json`, and `*-ledger.json` — generation and comms experiments
+- Legacy renumbered folders (`02_source`, `03_harness`, … `10_install-start`) — superseded by the 13-screen layout above
+- All **MP4** lip-sync renders and non-`morgan` **MP3** clips — regenerate locally (voice-bridge + Pruna); runtime reads them from `ui/public/uploads/` on disk
+- `.local/`, `.firecrawl/`, `.hermes/tmp/`, `.hermes/artifacts/`
 
-**Kept in repo (PR #30):** `script.md`, `captions.vtt`, `morgan.mp3` for app slugs only.
+**Versioned in [#30](https://github.com/5dlabs/cto-app/pull/30):** `script.md`, `captions.vtt`, `morgan.mp3`, and branch **`.md`/`.vtt`** for saved-access and endpoint conditions.
 
 ## Open work backlog (top items)
 
@@ -79,7 +78,7 @@ The Tauri app loads **`/uploads/morgan/{slug}/morgan.mp3`** and **`morgan.mp4`**
 
 ### cto
 
-1. Resolve [#4951](https://github.com/5dlabs/cto/pull/4951) against current `main` (hermes-agent chart overlap)
+1. Merge [#4951](https://github.com/5dlabs/cto/pull/4951) (branch now includes merged `origin/main`)
 2. Pop stash `pre-levelset-avatar-wip-20260516` and branch avatar WIP if still active
 3. Triage sibling worktrees (table above) — push or close per branch
 4. Metal / coder bots — production GitOps in `infra/gitops/applications/workloads/metal-agent.yaml`
@@ -88,7 +87,8 @@ The Tauri app loads **`/uploads/morgan/{slug}/morgan.mp3`** and **`morgan.mp4`**
 
 ### Humans
 
-- `gh api orgs/5dlabs/members` returned **`kaseonedge`** only — confirm intended org membership and team access for `cto` + `cto-app`.
+- `gh api orgs/5dlabs/members` returned **`kaseonedge`** only; org teams **`planning`**, **`qa`**, **`swe`** exist — grant team (or org-wide) access to `cto` and `cto-app` so collaborators are not limited to direct repo collaborators.
+- Repo collaborator API lists **`kaseonedge`** only on both repos; use org/team permissions for the rest of the org.
 
 ### Bots and tokens
 
