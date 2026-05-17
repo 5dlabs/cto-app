@@ -43,3 +43,34 @@ Thumbs.db
 # Local bootstrap/E2E artifacts (bootstrap-runs, e2e-snapshots, probes)
 .local/
 .firecrawl/
+
+# Morgan: scenario/A/B/motion-prompt experiments (local generation only)
+ui/public/uploads/morgan/ab/
+ui/public/uploads/morgan/**/motion-prompt/
+ui/public/uploads/morgan/scenario-ledger.json
+ui/public/uploads/morgan/**/*-ledger.json
+
+# Morgan: superseded screen folders (app uses 01_intro, 02_source … 10_install-start per LocalStackBootstrap)
+ui/public/uploads/morgan/02_saved-access/
+ui/public/uploads/morgan/03_endpoint/
+ui/public/uploads/morgan/04_source/
+ui/public/uploads/morgan/05_harness/
+ui/public/uploads/morgan/06_clis/
+ui/public/uploads/morgan/07_providers/
+ui/public/uploads/morgan/08_provider-models/
+ui/public/uploads/morgan/09_harness-routing/
+ui/public/uploads/morgan/10_provider-auth/
+ui/public/uploads/morgan/11_tools/
+ui/public/uploads/morgan/12_agent-tokens/
+ui/public/uploads/morgan/13_install-start/
+
+# Morgan: lip-sync video renders (regenerate via voice-bridge + Pruna; keep script.md + morgan.mp3 in repo)
+ui/public/uploads/morgan/**/morgan.mp4
+ui/public/uploads/morgan/**/*.mp4
+
+# Morgan: branch narration clips not wired in setup UI yet
+ui/public/uploads/morgan/02_saved-access/**/*.mp3
+ui/public/uploads/morgan/03_endpoint/**/*.mp3
+
+# Deliberation / scratch uploads
+ui/public/uploads/deliberation/
