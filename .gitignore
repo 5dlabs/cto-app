@@ -39,3 +39,6 @@ Thumbs.db
 # Local dev screenshots
 .screenshots-*.png
 .plan/
+
+# Local bootstrap/E2E artifacts (bootstrap-runs, e2e-snapshots, probes)
+.local/
