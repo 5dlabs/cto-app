@@ -38,10 +38,10 @@ diagnostic artifacts collected from the Morgan pod.
 const MEM0_CONFIG_PATH: &str = "plugins.entries.openclaw-mem0.config";
 const QDRANT_CONFIG_PATH: &str = "plugins.entries.openclaw-mem0.config.oss.vectorStore.config";
 const DEFAULT_QDRANT_HTTP_URL: &str = "http://localhost:6333";
-const EXPECTED_CTO_NAMESPACE: &str = "cto-system";
+const EXPECTED_CTO_NAMESPACE: &str = "cto";
 const EXPECTED_QDRANT_SERVICE: &str = "qdrant";
 const EXPECTED_QDRANT_NAMESPACE: &str = EXPECTED_CTO_NAMESPACE;
-const EXPECTED_QDRANT_HOST: &str = "qdrant.cto-system.svc.cluster.local";
+const EXPECTED_QDRANT_HOST: &str = "qdrant.cto.svc.cluster.local";
 const EXPECTED_QDRANT_PORT: u64 = 6333;
 const EXPECTED_QDRANT_GRPC_PORT: u64 = 6334;
 const EXPECTED_COLLECTION: &str = "cto_memory";
@@ -741,6 +741,18 @@ fn assert_controller_coderun_rbac(rendered_yaml: &str, failures: &mut Vec<String
                 "controller ClusterRole",
                 cluster_role,
                 r#"resources: ["coderuns", "coderuns/status"]"#,
+            );
+            require_doc_line(
+                failures,
+                "controller ClusterRole",
+                cluster_role,
+                r#"- apiGroups: ["cto.5dlabs.ai"]"#,
+            );
+            require_doc_line(
+                failures,
+                "controller ClusterRole",
+                cluster_role,
+                r#"resources: ["boltruns", "boltruns/status", "coderuns", "coderuns/status"]"#,
             );
             require_doc_line(
                 failures,
@@ -1651,9 +1663,9 @@ fn is_local_qdrant_host(host: &str) -> bool {
             | "host.docker.internal"
             | "kubernetes.docker.internal"
             | "qdrant"
-            | "qdrant.cto-system"
-            | "qdrant.cto-system.svc"
-            | "qdrant.cto-system.svc.cluster.local"
+            | "qdrant.cto"
+            | "qdrant.cto.svc"
+            | "qdrant.cto.svc.cluster.local"
     )
 }
 
@@ -1667,9 +1679,9 @@ fn is_local_gateway_host(host: &str) -> bool {
             | "host.docker.internal"
             | "kubernetes.docker.internal"
             | "morgan"
-            | "morgan.cto-system"
-            | "morgan.cto-system.svc"
-            | "morgan.cto-system.svc.cluster.local"
+            | "morgan.cto"
+            | "morgan.cto.svc"
+            | "morgan.cto.svc.cluster.local"
     )
 }
 
@@ -2313,7 +2325,7 @@ data:
               "oss": {
                 "vectorStore": {
                   "config": {
-                    "host": "qdrant.cto-system.svc.cluster.local",
+                    "host": "qdrant.cto.svc.cluster.local",
                     "port": 6333,
                     "collectionName": "cto_memory"
                   }
@@ -2357,7 +2369,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: qdrant
-  namespace: cto-system
+  namespace: cto
 spec:
   type: ClusterIP
   ports:
@@ -2374,7 +2386,7 @@ apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: qdrant
-  namespace: cto-system
+  namespace: cto
 spec:
   serviceName: qdrant
   template:
@@ -2410,7 +2422,7 @@ apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: qdrant
-  namespace: cto-system
+  namespace: cto
   annotations:
     nginx.ingress.kubernetes.io/rewrite-target: /$2
 spec:
@@ -2463,6 +2475,9 @@ rules:
   - apiGroups: ["agents.platform"]
     resources: ["coderuns", "coderuns/status"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["cto.5dlabs.ai"]
+    resources: ["boltruns", "boltruns/status", "coderuns", "coderuns/status"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -2485,7 +2500,7 @@ apiVersion: agents.platform/v1
 kind: CodeRun
 metadata:
   name: hermes-coderun-smoke
-  namespace: cto-system
+  namespace: cto
   annotations:
     helm.sh/hook: test
 spec:
@@ -2512,7 +2527,7 @@ apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: morgan
-  namespace: cto-system
+  namespace: cto
 spec:
   template:
     spec:

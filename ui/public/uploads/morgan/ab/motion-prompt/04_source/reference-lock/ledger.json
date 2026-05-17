@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "createdAt": "2026-05-14T21:33:46.905Z",
+  "entry": {
+    "audioAssetId": "asset_p6x84y8LhERLN2fBixVnHMr6",
+    "audioUploadedAt": "2026-05-14T21:33:51.729Z",
+    "screen": {
+      "id": "04",
+      "slug": "source",
+      "folder": "04_source"
+    },
+    "variant": "reference-lock",
+    "label": "reference-lock / original pose hold",
+    "modelId": "model_pruna-p-avatar",
+    "referenceImageAssetId": "asset_qD8pdsjsSaZhoyUxWG523aiU",
+    "body": {
+      "image": "asset_qD8pdsjsSaZhoyUxWG523aiU",
+      "audio": "asset_p6x84y8LhERLN2fBixVnHMr6",
+      "resolution": "720p",
+      "videoPrompt": "hold Morgan's original reference-image head pose throughout the whole video. Treat the head, neck, chin, and muzzle orientation as locked to the source portrait pose; animate primarily the mouth for speech and only subtle eye blinks. The head stays grounded and steady at the original height and angle, with the muzzle level or slightly downward. Keep motion restrained and documentary-like, as if Morgan is calmly explaining source control to a technical teammate. Keep paws and clipboard still. Preserve the exact golden retriever dog identity, glasses, outfit, lighting, and background. no background music; no generated voice",
+      "stylePrompt": "reference pose hold; near-static technical narrator; mouth-only animation; calm and grounded",
+      "voicePrompt": "use the uploaded audio exactly as the speech track; no generated voice, no music, no paraphrasing",
+      "disablePromptUpsampling": true,
+      "seed": 7502
+    },
+    "estimatedCreativeUnits": 32,
+    "videoJobId": "job_X9J1t4uZJdmgx1RJciK8Ebx3",
+    "status": "success",
+    "submittedAt": "2026-05-14T21:33:52.382Z",
+    "videoAssetId": "asset_NxkDqekbzuT19xB9msDPQTt1",
+    "localPath": "ui/public/uploads/morgan/ab/motion-prompt/04_source/reference-lock/04_source-reference-lock.mp4",
+    "progress": 1,
+    "lastPolledAt": "2026-05-14T21:34:39.109Z",
+    "completedAt": "2026-05-14T21:34:39.109Z",
+    "downloadedAt": "2026-05-14T21:34:48.160Z",
+    "ffprobe": {
+      "programs": [],
+      "stream_groups": [],
+      "streams": [
+        {
+          "codec_name": "h264",
+          "codec_type": "video",
+          "width": 960,
+          "height": 960
+        },
+        {
+          "codec_name": "aac",
+          "codec_type": "audio"
+        }
+      ],
+      "format": {
+        "duration": "12.669002",
+        "size": "11279966"
+      }
+    },
+    "discordPath": "ui/public/uploads/morgan/ab/motion-prompt/04_source/reference-lock/04_source-reference-lock-discord.mp4",
+    "comparePath": "ui/public/uploads/morgan/ab/motion-prompt/04_source/reference-lock/04_source-current-left-reference-lock-right.mp4"
+  },
+  "updatedAt": "2026-05-14T21:34:49.113Z"
+}

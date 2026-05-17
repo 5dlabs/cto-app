@@ -1,0 +1,1 @@
+It looks like you have the 1Password desktop app and the op CLI installed, but desktop app integration is not enabled yet. I opened the official 1Password CLI app-integration guide so you can turn it on, then I will check again.

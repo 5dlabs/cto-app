@@ -1,0 +1,21 @@
+{
+  "modelId": "model_kling-video-ai-avatar-v2-pro",
+  "label": "Kling AI Avatar 2 (Pro) with current local Morgan MP3",
+  "sourceAudioPath": "ui/public/uploads/morgan/01_intro/morgan.mp3",
+  "referenceImageAssetId": "asset_qD8pdsjsSaZhoyUxWG523aiU",
+  "audioAssetId": "asset_vQHkR56iEkgwEGzgrHufD6Hi",
+  "estimatedCreativeUnits": 370,
+  "jobId": "job_88H2yJvKNPaGisqfsZAgk3LF",
+  "status": "success",
+  "submittedAt": "2026-05-13T02:27:39.764Z",
+  "body": {
+    "image": "asset_qD8pdsjsSaZhoyUxWG523aiU",
+    "audio": "asset_vQHkR56iEkgwEGzgrHufD6Hi",
+    "text": "Morgan speaks as a friendly CTO setup guide. Preserve Morgan as a non-human golden retriever character with glasses, leather gloves, clipboard, and calm confident presenter motion. No background music. Use the uploaded audio exactly as the speech track."
+  },
+  "progress": 1,
+  "lastPolledAt": "2026-05-13T03:22:12.175Z",
+  "assetId": "asset_y1qKcfgTTSP9jc5zdsAwgG76",
+  "localPath": "ui/public/uploads/morgan/ab/01_intro/kling-current-audio/kling-current-audio.mp4",
+  "downloadedAt": "2026-05-13T03:22:25.831Z"
+}

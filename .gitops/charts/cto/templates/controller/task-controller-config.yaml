@@ -7,6 +7,8 @@ metadata:
   labels:
     {{- include "cto.controller.labels" . | nindent 4 }}
 data:
+  CTO-config.json: |
+{{ .Values.ctoConfig | default dict | toPrettyJson | indent 4 }}
   config.yaml: |
     job:
       activeDeadlineSeconds: 7200

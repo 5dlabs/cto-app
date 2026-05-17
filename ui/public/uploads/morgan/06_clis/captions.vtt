@@ -1,0 +1,9 @@
+WEBVTT
+
+1
+00:00:00.000 --> 00:00:03.133
+Next, choose the ACP CLIs you want CTO to manage.
+
+2
+00:00:03.133 --> 00:00:16.431
+CTO supports Claude, OpenCode, Cursor, Codex, Factory, Gemini, Copilot, and Kimi, and coordinates provider access across them so your teams can use the right model path without being locked into one provider.

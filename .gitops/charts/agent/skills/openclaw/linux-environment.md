@@ -13,7 +13,6 @@ You are running on Ubuntu Linux inside a Kubernetes pod. This is NOT macOS.
 
 - `git`, `curl`, `jq`, `envsubst`
 - `node`, `npm`, `npx` (via nvm)
-- `op` (1Password CLI — headless via service account token)
 - `claude` (Claude Code CLI — pinned version)
 - Headless Chromium (for browser automation)
 - `kubectl` (Kubernetes access)

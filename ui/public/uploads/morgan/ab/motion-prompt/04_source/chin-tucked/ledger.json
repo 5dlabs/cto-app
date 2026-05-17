@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "createdAt": "2026-05-14T21:32:50.279Z",
+  "entry": {
+    "audioAssetId": "asset_p6x84y8LhERLN2fBixVnHMr6",
+    "audioUploadedAt": "2026-05-14T21:32:55.798Z",
+    "screen": {
+      "id": "04",
+      "slug": "source",
+      "folder": "04_source"
+    },
+    "variant": "chin-tucked",
+    "label": "chin-tucked / lowered head posture",
+    "modelId": "model_pruna-p-avatar",
+    "referenceImageAssetId": "asset_qD8pdsjsSaZhoyUxWG523aiU",
+    "body": {
+      "image": "asset_qD8pdsjsSaZhoyUxWG523aiU",
+      "audio": "asset_p6x84y8LhERLN2fBixVnHMr6",
+      "resolution": "720p",
+      "videoPrompt": "Morgan speaks from the same calm seated pose as the reference image, with his chin gently tucked and his muzzle angled level-to-slightly-downward while addressing the viewer. Maintain a grounded, lowered head posture for the entire clip. Keep the eyes forward with a mild downward technical-focus expression, like a patient CTO reading from a checklist. Use accurate small mouth shapes for speech, tiny blinks, and almost no head travel. Keep the head posture relaxed, humble, and composed rather than proud or excited. Leather-gloved paws and clipboard remain still. Preserve the exact golden retriever dog identity, glasses, outfit, and background. no background music; no generated voice",
+      "stylePrompt": "grounded low-key technical briefing; chin gently tucked; level-to-downward muzzle; humble calm presence",
+      "voicePrompt": "use the uploaded audio exactly as the speech track; no generated voice, no music, no paraphrasing",
+      "disablePromptUpsampling": true,
+      "seed": 7501
+    },
+    "estimatedCreativeUnits": 32,
+    "videoJobId": "job_tV14DCXm6RGgaaJnhs6aDegd",
+    "status": "success",
+    "submittedAt": "2026-05-14T21:32:56.397Z",
+    "videoAssetId": "asset_P7Wy8SjFh9p8pmt2yYxfeD1f",
+    "localPath": "ui/public/uploads/morgan/ab/motion-prompt/04_source/chin-tucked/04_source-chin-tucked.mp4",
+    "progress": 1,
+    "lastPolledAt": "2026-05-14T21:33:42.984Z",
+    "completedAt": "2026-05-14T21:33:42.984Z",
+    "downloadedAt": "2026-05-14T21:33:45.660Z",
+    "ffprobe": {
+      "programs": [],
+      "stream_groups": [],
+      "streams": [
+        {
+          "codec_name": "h264",
+          "codec_type": "video",
+          "width": 960,
+          "height": 960
+        },
+        {
+          "codec_name": "aac",
+          "codec_type": "audio"
+        }
+      ],
+      "format": {
+        "duration": "12.669002",
+        "size": "11201247"
+      }
+    },
+    "discordPath": "ui/public/uploads/morgan/ab/motion-prompt/04_source/chin-tucked/04_source-chin-tucked-discord.mp4",
+    "comparePath": "ui/public/uploads/morgan/ab/motion-prompt/04_source/chin-tucked/04_source-current-left-chin-tucked-right.mp4"
+  },
+  "updatedAt": "2026-05-14T21:33:46.904Z"
+}

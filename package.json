@@ -23,6 +23,7 @@
     "e2e:local-stack-clean-slate": "node scripts/e2e/clean-slate-cycle.mjs",
     "e2e:k8s-smoke": "node scripts/e2e/kind-platform-smoke.mjs",
     "mcp:tauri": "node ./node_modules/tauri-plugin-mcp-server/build/index.js",
+    "mcp:scenario": "node scripts/mcp-scenario-server.mjs",
     "scenario:morgan-videos": "node scripts/generate-morgan-scenario-videos.mjs",
     "icons:openclaw-svgs": "node scripts/sync-openclaw-provider-svgs.mjs"
   },

@@ -4,6 +4,12 @@
 {{- $secrets := .Values.secrets | default dict -}}
 {{- $apiKeyNames := (index $secrets "apiKeyNames") | default dict -}}
 {{- $statefulset := eq (.Values.deploymentMode | default "deployment") "statefulset" -}}
+{{- $harness := lower (.Values.harness | default "openclaw") -}}
+{{- if not (or (eq $harness "openclaw") (eq $harness "hermes")) -}}
+{{- fail "agent harness must be either openclaw or hermes" -}}
+{{- end -}}
+{{- $isOpenClaw := eq $harness "openclaw" -}}
+{{- $isHermes := eq $harness "hermes" -}}
 apiVersion: apps/v1
 kind: {{ if $statefulset }}StatefulSet{{ else }}Deployment{{ end }}
 metadata:
@@ -147,12 +153,23 @@ spec:
               fi
               echo "[passwd] home dir fix applied"
 
+              {{- if $isOpenClaw }}
               # ---------------------------------------------------------------
               # 2. OpenClaw config (re-rendered every restart with fresh env)
               # ---------------------------------------------------------------
               envsubst < /config-template/openclaw.json > /workspace/.openclaw/openclaw.json
               echo "[config] openclaw.json rendered"
-              openclaw doctor --non-interactive >/dev/null 2>&1 || true
+              if command -v timeout >/dev/null 2>&1; then
+                timeout 20s openclaw doctor --non-interactive >/dev/null 2>&1 || true
+              else
+                openclaw doctor --non-interactive >/dev/null 2>&1 &
+                DOCTOR_PID="$!"
+                sleep 20
+                if kill -0 "$DOCTOR_PID" 2>/dev/null; then
+                  kill "$DOCTOR_PID" 2>/dev/null || true
+                fi
+                wait "$DOCTOR_PID" 2>/dev/null || true
+              fi
 
               # ---------------------------------------------------------------
               # 3. OpenClaw orchestrator skills (always overwrite from ConfigMap)
@@ -171,6 +188,34 @@ spec:
                 SKILL_COUNT=$((SKILL_COUNT + 1))
               done
               echo "[skills] OpenClaw: $SKILL_COUNT skills loaded"
+              {{- else }}
+              # ---------------------------------------------------------------
+              # 2. Hermes config (re-rendered every restart with fresh env)
+              # ---------------------------------------------------------------
+              mkdir -p /workspace/.hermes/memories /workspace/.hermes/skills /workspace/.hermes/sessions /workspace/.hermes/logs
+              cat > /workspace/.hermes/config.yaml <<'HERMESCFG'
+              model:
+                provider: {{ .Values.hermes.model.provider | default "auto" | quote }}
+                default: {{ (.Values.hermes.model.default | default .Values.agent.model) | quote }}
+              terminal:
+                backend: {{ .Values.hermes.terminal.backend | default "local" | quote }}
+                cwd: {{ .Values.hermes.terminal.cwd | default "/workspace" | quote }}
+                timeout: {{ .Values.hermes.terminal.timeout | default 180 }}
+              {{- if .Values.toolServer.url }}
+              mcp_servers:
+                cto_tools:
+                  url: {{ .Values.toolServer.url | quote }}
+                  enabled: true
+              {{- end }}
+              HERMESCFG
+              sed -i 's/^              //' /workspace/.hermes/config.yaml
+              if [ -f /workspace/SOUL.md ]; then
+                cp -f /workspace/SOUL.md /workspace/.hermes/SOUL.md
+              elif [ -f /workspace/AGENTS.md ]; then
+                cp -f /workspace/AGENTS.md /workspace/.hermes/SOUL.md
+              fi
+              echo "[config] Hermes config.yaml rendered"
+              {{- end }}
 
               # ---------------------------------------------------------------
               # 3a. Stable code-server URL marker
@@ -428,9 +473,17 @@ spec:
               export HOME=/workspace
               export GIT_TERMINAL_PROMPT=0
 
+              : > /workspace/.git-credentials
               if [ -n "${GITHUB_TOKEN:-}" ]; then
                 # Credential store with entries for github.com
-                echo "https://x-access-token:${GITHUB_TOKEN}@github.com" > /workspace/.git-credentials
+                echo "https://x-access-token:${GITHUB_TOKEN}@github.com" >> /workspace/.git-credentials
+              fi
+              if [ -n "${GITLAB_TOKEN:-}" ]; then
+                # Credential store with entries for gitlab.com
+                echo "https://oauth2:${GITLAB_TOKEN}@gitlab.com" >> /workspace/.git-credentials
+              fi
+
+              if [ -s /workspace/.git-credentials ]; then
                 chmod 644 /workspace/.git-credentials
                 chown 1001:1000 /workspace/.git-credentials
 
@@ -446,7 +499,7 @@ spec:
                 git config --global credential.interactive never
 
                 chown 1001:1000 /workspace/.gitconfig
-                echo "[git] Credentials configured for github.com (gitconfig at /workspace/.gitconfig)"
+                echo "[git] Source credentials configured (gitconfig at /workspace/.gitconfig)"
               else
                 # Even without a token, configure git basics so ad-hoc clones don't hang
                 git config --global user.email "bot@5dlabs.ai"
@@ -455,7 +508,7 @@ spec:
                 git config --global core.askPass ""
                 git config --global credential.interactive never
                 chown 1001:1000 /workspace/.gitconfig 2>/dev/null || true
-                echo "[git] WARNING: GITHUB_TOKEN not set — private repo clones may fail"
+                echo "[git] WARNING: no source-control token set — private repo clones may fail"
               fi
 
               # Reset HOME for remaining init steps (root context)
@@ -587,7 +640,14 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.secrets.apiKeysSecret }}
-                  key: {{ get $apiKeyNames "github" | default "github-pat" | quote }}
+                  key: {{ get $apiKeyNames "github" | default "GITHUB_TOKEN" | quote }}
+                  optional: true
+            # GitLab token for private repo cloning
+            - name: GITLAB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.apiKeysSecret }}
+                  key: {{ get $apiKeyNames "gitlab" | default "GITLAB_TOKEN" | quote }}
                   optional: true
             # Fireworks API key (used by envsubst for mem0 embedder/llm config)
             - name: FIREWORKS_API_KEY
@@ -595,13 +655,6 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.secrets.apiKeysSecret }}
                   key: {{ get $apiKeyNames "fireworks" | default "fireworks-api-key" | quote }}
-                  optional: true
-            # DigitalOcean Gradient AI model access key (OpenCode → Claude Opus 4.7 tier-3 fallback)
-            - name: DO_INFERENCE_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.secrets.apiKeysSecret }}
-                  key: {{ get $apiKeyNames "doInference" | default "DO_INFERENCE_KEY" | quote }}
                   optional: true
             {{- if .Values.cloudProviders.bedrock.enabled }}
             # AWS Bedrock credentials (used by OpenClaw gateway + Claude Code CLI)
@@ -701,7 +754,7 @@ spec:
                 name="$(basename "$src")"
                 dest="/workspace/$name"
                 case "$name" in
-                  AGENTS.md|HEARTBEAT.md|IDENTITY.md|SOUL.md|TOOLS.md)
+                  AGENTS.md|HEARTBEAT.md|IDENTITY.md|SOUL.md|TOOLS.md|cto-config.json|CTO-config.json)
                     cp "$src" "$dest" && echo "[workspace-files] Updated $dest"
                     ;;
                   *)
@@ -713,6 +766,7 @@ spec:
                     ;;
                 esac
               done
+              {{- if $isOpenClaw }}
               # Patch OpenClaw agent-delivery to honor OPENCLAW_DEFAULT_RECIPIENT
               # when no explicit recipient is resolved (fixes channel:UNKNOWN on boot).
               # Runs in init (root) because dist/ files are root-owned.
@@ -723,6 +777,7 @@ spec:
                   && echo "[workspace-files] Patched delivery fallback in $(basename $f)" \
                   || echo "[workspace-files] WARN: delivery patch failed for $(basename $f)"
               done
+              {{- end }}
               {{- if and (hasKey $mem0Plugin "enabled") $mem0Plugin.enabled }}
               # Increase mem0 recall timeout from 8s to 30s (qdrant can be slow
               # on large collections, especially after pod restarts).
@@ -751,6 +806,23 @@ spec:
               cd /workspace
               export HOME=/workspace
               export PATH="/workspace/.local/bin:/usr/local/share/npm-global/bin:/usr/local/bin:$PATH"
+              {{- if $isHermes }}
+              export HERMES_HOME=/workspace/.hermes
+              export HERMES_HEADLESS=1
+              case "{{ .Values.hermes.gateway.mode | default "local" }}" in
+                local)
+                  exec {{ .Values.hermes.gateway.command | default "hermes gateway" }}
+                  ;;
+                remote)
+                  echo "[hermes] remote gateway mode selected; set HERMES_REMOTE_GATEWAY_URL and run a managed gateway outside this pod"
+                  exec sleep infinity
+                  ;;
+                *)
+                  echo "[hermes] invalid gateway mode: {{ .Values.hermes.gateway.mode | default "local" }}" >&2
+                  exit 2
+                  ;;
+              esac
+              {{- else }}
               export OPENCLAW_CONFIG=/workspace/.openclaw/openclaw.json
               {{- $openclaw := index .Values "openclaw" | default dict }}
               {{- if $openclaw.version }}
@@ -758,8 +830,7 @@ spec:
               if [ "$CURRENT_OPENCLAW_VERSION" != "{{ $openclaw.version }}" ]; then
                 echo "[openclaw] Installing OpenClaw {{ $openclaw.version }} (current: ${CURRENT_OPENCLAW_VERSION:-missing})"
                 npm install -g --no-audit --no-fund "openclaw@{{ $openclaw.version }}" || {
-                  echo "[openclaw] ERROR: failed to install OpenClaw {{ $openclaw.version }}"
-                  exit 1
+                  echo "[openclaw] WARN: failed to install OpenClaw {{ $openclaw.version }}; using baked version ${CURRENT_OPENCLAW_VERSION:-unknown}"
                 }
               fi
               {{- end }}
@@ -773,6 +844,7 @@ spec:
                 npm install -g --no-audit --no-fund @buape/carbon 2>&1 | tail -2
               }
               exec openclaw gateway
+              {{- end }}
           lifecycle:
             postStart:
               exec:
@@ -799,6 +871,26 @@ spec:
               value: /workspace
             - name: TZ
               value: "UTC"
+            {{- if $isHermes }}
+            - name: HERMES_HOME
+              value: /workspace/.hermes
+            - name: HERMES_HEADLESS
+              value: "1"
+            {{- if .Values.hermes.gateway.allowedUsers }}
+            - name: GATEWAY_ALLOWED_USERS
+              value: {{ .Values.hermes.gateway.allowedUsers | quote }}
+            - name: DISCORD_ALLOWED_USERS
+              value: {{ .Values.hermes.gateway.allowedUsers | quote }}
+            {{- end }}
+            {{- if .Values.hermes.gateway.homeChannel }}
+            - name: DISCORD_HOME_CHANNEL
+              value: {{ .Values.hermes.gateway.homeChannel | quote }}
+            {{- end }}
+            {{- if .Values.hermes.gateway.allowedRoles }}
+            - name: DISCORD_ALLOWED_ROLES
+              value: {{ .Values.hermes.gateway.allowedRoles | quote }}
+            {{- end }}
+            {{- else }}
             - name: OPENCLAW_CONFIG
               value: /workspace/.openclaw/openclaw.json
             {{- if .Values.logging }}
@@ -839,6 +931,7 @@ spec:
               value: production
             - name: OPENCLAW_NO_RESPAWN
               value: "1"
+            {{- end }}
             # Prevent git from prompting for credentials in non-TTY
             - name: GIT_TERMINAL_PROMPT
               value: "0"
@@ -851,7 +944,7 @@ spec:
             - name: KIMI_SHARE_DIR
               value: /workspace/.kimi
             {{- end }}
-            {{- if .Values.agent.defaultRecipient }}
+            {{- if and $isOpenClaw .Values.agent.defaultRecipient }}
             # Fallback delivery target when session has no resolved recipient.
             # Consumed by postStart patch on agent-delivery-*.js to fix missing
             # final-response Discord posts.
@@ -906,13 +999,6 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.secrets.apiKeysSecret }}
                   key: {{ get $apiKeyNames "fireworks" | default "fireworks-api-key" | quote }}
-                  optional: true
-            # DigitalOcean Gradient AI model access key (OpenCode → Claude Opus 4.7 tier-3 fallback)
-            - name: DO_INFERENCE_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.secrets.apiKeysSecret }}
-                  key: {{ get $apiKeyNames "doInference" | default "DO_INFERENCE_KEY" | quote }}
                   optional: true
             # Web tools API keys (Brave search + Firecrawl scraping)
             - name: BRAVE_API_KEY
@@ -989,59 +1075,21 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.secrets.apiKeysSecret }}
-                  key: {{ get $apiKeyNames "github" | default "github-pat" | quote }}
+                  key: {{ get $apiKeyNames "github" | default "GITHUB_TOKEN" | quote }}
                   optional: true
             # gh CLI auth (mirrors GITHUB_TOKEN)
             - name: GH_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.secrets.apiKeysSecret }}
-                  key: {{ get $apiKeyNames "github" | default "github-pat" | quote }}
+                  key: {{ get $apiKeyNames "github" | default "GITHUB_TOKEN" | quote }}
                   optional: true
             # Copilot CLI headless auth (mirrors GITHUB_TOKEN)
             - name: COPILOT_GITHUB_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.secrets.apiKeysSecret }}
-                  key: {{ get $apiKeyNames "github" | default "github-pat" | quote }}
-                  optional: true
-            # 1Password CLI (headless via service account token)
-            - name: OP_SERVICE_ACCOUNT_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.secrets.apiKeysSecret }}
-                  key: {{ get $apiKeyNames "opServiceAccountToken" | default "op-service-account-token" | quote }}
-                  optional: true
-            # OVH API credentials (python-ovh SDK)
-            - name: OVH_APPLICATION_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.secrets.apiKeysSecret }}
-                  key: {{ get $apiKeyNames "ovhApplicationKey" | default "ovh-application-key" | quote }}
-                  optional: true
-            - name: OVH_APPLICATION_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.secrets.apiKeysSecret }}
-                  key: {{ get $apiKeyNames "ovhApplicationSecret" | default "ovh-application-secret" | quote }}
-                  optional: true
-            - name: OVH_CONSUMER_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.secrets.apiKeysSecret }}
-                  key: {{ get $apiKeyNames "ovhConsumerKey" | default "ovh-consumer-key" | quote }}
-                  optional: true
-            - name: OVH_ENDPOINT
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.secrets.apiKeysSecret }}
-                  key: {{ get $apiKeyNames "ovhEndpoint" | default "ovh-endpoint" | quote }}
-                  optional: true
-            - name: OVH_PROJECT_ID
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.secrets.apiKeysSecret }}
-                  key: {{ get $apiKeyNames "ovhProjectId" | default "ovh-project-id" | quote }}
+                  key: {{ get $apiKeyNames "github" | default "GITHUB_TOKEN" | quote }}
                   optional: true
             {{- if .Values.kaniko.enabled }}
             # Docker config for image builds/pushes (GHCR auth)
@@ -1105,9 +1153,14 @@ spec:
               protocol: TCP
           {{- if .Values.probes.startup.enabled }}
           startupProbe:
+            {{- if $isOpenClaw }}
             httpGet:
               path: /healthz
               port: gateway
+            {{- else }}
+            exec:
+              command: ["/bin/sh", "-c", "pgrep -f 'hermes.*gateway' >/dev/null"]
+            {{- end }}
             initialDelaySeconds: {{ .Values.probes.startup.initialDelaySeconds }}
             periodSeconds: {{ .Values.probes.startup.periodSeconds }}
             timeoutSeconds: {{ .Values.probes.startup.timeoutSeconds }}
@@ -1115,9 +1168,14 @@ spec:
           {{- end }}
           {{- if .Values.probes.liveness.enabled }}
           livenessProbe:
+            {{- if $isOpenClaw }}
             httpGet:
               path: /healthz
               port: gateway
+            {{- else }}
+            exec:
+              command: ["/bin/sh", "-c", "pgrep -f 'hermes.*gateway' >/dev/null"]
+            {{- end }}
             initialDelaySeconds: {{ .Values.probes.liveness.initialDelaySeconds }}
             periodSeconds: {{ .Values.probes.liveness.periodSeconds }}
             timeoutSeconds: {{ .Values.probes.liveness.timeoutSeconds }}
@@ -1130,8 +1188,12 @@ spec:
                 - /bin/sh
                 - -c
                 - |
+                  {{- if $isOpenClaw }}
                   HEALTH=$(curl -sf --max-time 3 http://localhost:{{ .Values.gateway.port }}/healthz 2>/dev/null) || exit 1
                   echo "$HEALTH" | grep -q '"ok":true' || exit 1
+                  {{- else }}
+                  pgrep -f 'hermes.*gateway' >/dev/null
+                  {{- end }}
             initialDelaySeconds: {{ .Values.probes.readiness.initialDelaySeconds }}
             periodSeconds: {{ .Values.probes.readiness.periodSeconds }}
             timeoutSeconds: {{ .Values.probes.readiness.timeoutSeconds }}
@@ -1494,7 +1556,7 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.secrets.apiKeysSecret }}
-                  key: {{ get $apiKeyNames "github" | default "github-pat" | quote }}
+                  key: {{ get $apiKeyNames "github" | default "GITHUB_TOKEN" | quote }}
                   optional: true
           ports:
             - name: project-api

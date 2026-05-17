@@ -26,7 +26,7 @@ Your mem0 memories persist across reboots. Recall your recent work:
 ### Step 3: Check workspace state
 ```bash
 # Check for uncommitted work
-cd /workspace/repos/cto && git status && git stash list
+cd /workspace/repos/<project> && git status && git stash list
 
 # Check for in-progress branches
 git branch --sort=-committerdate | head -5

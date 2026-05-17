@@ -1,0 +1,1250 @@
+{
+  "snapshots": [
+    {
+      "label": "initial",
+      "ts": 1778363921709,
+      "heading": "CTO",
+      "bodyText": " 5D LABS CC Quick tunnel selected. Morgan can prefill webhook URLs for a live walkthrough. CTO CLIENT CLUSTER Kind Client Cluster Ingress NGINX Argo CD Helm Charts CTO + Qdrant Kind 1 node · 19 pods Ingress 1/1 running Argo CD 5/5 running CTO 3/3 running Pods 19 pods BASELINE 100% Client Cluster baseline ready for setup choices. Continue",
+      "bannedCopyVisible": false,
+      "modalOpen": false,
+      "readinessState": null,
+      "readinessLabel": null,
+      "activeElement": {
+        "tag": "BODY",
+        "text": "5D LabsCCQuick tunnel selected. Morgan can prefill webhook URLs for a live walkt",
+        "testId": null,
+        "aria": null
+      },
+      "buttons": [
+        {
+          "text": "",
+          "title": "Previous setup screen",
+          "aria": "Previous setup screen",
+          "testId": null,
+          "disabled": false,
+          "rect": {
+            "x": 1060,
+            "y": 23,
+            "w": 38,
+            "h": 38
+          }
+        },
+        {
+          "text": "",
+          "title": "Next setup screen",
+          "aria": "Next setup screen",
+          "testId": null,
+          "disabled": false,
+          "rect": {
+            "x": 1106,
+            "y": 23,
+            "w": 38,
+            "h": 38
+          }
+        },
+        {
+          "text": "",
+          "title": "Mute Morgan audio",
+          "aria": "Mute Morgan audio",
+          "testId": null,
+          "disabled": false,
+          "rect": {
+            "x": 1152,
+            "y": 23,
+            "w": 38,
+            "h": 38
+          }
+        },
+        {
+          "text": "",
+          "title": "Start over: clear saved setup choices and delete the local CTO Kind cluster",
+          "aria": "Start over and clear the local CTO stack",
+          "testId": null,
+          "disabled": false,
+          "rect": {
+            "x": 1198,
+            "y": 23,
+            "w": 38,
+            "h": 38
+          }
+        },
+        {
+          "text": "CC",
+          "title": null,
+          "aria": "Show Morgan captions",
+          "testId": null,
+          "disabled": false,
+          "rect": {
+            "x": 361,
+            "y": 543,
+            "w": 38,
+            "h": 30
+          }
+        },
+        {
+          "text": "Continue",
+          "title": "Continue to saved access",
+          "aria": null,
+          "testId": null,
+          "disabled": false,
+          "rect": {
+            "x": 716,
+            "y": 585,
+            "w": 148,
+            "h": 40
+          }
+        }
+      ],
+      "medias": [
+        {
+          "tag": "VIDEO",
+          "testId": null,
+          "src": "http://localhost:5173/uploads/morgan/01_intro/morgan.mp4",
+          "muted": false,
+          "paused": true,
+          "currentTime": "17.28",
+          "duration": "17.28",
+          "readyState": 4,
+          "visible": true
+        }
+      ],
+      "viewport": {
+        "w": 1280,
+        "h": 768
+      },
+      "scroll": {
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "label": "saved-access-visible",
+      "ts": 1778363923615,
+      "heading": "Saved access",
+      "bodyText": " CC Quick tunnel selected. Morgan can prefill webhook URLs for a live walkthrough. Saved access SAVED ACCESS Use 1Password saved access Continue without saved access Back Continue",
+      "bannedCopyVisible": false,
+      "modalOpen": false,
+      "readinessState": null,
+      "readinessLabel": null,
+      "activeElement": {
+        "tag": "BODY",
+        "text": "CCCTOQuick tunnel selected. Morgan can prefill webhook URLs for a live walkthrou",
+        "testId": null,
+        "aria": null
+      },
+      "buttons": [
+        {
+          "text": "",
+          "title": "Previous setup screen",
+          "aria": "Previous setup screen",
+          "testId": null,
+          "disabled": false,
+          "rect": {
+            "x": 1060,
+            "y": 23,
+            "w": 38,
+            "h": 38
+          }
+        },
+        {
+          "text": "",
+          "title": "Next setup screen",
+          "aria": "Next setup screen",
+          "testId": null,
+          "disabled": false,
+          "rect": {
+            "x": 1106,
+            "y": 23,
+            "w": 38,
+            "h": 38
+          }
+        },
+        {
+          "text": "",
+          "title": "Mute Morgan audio",
+          "aria": "Mute Morgan audio",
+          "testId": null,
+          "disabled": false,
+          "rect": {
+            "x": 1152,
+            "y": 23,
+            "w": 38,
+            "h": 38
+          }
+        },
+        {
+          "text": "",
+          "title": "Start over: clear saved setup choices and delete the local CTO Kind cluster",
+          "aria": "Start over and clear the local CTO stack",
+          "testId": null,
+          "disabled": false,
+          "rect": {
+            "x": 1198,
+            "y": 23,
+            "w": 38,
+            "h": 38
+          }
+        },
+        {
+          "text": "CC",
+          "title": null,
+          "aria": "Show Morgan captions",
+          "testId": null,
+          "disabled": false,
+          "rect": {
+            "x": 431,
+            "y": 589,
+            "w": 48,
+            "h": 38
+          }
+        },
+        {
+          "text": "Use 1Password saved access",
+          "title": "Use 1Password saved access",
+          "aria": "Use 1Password saved access",
+          "testId": "saved-access-onepassword",
+          "disabled": false,
+          "rect": {
+            "x": 676,
+            "y": 345,
+            "w": 124,
+            "h": 124
+          }
+        },
+        {
+          "text": "Continue without saved access",
+          "title": "Continue without saved access",
+          "aria": "Continue without saved access",
+          "testId": "saved-access-skip",
+          "disabled": false,
+          "rect": {
+            "x": 819,
+            "y": 348,
+            "w": 118,
+            "h": 118
+          }
+        },
+        {
+          "text": "Back",
+          "title": "Back to Client Cluster",
+          "aria": null,
+          "testId": null,
+          "disabled": false,
+          "rect": {
+            "x": 1036,
+            "y": 482,
+            "w": 50,
+            "h": 24
+          }
+        },
+        {
+          "text": "Continue",
+          "title": "Continue to Cloudflare",
+          "aria": null,
+          "testId": "saved-access-continue",
+          "disabled": false,
+          "rect": {
+            "x": 1097,
+            "y": 482,
+            "w": 75,
+            "h": 24
+          }
+        }
+      ],
+      "medias": [
+        {
+          "tag": "AUDIO",
+          "testId": null,
+          "src": "http://localhost:5173/uploads/morgan/02_saved-access/morgan.mp3",
+          "muted": false,
+          "paused": true,
+          "currentTime": "0.00",
+          "duration": "24.01",
+          "readyState": 4,
+          "visible": false
+        }
+      ],
+      "viewport": {
+        "w": 1280,
+        "h": 768
+      },
+      "scroll": {
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "label": "after-enter-on-1password",
+      "ts": 1778363924578,
+      "heading": "Saved access",
+      "bodyText": " CC Quick tunnel selected. Morgan can prefill webhook URLs for a live walkthrough. Saved access SAVED ACCESS Use 1Password saved access Continue without saved access Back Continue",
+      "bannedCopyVisible": false,
+      "modalOpen": false,
+      "readinessState": null,
+      "readinessLabel": null,
+      "activeElement": {
+        "tag": "BUTTON",
+        "text": "Use 1Password saved access",
+        "testId": "saved-access-onepassword",
+        "aria": "Use 1Password saved access"
+      },
+      "buttons": [
+        {
+          "text": "",
+          "title": "Previous setup screen",
+          "aria": "Previous setup screen",
+          "testId": null,
+          "disabled": false,
+          "rect": {
+            "x": 1060,
+            "y": 23,
+            "w": 38,
+            "h": 38
+          }
+        },
+        {
+          "text": "",
+          "title": "Next setup screen",
+          "aria": "Next setup screen",
+          "testId": null,
+          "disabled": false,
+          "rect": {
+            "x": 1106,
+            "y": 23,
+            "w": 38,
+            "h": 38
+          }
+        },
+        {
+          "text": "",
+          "title": "Mute Morgan audio",
+          "aria": "Mute Morgan audio",
+          "testId": null,
+          "disabled": false,
+          "rect": {
+            "x": 1152,
+            "y": 23,
+            "w": 38,
+            "h": 38
+          }
+        },
+        {
+          "text": "",
+          "title": "Start over: clear saved setup choices and delete the local CTO Kind cluster",
+          "aria": "Start over and clear the local CTO stack",
+          "testId": null,
+          "disabled": false,
+          "rect": {
+            "x": 1198,
+            "y": 23,
+            "w": 38,
+            "h": 38
+          }
+        },
+        {
+          "text": "CC",
+          "title": null,
+          "aria": "Show Morgan captions",
+          "testId": null,
+          "disabled": false,
+          "rect": {
+            "x": 431,
+            "y": 589,
+            "w": 48,
+            "h": 38
+          }
+        },
+        {
+          "text": "Use 1Password saved access",
+          "title": "Use 1Password saved access",
+          "aria": "Use 1Password saved access",
+          "testId": "saved-access-onepassword",
+          "disabled": false,
+          "rect": {
+            "x": 676,
+            "y": 345,
+            "w": 124,
+            "h": 124
+          }
+        },
+        {
+          "text": "Continue without saved access",
+          "title": "Continue without saved access",
+          "aria": "Continue without saved access",
+          "testId": "saved-access-skip",
+          "disabled": false,
+          "rect": {
+            "x": 819,
+            "y": 348,
+            "w": 118,
+            "h": 118
+          }
+        },
+        {
+          "text": "Back",
+          "title": "Back to Client Cluster",
+          "aria": null,
+          "testId": null,
+          "disabled": false,
+          "rect": {
+            "x": 1036,
+            "y": 482,
+            "w": 50,
+            "h": 24
+          }
+        },
+        {
+          "text": "Continue",
+          "title": "Continue to Cloudflare",
+          "aria": null,
+          "testId": "saved-access-continue",
+          "disabled": false,
+          "rect": {
+            "x": 1097,
+            "y": 482,
+            "w": 75,
+            "h": 24
+          }
+        }
+      ],
+      "medias": [
+        {
+          "tag": "AUDIO",
+          "testId": null,
+          "src": "http://localhost:5173/uploads/morgan/02_saved-access/morgan.mp3",
+          "muted": false,
+          "paused": true,
+          "currentTime": "0.00",
+          "duration": "24.01",
+          "readyState": 4,
+          "visible": false
+        }
+      ],
+      "viewport": {
+        "w": 1280,
+        "h": 768
+      },
+      "scroll": {
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "label": "saved-access-after-detection-audio",
+      "ts": 1778363927586,
+      "heading": "Saved access",
+      "bodyText": " CC Quick tunnel selected. Morgan can prefill webhook URLs for a live walkthrough. Saved access SAVED ACCESS Use 1Password saved access Continue without saved access Back Continue",
+      "bannedCopyVisible": false,
+      "modalOpen": false,
+      "readinessState": null,
+      "readinessLabel": null,
+      "activeElement": {
+        "tag": "BUTTON",
+        "text": "Use 1Password saved access",
+        "testId": "saved-access-onepassword",
+        "aria": "Use 1Password saved access"
+      },
+      "buttons": [
+        {
+          "text": "",
+          "title": "Previous setup screen",
+          "aria": "Previous setup screen",
+          "testId": null,
+          "disabled": false,
+          "rect": {
+            "x": 1060,
+            "y": 23,
+            "w": 38,
+            "h": 38
+          }
+        },
+        {
+          "text": "",
+          "title": "Next setup screen",
+          "aria": "Next setup screen",
+          "testId": null,
+          "disabled": false,
+          "rect": {
+            "x": 1106,
+            "y": 23,
+            "w": 38,
+            "h": 38
+          }
+        },
+        {
+          "text": "",
+          "title": "Mute Morgan audio",
+          "aria": "Mute Morgan audio",
+          "testId": null,
+          "disabled": false,
+          "rect": {
+            "x": 1152,
+            "y": 23,
+            "w": 38,
+            "h": 38
+          }
+        },
+        {
+          "text": "",
+          "title": "Start over: clear saved setup choices and delete the local CTO Kind cluster",
+          "aria": "Start over and clear the local CTO stack",
+          "testId": null,
+          "disabled": false,
+          "rect": {
+            "x": 1198,
+            "y": 23,
+            "w": 38,
+            "h": 38
+          }
+        },
+        {
+          "text": "CC",
+          "title": null,
+          "aria": "Show Morgan captions",
+          "testId": null,
+          "disabled": false,
+          "rect": {
+            "x": 431,
+            "y": 589,
+            "w": 48,
+            "h": 38
+          }
+        },
+        {
+          "text": "Use 1Password saved access",
+          "title": "Use 1Password saved access",
+          "aria": "Use 1Password saved access",
+          "testId": "saved-access-onepassword",
+          "disabled": false,
+          "rect": {
+            "x": 676,
+            "y": 345,
+            "w": 124,
+            "h": 124
+          }
+        },
+        {
+          "text": "Continue without saved access",
+          "title": "Continue without saved access",
+          "aria": "Continue without saved access",
+          "testId": "saved-access-skip",
+          "disabled": false,
+          "rect": {
+            "x": 819,
+            "y": 348,
+            "w": 118,
+            "h": 118
+          }
+        },
+        {
+          "text": "Back",
+          "title": "Back to Client Cluster",
+          "aria": null,
+          "testId": null,
+          "disabled": false,
+          "rect": {
+            "x": 1036,
+            "y": 482,
+            "w": 50,
+            "h": 24
+          }
+        },
+        {
+          "text": "Continue",
+          "title": "Continue to Cloudflare",
+          "aria": null,
+          "testId": "saved-access-continue",
+          "disabled": false,
+          "rect": {
+            "x": 1097,
+            "y": 482,
+            "w": 75,
+            "h": 24
+          }
+        }
+      ],
+      "medias": [
+        {
+          "tag": "AUDIO",
+          "testId": null,
+          "src": "http://localhost:5173/uploads/morgan/02_saved-access/morgan.mp3",
+          "muted": false,
+          "paused": true,
+          "currentTime": "0.00",
+          "duration": "24.01",
+          "readyState": 4,
+          "visible": false
+        }
+      ],
+      "viewport": {
+        "w": 1280,
+        "h": 768
+      },
+      "scroll": {
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "label": "cloudflare-after-modal-continue",
+      "ts": 1778363928494,
+      "heading": "Saved access",
+      "bodyText": " CC Quick tunnel selected. Morgan can prefill webhook URLs for a live walkthrough. Saved access SAVED ACCESS Use 1Password saved access Continue without saved access Back Continue",
+      "bannedCopyVisible": false,
+      "modalOpen": false,
+      "readinessState": null,
+      "readinessLabel": null,
+      "activeElement": {
+        "tag": "BUTTON",
+        "text": "Use 1Password saved access",
+        "testId": "saved-access-onepassword",
+        "aria": "Use 1Password saved access"
+      },
+      "buttons": [
+        {
+          "text": "",
+          "title": "Previous setup screen",
+          "aria": "Previous setup screen",
+          "testId": null,
+          "disabled": false,
+          "rect": {
+            "x": 1060,
+            "y": 23,
+            "w": 38,
+            "h": 38
+          }
+        },
+        {
+          "text": "",
+          "title": "Next setup screen",
+          "aria": "Next setup screen",
+          "testId": null,
+          "disabled": false,
+          "rect": {
+            "x": 1106,
+            "y": 23,
+            "w": 38,
+            "h": 38
+          }
+        },
+        {
+          "text": "",
+          "title": "Mute Morgan audio",
+          "aria": "Mute Morgan audio",
+          "testId": null,
+          "disabled": false,
+          "rect": {
+            "x": 1152,
+            "y": 23,
+            "w": 38,
+            "h": 38
+          }
+        },
+        {
+          "text": "",
+          "title": "Start over: clear saved setup choices and delete the local CTO Kind cluster",
+          "aria": "Start over and clear the local CTO stack",
+          "testId": null,
+          "disabled": false,
+          "rect": {
+            "x": 1198,
+            "y": 23,
+            "w": 38,
+            "h": 38
+          }
+        },
+        {
+          "text": "CC",
+          "title": null,
+          "aria": "Show Morgan captions",
+          "testId": null,
+          "disabled": false,
+          "rect": {
+            "x": 431,
+            "y": 589,
+            "w": 48,
+            "h": 38
+          }
+        },
+        {
+          "text": "Use 1Password saved access",
+          "title": "Use 1Password saved access",
+          "aria": "Use 1Password saved access",
+          "testId": "saved-access-onepassword",
+          "disabled": false,
+          "rect": {
+            "x": 676,
+            "y": 345,
+            "w": 124,
+            "h": 124
+          }
+        },
+        {
+          "text": "Continue without saved access",
+          "title": "Continue without saved access",
+          "aria": "Continue without saved access",
+          "testId": "saved-access-skip",
+          "disabled": false,
+          "rect": {
+            "x": 819,
+            "y": 348,
+            "w": 118,
+            "h": 118
+          }
+        },
+        {
+          "text": "Back",
+          "title": "Back to Client Cluster",
+          "aria": null,
+          "testId": null,
+          "disabled": false,
+          "rect": {
+            "x": 1036,
+            "y": 482,
+            "w": 50,
+            "h": 24
+          }
+        },
+        {
+          "text": "Continue",
+          "title": "Continue to Cloudflare",
+          "aria": null,
+          "testId": "saved-access-continue",
+          "disabled": false,
+          "rect": {
+            "x": 1097,
+            "y": 482,
+            "w": 75,
+            "h": 24
+          }
+        }
+      ],
+      "medias": [
+        {
+          "tag": "AUDIO",
+          "testId": null,
+          "src": "http://localhost:5173/uploads/morgan/02_saved-access/morgan.mp3",
+          "muted": false,
+          "paused": true,
+          "currentTime": "0.00",
+          "duration": "24.01",
+          "readyState": 4,
+          "visible": false
+        }
+      ],
+      "viewport": {
+        "w": 1280,
+        "h": 768
+      },
+      "scroll": {
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "label": "cloudflare-saved-access-selected",
+      "ts": 1778363929399,
+      "heading": "Saved access",
+      "bodyText": " CC Quick tunnel selected. Morgan can prefill webhook URLs for a live walkthrough. Saved access SAVED ACCESS Use 1Password saved access Continue without saved access Back Continue",
+      "bannedCopyVisible": false,
+      "modalOpen": false,
+      "readinessState": null,
+      "readinessLabel": null,
+      "activeElement": {
+        "tag": "BUTTON",
+        "text": "Use 1Password saved access",
+        "testId": "saved-access-onepassword",
+        "aria": "Use 1Password saved access"
+      },
+      "buttons": [
+        {
+          "text": "",
+          "title": "Previous setup screen",
+          "aria": "Previous setup screen",
+          "testId": null,
+          "disabled": false,
+          "rect": {
+            "x": 1060,
+            "y": 23,
+            "w": 38,
+            "h": 38
+          }
+        },
+        {
+          "text": "",
+          "title": "Next setup screen",
+          "aria": "Next setup screen",
+          "testId": null,
+          "disabled": false,
+          "rect": {
+            "x": 1106,
+            "y": 23,
+            "w": 38,
+            "h": 38
+          }
+        },
+        {
+          "text": "",
+          "title": "Mute Morgan audio",
+          "aria": "Mute Morgan audio",
+          "testId": null,
+          "disabled": false,
+          "rect": {
+            "x": 1152,
+            "y": 23,
+            "w": 38,
+            "h": 38
+          }
+        },
+        {
+          "text": "",
+          "title": "Start over: clear saved setup choices and delete the local CTO Kind cluster",
+          "aria": "Start over and clear the local CTO stack",
+          "testId": null,
+          "disabled": false,
+          "rect": {
+            "x": 1198,
+            "y": 23,
+            "w": 38,
+            "h": 38
+          }
+        },
+        {
+          "text": "CC",
+          "title": null,
+          "aria": "Show Morgan captions",
+          "testId": null,
+          "disabled": false,
+          "rect": {
+            "x": 431,
+            "y": 589,
+            "w": 48,
+            "h": 38
+          }
+        },
+        {
+          "text": "Use 1Password saved access",
+          "title": "Use 1Password saved access",
+          "aria": "Use 1Password saved access",
+          "testId": "saved-access-onepassword",
+          "disabled": false,
+          "rect": {
+            "x": 676,
+            "y": 345,
+            "w": 124,
+            "h": 124
+          }
+        },
+        {
+          "text": "Continue without saved access",
+          "title": "Continue without saved access",
+          "aria": "Continue without saved access",
+          "testId": "saved-access-skip",
+          "disabled": false,
+          "rect": {
+            "x": 819,
+            "y": 348,
+            "w": 118,
+            "h": 118
+          }
+        },
+        {
+          "text": "Back",
+          "title": "Back to Client Cluster",
+          "aria": null,
+          "testId": null,
+          "disabled": false,
+          "rect": {
+            "x": 1036,
+            "y": 482,
+            "w": 50,
+            "h": 24
+          }
+        },
+        {
+          "text": "Continue",
+          "title": "Continue to Cloudflare",
+          "aria": null,
+          "testId": "saved-access-continue",
+          "disabled": false,
+          "rect": {
+            "x": 1097,
+            "y": 482,
+            "w": 75,
+            "h": 24
+          }
+        }
+      ],
+      "medias": [
+        {
+          "tag": "AUDIO",
+          "testId": null,
+          "src": "http://localhost:5173/uploads/morgan/02_saved-access/morgan.mp3",
+          "muted": false,
+          "paused": true,
+          "currentTime": "0.00",
+          "duration": "24.01",
+          "readyState": 4,
+          "visible": false
+        }
+      ],
+      "viewport": {
+        "w": 1280,
+        "h": 768
+      },
+      "scroll": {
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "label": "after-enter-on-cloudflare-continue",
+      "ts": 1778363930360,
+      "heading": "Saved access",
+      "bodyText": " CC Quick tunnel selected. Morgan can prefill webhook URLs for a live walkthrough. Saved access SAVED ACCESS Use 1Password saved access Continue without saved access Back Continue",
+      "bannedCopyVisible": false,
+      "modalOpen": false,
+      "readinessState": null,
+      "readinessLabel": null,
+      "activeElement": {
+        "tag": "BUTTON",
+        "text": "Use 1Password saved access",
+        "testId": "saved-access-onepassword",
+        "aria": "Use 1Password saved access"
+      },
+      "buttons": [
+        {
+          "text": "",
+          "title": "Previous setup screen",
+          "aria": "Previous setup screen",
+          "testId": null,
+          "disabled": false,
+          "rect": {
+            "x": 1060,
+            "y": 23,
+            "w": 38,
+            "h": 38
+          }
+        },
+        {
+          "text": "",
+          "title": "Next setup screen",
+          "aria": "Next setup screen",
+          "testId": null,
+          "disabled": false,
+          "rect": {
+            "x": 1106,
+            "y": 23,
+            "w": 38,
+            "h": 38
+          }
+        },
+        {
+          "text": "",
+          "title": "Mute Morgan audio",
+          "aria": "Mute Morgan audio",
+          "testId": null,
+          "disabled": false,
+          "rect": {
+            "x": 1152,
+            "y": 23,
+            "w": 38,
+            "h": 38
+          }
+        },
+        {
+          "text": "",
+          "title": "Start over: clear saved setup choices and delete the local CTO Kind cluster",
+          "aria": "Start over and clear the local CTO stack",
+          "testId": null,
+          "disabled": false,
+          "rect": {
+            "x": 1198,
+            "y": 23,
+            "w": 38,
+            "h": 38
+          }
+        },
+        {
+          "text": "CC",
+          "title": null,
+          "aria": "Show Morgan captions",
+          "testId": null,
+          "disabled": false,
+          "rect": {
+            "x": 431,
+            "y": 589,
+            "w": 48,
+            "h": 38
+          }
+        },
+        {
+          "text": "Use 1Password saved access",
+          "title": "Use 1Password saved access",
+          "aria": "Use 1Password saved access",
+          "testId": "saved-access-onepassword",
+          "disabled": false,
+          "rect": {
+            "x": 676,
+            "y": 345,
+            "w": 124,
+            "h": 124
+          }
+        },
+        {
+          "text": "Continue without saved access",
+          "title": "Continue without saved access",
+          "aria": "Continue without saved access",
+          "testId": "saved-access-skip",
+          "disabled": false,
+          "rect": {
+            "x": 819,
+            "y": 348,
+            "w": 118,
+            "h": 118
+          }
+        },
+        {
+          "text": "Back",
+          "title": "Back to Client Cluster",
+          "aria": null,
+          "testId": null,
+          "disabled": false,
+          "rect": {
+            "x": 1036,
+            "y": 482,
+            "w": 50,
+            "h": 24
+          }
+        },
+        {
+          "text": "Continue",
+          "title": "Continue to Cloudflare",
+          "aria": null,
+          "testId": "saved-access-continue",
+          "disabled": false,
+          "rect": {
+            "x": 1097,
+            "y": 482,
+            "w": 75,
+            "h": 24
+          }
+        }
+      ],
+      "medias": [
+        {
+          "tag": "AUDIO",
+          "testId": null,
+          "src": "http://localhost:5173/uploads/morgan/02_saved-access/morgan.mp3",
+          "muted": false,
+          "paused": true,
+          "currentTime": "0.00",
+          "duration": "24.01",
+          "readyState": 4,
+          "visible": false
+        }
+      ],
+      "viewport": {
+        "w": 1280,
+        "h": 768
+      },
+      "scroll": {
+        "x": 0,
+        "y": 0
+      }
+    }
+  ],
+  "actions": [],
+  "issues": [],
+  "events": [
+    {
+      "t": 1438151,
+      "type": "instrumented",
+      "heading": "CTO",
+      "screen": "CTO",
+      "detail": {}
+    },
+    {
+      "t": 1438156,
+      "type": "click",
+      "heading": "CTO",
+      "screen": "CTO",
+      "detail": {
+        "title": "Continue to saved access",
+        "text": "Continue",
+        "testId": null
+      }
+    },
+    {
+      "t": 1438159,
+      "type": "media.play.call",
+      "heading": "Saved access",
+      "screen": "Saved access",
+      "detail": {
+        "tag": "VIDEO",
+        "testId": null,
+        "src": "http://localhost:5173/uploads/morgan/02_saved-access/morgan.mp4",
+        "muted": false,
+        "paused": true,
+        "currentTime": "0.00",
+        "readyState": 0
+      }
+    },
+    {
+      "t": 1438165,
+      "type": "media.loadstart",
+      "heading": "Saved access",
+      "screen": "Saved access",
+      "detail": {
+        "tag": "VIDEO",
+        "testId": null,
+        "src": "http://localhost:5173/uploads/morgan/02_saved-access/morgan.mp4",
+        "muted": false,
+        "paused": false,
+        "currentTime": "0.00",
+        "duration": null,
+        "readyState": 0,
+        "error": null
+      }
+    },
+    {
+      "t": 1438165,
+      "type": "media.play",
+      "heading": "Saved access",
+      "screen": "Saved access",
+      "detail": {
+        "tag": "VIDEO",
+        "testId": null,
+        "src": "http://localhost:5173/uploads/morgan/02_saved-access/morgan.mp4",
+        "muted": false,
+        "paused": false,
+        "currentTime": "0.00",
+        "duration": null,
+        "readyState": 0,
+        "error": null
+      }
+    },
+    {
+      "t": 1438175,
+      "type": "media.play.reject",
+      "heading": "Saved access",
+      "screen": "Saved access",
+      "detail": {
+        "src": "http://localhost:5173/uploads/morgan/02_saved-access/morgan.mp4",
+        "message": "The operation is not supported."
+      }
+    },
+    {
+      "t": 1438176,
+      "type": "media.error",
+      "heading": "Saved access",
+      "screen": "Saved access",
+      "detail": {
+        "tag": "VIDEO",
+        "testId": null,
+        "src": "http://localhost:5173/uploads/morgan/02_saved-access/morgan.mp4",
+        "muted": false,
+        "paused": false,
+        "currentTime": "0.00",
+        "duration": null,
+        "readyState": 0,
+        "error": {
+          "code": 4,
+          "message": ""
+        }
+      }
+    },
+    {
+      "t": 1438183,
+      "type": "media.loadstart",
+      "heading": "Saved access",
+      "screen": "Saved access",
+      "detail": {
+        "tag": "AUDIO",
+        "testId": null,
+        "src": "http://localhost:5173/uploads/morgan/02_saved-access/morgan.mp3",
+        "muted": false,
+        "paused": true,
+        "currentTime": "0.00",
+        "duration": null,
+        "readyState": 0,
+        "error": null
+      }
+    },
+    {
+      "t": 1438190,
+      "type": "media.loadedmetadata",
+      "heading": "Saved access",
+      "screen": "Saved access",
+      "detail": {
+        "tag": "AUDIO",
+        "testId": null,
+        "src": "http://localhost:5173/uploads/morgan/02_saved-access/morgan.mp3",
+        "muted": false,
+        "paused": true,
+        "currentTime": "0.00",
+        "duration": "24.01",
+        "readyState": 1,
+        "error": null
+      }
+    },
+    {
+      "t": 1438194,
+      "type": "media.canplay",
+      "heading": "Saved access",
+      "screen": "Saved access",
+      "detail": {
+        "tag": "AUDIO",
+        "testId": null,
+        "src": "http://localhost:5173/uploads/morgan/02_saved-access/morgan.mp3",
+        "muted": false,
+        "paused": true,
+        "currentTime": "0.00",
+        "duration": "24.01",
+        "readyState": 4,
+        "error": null
+      }
+    },
+    {
+      "t": 1440063,
+      "type": "focus",
+      "heading": "Saved access",
+      "screen": "Saved access",
+      "detail": {
+        "selector": "[data-testid=\"saved-access-onepassword\"]",
+        "testId": "saved-access-onepassword"
+      }
+    },
+    {
+      "t": 1440317,
+      "type": "keyboard.enter",
+      "heading": "Saved access",
+      "screen": "Saved access",
+      "detail": {
+        "activeTag": "BUTTON",
+        "activeTestId": "saved-access-onepassword",
+        "activeText": "Use 1Password saved access"
+      }
+    },
+    {
+      "t": 1445846,
+      "type": "focus",
+      "heading": "Saved access",
+      "screen": "Saved access",
+      "detail": {
+        "selector": "[data-testid=\"cloudflare-continue\"]"
+      }
+    },
+    {
+      "t": 1446100,
+      "type": "keyboard.enter",
+      "heading": "Saved access",
+      "screen": "Saved access",
+      "detail": {
+        "activeTag": "BUTTON",
+        "activeTestId": "saved-access-onepassword",
+        "activeText": "Use 1Password saved access"
+      }
+    }
+  ]
+}

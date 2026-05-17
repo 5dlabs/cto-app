@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "createdAt": "2026-05-14T14:43:46.842Z",
+  "entry": {
+    "audioAssetId": "asset_p6x84y8LhERLN2fBixVnHMr6",
+    "audioUploadedAt": "2026-05-14T14:43:51.896Z",
+    "screen": {
+      "id": "04",
+      "slug": "source",
+      "folder": "04_source"
+    },
+    "variant": "nose-level",
+    "label": "nose-level / grounded presenter",
+    "modelId": "model_pruna-p-avatar",
+    "referenceImageAssetId": "asset_qD8pdsjsSaZhoyUxWG523aiU",
+    "body": {
+      "image": "asset_qD8pdsjsSaZhoyUxWG523aiU",
+      "audio": "asset_p6x84y8LhERLN2fBixVnHMr6",
+      "resolution": "720p",
+      "videoPrompt": "grounded presenter with Morgan's nose line pinned level to the camera. Throughout the video, the nose should not travel upward and the muzzle should not point upward. Avoid all head lift, chin lift, looking-up, bounce, excitement, celebration, sniffing, or emphatic head gestures. Keep the face forward and level; use restrained mouth movement, subtle blinks, and almost no head motion. Technical setup narration should feel composed, patient, and low-key. Preserve Morgan as the exact non-human golden retriever dog with glasses, leather gloves, clipboard, outfit, and background. no background music; no generated voice",
+      "stylePrompt": "composed low-key technical presenter; muzzle stays level; minimal movement",
+      "voicePrompt": "use the uploaded audio exactly as the speech track; no generated voice, no music, no paraphrasing",
+      "disablePromptUpsampling": true,
+      "seed": 7403
+    },
+    "estimatedCreativeUnits": 32,
+    "videoJobId": "job_FBHLuYyNzMjUMPorriduKGBP",
+    "status": "success",
+    "submittedAt": "2026-05-14T14:43:52.622Z",
+    "videoAssetId": "asset_McqHQN1gjHhUuPWJoa5DCcvo",
+    "localPath": "ui/public/uploads/morgan/ab/motion-prompt/04_source/nose-level/04_source-nose-level.mp4",
+    "progress": 1,
+    "lastPolledAt": "2026-05-14T14:44:39.159Z",
+    "completedAt": "2026-05-14T14:44:39.159Z",
+    "downloadedAt": "2026-05-14T14:44:41.013Z",
+    "ffprobe": {
+      "programs": [],
+      "stream_groups": [],
+      "streams": [
+        {
+          "codec_name": "h264",
+          "codec_type": "video",
+          "width": 960,
+          "height": 960
+        },
+        {
+          "codec_name": "aac",
+          "codec_type": "audio"
+        }
+      ],
+      "format": {
+        "duration": "12.669002",
+        "size": "11426109"
+      }
+    },
+    "discordPath": "ui/public/uploads/morgan/ab/motion-prompt/04_source/nose-level/04_source-nose-level-discord.mp4",
+    "comparePath": "ui/public/uploads/morgan/ab/motion-prompt/04_source/nose-level/04_source-current-left-nose-level-right.mp4"
+  },
+  "updatedAt": "2026-05-14T14:44:42.024Z"
+}

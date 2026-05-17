@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "variants": {
+    "audio-pad-150": {
+      "audioPath": "ui/public/uploads/morgan/ab/01_intro/lipsync-offset/audio-pad-150.mp3",
+      "audioAssetId": "asset_NKfyDdYNVMSZTCkivoZGXGxk",
+      "audioUploadedAt": "2026-05-14T22:41:44.826Z",
+      "body": {
+        "image": "asset_qD8pdsjsSaZhoyUxWG523aiU",
+        "audio": "asset_NKfyDdYNVMSZTCkivoZGXGxk",
+        "resolution": "720p",
+        "videoPrompt": "Morgan speaks from the same calm seated pose as the reference image. Natural but restrained mouth movement; keep the approved dog character, glasses, leather gloves, clipboard, outfit, and background. no background music; no generated voice",
+        "stylePrompt": "calm CTO setup guide; subtle expression; focus on accurate lip synchronization to the uploaded audio",
+        "voicePrompt": "use the uploaded audio exactly as the speech track; prioritize exact lip synchronization; no generated voice, no music, no paraphrasing",
+        "disablePromptUpsampling": true,
+        "seed": 8601
+      },
+      "jobId": "job_LyRok7HiGJjsyJJTQsUMg2cT",
+      "status": "success",
+      "submittedAt": "2026-05-14T22:41:45.459Z",
+      "progress": 1,
+      "assetId": "asset_PUbHYEqMhgzaNjwebYD2bQTc",
+      "lastPolledAt": "2026-05-14T22:42:42.908Z",
+      "path": "ui/public/uploads/morgan/ab/01_intro/lipsync-offset/audio-pad-150.mp4",
+      "downloadedAt": "2026-05-14T22:42:46.281Z",
+      "reviewPath": "ui/public/uploads/morgan/ab/01_intro/lipsync-offset/audio-pad-150-review.mp4"
+    },
+    "audio-pad-250": {
+      "audioPath": "ui/public/uploads/morgan/ab/01_intro/lipsync-offset/audio-pad-250.mp3",
+      "audioAssetId": "asset_cixXSqS2UPANoZoW8nBkuQxr",
+      "audioUploadedAt": "2026-05-14T22:43:36.213Z",
+      "body": {
+        "image": "asset_qD8pdsjsSaZhoyUxWG523aiU",
+        "audio": "asset_cixXSqS2UPANoZoW8nBkuQxr",
+        "resolution": "720p",
+        "videoPrompt": "Morgan speaks from the same calm seated pose as the reference image. Natural but restrained mouth movement; keep the approved dog character, glasses, leather gloves, clipboard, outfit, and background. no background music; no generated voice",
+        "stylePrompt": "calm CTO setup guide; subtle expression; focus on accurate lip synchronization to the uploaded audio",
+        "voicePrompt": "use the uploaded audio exactly as the speech track; prioritize exact lip synchronization; no generated voice, no music, no paraphrasing",
+        "disablePromptUpsampling": true,
+        "seed": 8601
+      },
+      "jobId": "job_HQvpwv7kkCcxRL9WNb52rydJ",
+      "status": "success",
+      "submittedAt": "2026-05-14T22:43:36.589Z",
+      "progress": 1,
+      "assetId": "asset_xW4vGsLXmkkScYZWeKdbPbcd",
+      "lastPolledAt": "2026-05-14T22:44:24.249Z",
+      "path": "ui/public/uploads/morgan/ab/01_intro/lipsync-offset/audio-pad-250.mp4",
+      "downloadedAt": "2026-05-14T22:44:31.396Z",
+      "reviewPath": "ui/public/uploads/morgan/ab/01_intro/lipsync-offset/audio-pad-250-review.mp4"
+    },
+    "video-delay-150": {
+      "path": "ui/public/uploads/morgan/01_intro/morgan.mp4",
+      "reviewPath": "ui/public/uploads/morgan/ab/01_intro/lipsync-offset/video-delay-150-review.mp4",
+      "status": "success",
+      "assetId": "local",
+      "lastPolledAt": "2026-05-14T22:45:24.710Z",
+      "kind": "postprocess-video-delay",
+      "delayMs": 150
+    },
+    "video-delay-250": {
+      "path": "ui/public/uploads/morgan/01_intro/morgan.mp4",
+      "reviewPath": "ui/public/uploads/morgan/ab/01_intro/lipsync-offset/video-delay-250-review.mp4",
+      "status": "success",
+      "assetId": "local",
+      "lastPolledAt": "2026-05-14T22:47:09.810Z",
+      "kind": "postprocess-video-delay",
+      "delayMs": 250
+    }
+  },
+  "updatedAt": "2026-05-14T22:48:30.423Z"
+}

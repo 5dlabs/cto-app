@@ -1,0 +1,159 @@
+{
+  "label": "morgan-source-install-actions-live",
+  "capturedAt": "2026-05-02T21:49:40.037Z",
+  "url": "http://localhost:5173/",
+  "title": "CTO",
+  "heading": "Source",
+  "text": "\nCC\nInstall GitLab on CTO selected. I’ll prepare the CTO GitLab deployment before connecting Morgan.\nSource\nMorganInstall me on your environment.\nSOURCE\nPick the logo you recognize. Morgan installs the app, detects access, and asks for anything else only if it appears.\n\nInstall me on your environment.\n\nInstall Morgan on GitHub\ngithub.com\n\nInstall Morgan on GitLab\ngitlab.com\n\nInstall GitLab on CTO\nself-hosted\nInstall Morgan on GitLab, then Morgan detects your groups and projects. Hosted, self-hosted, and token fallbacks stay in Review details.\nInstall Morgan on self-managed GitLab\nMorgan opens the self-managed GitLab app flow after confirming the server URL.\nReview details\nGITLAB SELF-MANAGED URL\n\nGITLAB NAMESPACE, GROUP, OR PROJECT\n\nMorgan uses this only after sign-in shows which accounts are available.\nSelf-managed GitLab will use the instance OAuth application API at/api/v4/applications.\nGitHub authorization timed out. Close any stale GitHub prompt, switch to the right browser profile, and try again.\nContinue",
+  "buttons": [
+    {
+      "text": "",
+      "title": "Previous setup screen",
+      "aria": "Previous setup screen",
+      "testId": "",
+      "disabled": false,
+      "visible": true,
+      "name": "",
+      "placeholder": "",
+      "value": ""
+    },
+    {
+      "text": "",
+      "title": "Next setup screen",
+      "aria": "Next setup screen",
+      "testId": "",
+      "disabled": false,
+      "visible": true,
+      "name": "",
+      "placeholder": "",
+      "value": ""
+    },
+    {
+      "text": "",
+      "title": "Mute Morgan audio",
+      "aria": "Mute Morgan audio",
+      "testId": "",
+      "disabled": false,
+      "visible": true,
+      "name": "",
+      "placeholder": "",
+      "value": ""
+    },
+    {
+      "text": "",
+      "title": "Start over: clear saved setup choices and delete the local CTO Kind cluster",
+      "aria": "Start over and clear the local CTO stack",
+      "testId": "",
+      "disabled": false,
+      "visible": true,
+      "name": "",
+      "placeholder": "",
+      "value": ""
+    },
+    {
+      "text": "CC",
+      "title": "",
+      "aria": "Show Morgan captions",
+      "testId": "",
+      "disabled": false,
+      "visible": true,
+      "name": "",
+      "placeholder": "",
+      "value": ""
+    },
+    {
+      "text": "Install Morgan on GitHubgithub.com",
+      "title": "Install Morgan on GitHub",
+      "aria": "Install Morgan on GitHub",
+      "testId": "source-install-github",
+      "disabled": false,
+      "visible": true,
+      "name": "",
+      "placeholder": "",
+      "value": ""
+    },
+    {
+      "text": "Install Morgan on GitLabgitlab.com",
+      "title": "Install Morgan on GitLab",
+      "aria": "Install Morgan on GitLab",
+      "testId": "source-install-gitlab",
+      "disabled": false,
+      "visible": true,
+      "name": "",
+      "placeholder": "",
+      "value": ""
+    },
+    {
+      "text": "Install GitLab on CTOself-hosted",
+      "title": "Install GitLab on CTO",
+      "aria": "Install GitLab on CTO",
+      "testId": "source-install-gitlab-cto",
+      "disabled": false,
+      "visible": true,
+      "name": "",
+      "placeholder": "",
+      "value": ""
+    },
+    {
+      "text": "Install Morgan on self-managed GitLab",
+      "title": "",
+      "aria": "",
+      "testId": "source-gitlab-install",
+      "disabled": true,
+      "visible": true,
+      "name": "",
+      "placeholder": "",
+      "value": ""
+    },
+    {
+      "text": "Review details",
+      "title": "",
+      "aria": "",
+      "testId": "",
+      "disabled": false,
+      "visible": true,
+      "name": "",
+      "placeholder": "",
+      "value": ""
+    },
+    {
+      "text": "Continue",
+      "title": "Continue to harness selection",
+      "aria": "",
+      "testId": "",
+      "disabled": true,
+      "visible": true,
+      "name": "",
+      "placeholder": "",
+      "value": ""
+    }
+  ],
+  "inputs": [
+    {
+      "tag": "input",
+      "type": "url",
+      "name": "",
+      "placeholder": "https://gitlab.example.com",
+      "testId": "source-base-url",
+      "value": "",
+      "visible": true,
+      "text": "",
+      "title": "",
+      "aria": ""
+    },
+    {
+      "tag": "input",
+      "type": "text",
+      "name": "",
+      "placeholder": "platform/team",
+      "testId": "",
+      "value": "",
+      "visible": true,
+      "text": "",
+      "title": "",
+      "aria": ""
+    }
+  ],
+  "selected": [],
+  "controls": []
+}

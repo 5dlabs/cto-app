@@ -10,21 +10,28 @@ import {
 } from "react";
 import fiveDLabsLogo from "../assets/5d-labs-mark.png";
 import {
+  applySecretSourceMatches,
+  detectSecretSources,
+  installOnePasswordCli,
   prepareOriginTransfer,
   prepareScmProvisioning,
+  previewSecretSourceMatches,
   provisionOriginApplication,
   saveScmConnection,
   slugifyConnectionId,
   type OriginTransferPlan,
   type ScmProvider,
+  type SecretSourceApplyResult,
+  type SecretSourceDetectionResult,
+  type SecretSourceMatchPreview,
+  type SecretSourcePreviewResult,
 } from "../api/sourceControlProvisioning";
 import { invokeTauri, isTauriCommandAvailable, listenTauri, openExternalUrl } from "../api/tauri";
-import { isLocalStackBootstrapPreview, shouldSkipLocalStackBootstrap } from "../runtime";
+import { isLocalStackBootstrapPreview, shouldEnableSelfHostedSource, shouldSkipLocalStackBootstrap } from "../runtime";
 import { VoiceClient } from "./VoiceClient";
 import {
   IconClaude,
-  IconChevLeft,
-  IconChevRight,
+  IconClose,
   IconCloud,
   IconCpu,
   IconCursor,
@@ -43,8 +50,6 @@ import {
   IconShield,
   IconSparkles,
   IconTerminal,
-  IconVolume,
-  IconVolumeOff,
   type IconProps,
 } from "../views/icons";
 
@@ -52,14 +57,6 @@ type BootstrapProgress = {
   stage: string;
   message: string;
   progress: number;
-};
-
-type AudioOutputStatus = {
-  hasOutputDevice: boolean;
-  outputDeviceName: string | null;
-  outputVolumePercent: number | null;
-  outputMuted: boolean | null;
-  warning: string | null;
 };
 
 type CaptionCue = {
@@ -80,6 +77,8 @@ type SourceAuthMode =
   | "gitlab-instance-oauth-app";
 type SetupScreen =
   | "intro"
+  | "cloudflare"
+  | "saved-access"
   | "source"
   | "harness"
   | "clis"
@@ -89,9 +88,10 @@ type SetupScreen =
   | "provider-auth"
   | "tools"
   | "agent-tokens";
-const MORGAN_PORTRAIT_SRC = "/uploads/morgan-portrait.jpg";
 const MORGAN_VIDEO_SCREENS: ReadonlySet<SetupScreen> = new Set([
   "intro",
+  "cloudflare",
+  "saved-access",
   "source",
   "harness",
   "clis",
@@ -104,17 +104,20 @@ const MORGAN_VIDEO_SCREENS: ReadonlySet<SetupScreen> = new Set([
 ]);
 const MORGAN_MEDIA_SCREEN_SLUG: Record<SetupScreen, string> = {
   intro: "01_intro",
-  source: "02_source",
-  harness: "03_harness",
-  clis: "04_clis",
-  profiles: "05_providers",
-  "provider-models": "06_provider-models",
-  "harness-routing": "07_harness-routing",
-  "provider-auth": "07_provider-auth",
-  tools: "08_tools",
-  "agent-tokens": "09_agent-tokens",
+  "saved-access": "02_saved-access",
+  cloudflare: "03_endpoint",
+  source: "04_source",
+  harness: "05_harness",
+  clis: "06_clis",
+  profiles: "07_providers",
+  "provider-models": "08_provider-models",
+  "harness-routing": "09_harness-routing",
+  "provider-auth": "10_provider-auth",
+  tools: "11_tools",
+  "agent-tokens": "12_agent-tokens",
 };
-const MORGAN_INSTALL_MEDIA_SLUG = "10_install-start";
+const MORGAN_INSTALL_MEDIA_SLUG = "13_install-start";
+const MORGAN_PORTRAIT_ONLY_SCREENS: ReadonlySet<SetupScreen> = new Set();
 const INTRO_ADVANCE_FALLBACK_MS = 18_000;
 const GITHUB_OAUTH_UI_TIMEOUT_MS = 120_000;
 type HarnessId = "openclaw" | "hermes";
@@ -371,53 +374,141 @@ type MetricsState = {
   report: LocalStackResourceMetricsReport | null;
 };
 
-function nextSetupScreen(screen: SetupScreen): SetupScreen {
-  switch (screen) {
-    case "intro":
-      return "source";
-    case "source":
-      return "harness";
-    case "harness":
-      return "clis";
-    case "clis":
-      return "profiles";
-    case "profiles":
-      return "provider-models";
-    case "provider-models":
-      return "harness-routing";
-    case "harness-routing":
-      return "provider-auth";
-    case "provider-auth":
-      return "tools";
-    case "tools":
-      return "agent-tokens";
-    case "agent-tokens":
-      return "agent-tokens";
+type SavedAccessState = "idle" | "detecting" | "installing-cli" | "unavailable" | "review" | "applying" | "connected" | "failed";
+type CloudflareEndpointMode = "idle" | "quick" | "login" | "saved" | "local";
+type SavedAccessPrepMode = "idle" | "onepassword" | "bitwarden" | "skipped";
+type SavedAccessCue = "idle" | "ready" | "missing-desktop" | "missing-cli" | "desktop-integration" | "approval-pending" | "needs-access" | "no-account";
+
+const ONEPASSWORD_DESKTOP_INSTALL_URL = "https://1password.com/downloads/mac/";
+const ONEPASSWORD_CLI_INSTALL_URL = "https://developer.1password.com/docs/cli/get-started/";
+const ONEPASSWORD_DESKTOP_CLI_SETTINGS_URL = "https://developer.1password.com/docs/cli/app-integration/";
+const BITWARDEN_CLI_DOCS_URL = "https://bitwarden.com/help/cli/";
+const SAVED_ACCESS_DETECTION_TIMEOUT_MS = 12_000;
+const SAVED_ACCESS_PREVIEW_TIMEOUT_MS = 15_000;
+const SAVED_ACCESS_APPLY_TIMEOUT_MS = 50_000;
+
+function withSavedAccessTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  let timer: number | null = null;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = window.setTimeout(() => {
+      reject(new Error(`${label} is waiting on 1Password approval. Approve the desktop prompt, then retry.`));
+    }, timeoutMs);
+  });
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timer !== null) window.clearTimeout(timer);
+  });
+}
+
+function savedAccessCueFromDetection(
+  detection: SecretSourceDetectionResult | null,
+  state: SavedAccessState,
+): SavedAccessCue {
+  if (state === "idle" || state === "detecting" || state === "installing-cli") return "idle";
+  const onePassword = detection?.providers.find((provider) => provider.provider === "onepassword");
+  if (!onePassword) return "needs-access";
+  if (!onePassword.desktopInstalled) return "missing-desktop";
+  if (!onePassword.cliInstalled) return "missing-cli";
+  if (onePassword.available || onePassword.cliAccessReady) return "ready";
+  if (onePassword.pendingUserPermission) return "approval-pending";
+  if (onePassword.accountConfigured === false) return "no-account";
+  if (onePassword.cliInstalled && onePassword.desktopAppIntegrationEnabled === false) return "desktop-integration";
+  return "needs-access";
+}
+
+function savedAccessReadinessPercent(cue: SavedAccessCue): number {
+  switch (cue) {
+    case "ready":
+      return 100;
+    case "approval-pending":
+      return 82;
+    case "needs-access":
+      return 72;
+    case "desktop-integration":
+      return 64;
+    case "no-account":
+      return 58;
+    case "missing-cli":
+      return 46;
+    case "missing-desktop":
+      return 18;
+    case "idle":
+      return 8;
   }
 }
 
-function previousSetupScreen(screen: SetupScreen): SetupScreen {
-  switch (screen) {
-    case "intro":
-      return "intro";
-    case "source":
-      return "intro";
-    case "harness":
-      return "source";
-    case "clis":
-      return "harness";
-    case "profiles":
-      return "clis";
-    case "provider-models":
-      return "profiles";
-    case "harness-routing":
-      return "provider-models";
-    case "provider-auth":
-      return "harness-routing";
-    case "tools":
-      return "provider-auth";
-    case "agent-tokens":
-      return "tools";
+function savedAccessCueLabel(cue: SavedAccessCue, state: SavedAccessState): string {
+  if (state === "detecting") return "Checking";
+  if (state === "installing-cli") return "Installing CLI";
+  switch (cue) {
+    case "ready":
+      return "Ready";
+    case "missing-desktop":
+      return "Desktop";
+    case "missing-cli":
+      return "CLI";
+    case "approval-pending":
+      return "Approve";
+    case "desktop-integration":
+      return "Integration";
+    case "needs-access":
+      return "Access";
+    case "no-account":
+      return "Account";
+    case "idle":
+      return "Pending";
+  }
+}
+
+function savedAccessConditionalMediaKey(
+  mode: SavedAccessPrepMode,
+  cue: SavedAccessCue,
+  bitwarden?: SecretSourceDetectionResult["providers"][number],
+): string | null {
+  if (mode === "bitwarden") {
+    const status = bitwarden?.status?.toLowerCase() ?? "";
+    if (bitwarden?.available || bitwarden?.cliAccessReady || status.includes("unlocked")) {
+      return "bitwarden-unlocked";
+    }
+    if (bitwarden?.cliInstalled || status.includes("locked") || status.includes("unauthenticated")) {
+      return "bitwarden-locked";
+    }
+    return "bitwarden-detected";
+  }
+  if (mode !== "onepassword") return null;
+  return cue === "idle" || cue === "approval-pending" ? null : `onepassword-${cue}`;
+}
+
+function cloudflareConditionalMediaKey(mode: CloudflareEndpointMode): string | null {
+  switch (mode) {
+    case "login":
+      return "cloudflare-login";
+    case "saved":
+      return "cloudflare-saved-access";
+    case "quick":
+      return "cloudflare-quick-tunnel";
+    case "local":
+      return "cloudflare-local";
+    case "idle":
+      return null;
+  }
+}
+
+function savedAccessCueAction(cue: SavedAccessCue): { label: string; url?: string; action?: "install-cli" | "open-url" } | null {
+  switch (cue) {
+    case "missing-desktop":
+      return { label: "Install 1Password", url: ONEPASSWORD_DESKTOP_INSTALL_URL, action: "open-url" };
+    case "missing-cli":
+      return { label: "Install CLI", action: "install-cli" };
+    case "approval-pending":
+      return { label: "Retry after approval" };
+    case "desktop-integration":
+      return { label: "Open guide", url: ONEPASSWORD_DESKTOP_CLI_SETTINGS_URL, action: "open-url" };
+    case "needs-access":
+      return { label: "Enable access", url: ONEPASSWORD_DESKTOP_CLI_SETTINGS_URL, action: "open-url" };
+    case "no-account":
+      return { label: "Open guide", url: ONEPASSWORD_DESKTOP_CLI_SETTINGS_URL, action: "open-url" };
+    default:
+      return null;
   }
 }
 
@@ -1587,10 +1678,13 @@ function baselineStatusValue(report: LocalStackResourceMetricsReport, namespace:
 
 function buildClientClusterBaselineItems(metrics: MetricsState): MetricsItem[] {
   if (!metrics.report) {
+    const placeholder = metrics.status === "unavailable" ? "unknown" : "checking";
     return [
-      { label: "Ingress", value: metrics.status === "unavailable" ? "unknown" : "checking" },
-      { label: "Argo CD", value: metrics.status === "unavailable" ? "unknown" : "checking" },
-      { label: "CTO", value: metrics.status === "unavailable" ? "unknown" : "checking" },
+      { label: "Kind", value: placeholder },
+      { label: "Ingress", value: placeholder },
+      { label: "Argo CD", value: placeholder },
+      { label: "CTO", value: placeholder },
+      { label: "Pods", value: placeholder },
     ];
   }
 
@@ -1930,6 +2024,10 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
   const [state, setState] = useState<BootstrapState>("credentials");
   const [setupScreen, setSetupScreen] = useState<SetupScreen>("intro");
   const [dependencyPrepState, setDependencyPrepState] = useState<DependencyPrepState>("idle");
+  const [cloudflareEndpointMode, setCloudflareEndpointMode] = useState<CloudflareEndpointMode>("idle");
+  const [cloudflareEndpointUrl, setCloudflareEndpointUrl] = useState("");
+  const [savedAccessPrepMode, setSavedAccessPrepMode] = useState<SavedAccessPrepMode>("idle");
+  const [savedAccessModalOpen, setSavedAccessModalOpen] = useState(false);
   const [sourceProvider, setSourceProvider] = useState<ScmProvider>("github");
   const [sourceHostMode, setSourceHostMode] = useState<SourceHostMode>("hosted");
   const [sourceHostUrl, setSourceHostUrl] = useState(SOURCE_DEFAULT_URLS.github);
@@ -1961,6 +2059,12 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
   const [scmProvisioningMessage, setScmProvisioningMessage] = useState<string | null>(null);
   const [githubOAuthPrompt, setGithubOAuthPrompt] = useState<GitHubCliOAuthPrompt | null>(null);
   const [githubAccountOptions, setGithubAccountOptions] = useState<GitHubCliAccount[]>([]);
+  const [savedAccessState, setSavedAccessState] = useState<SavedAccessState>("idle");
+  const [savedAccessDetection, setSavedAccessDetection] = useState<SecretSourceDetectionResult | null>(null);
+  const [showSavedAccessMoreOptions, setShowSavedAccessMoreOptions] = useState(false);
+  const [savedAccessPreview, setSavedAccessPreview] = useState<SecretSourcePreviewResult | null>(null);
+  const [savedAccessApplyResult, setSavedAccessApplyResult] = useState<SecretSourceApplyResult | null>(null);
+  const [showSavedAccessReview, setShowSavedAccessReview] = useState(false);
   const [enabledDiscordAgents, setEnabledDiscordAgents] = useState<Partial<Record<DiscordAgentId, true>>>(
     () =>
       Object.fromEntries(
@@ -1976,15 +2080,14 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
   });
   const [error, setError] = useState<string | null>(null);
   const [previewBanner, setPreviewBanner] = useState<string | null>(null);
-  const [audioWarning, setAudioWarning] = useState<string | null>(null);
   const [resettingFlow, setResettingFlow] = useState(false);
-  const [morganAudioMuted, setMorganAudioMuted] = useState(false);
   const [captionsEnabled, setCaptionsEnabled] = useState(false);
+  const [morganAudioUnlocked, setMorganAudioUnlocked] = useState(false);
   const [captionCues, setCaptionCues] = useState<CaptionCue[]>([]);
   const [activeCaptionText, setActiveCaptionText] = useState("");
-  const [morganVideoUnavailable, setMorganVideoUnavailable] = useState(false);
   const [morganConversationTurn, setMorganConversationTurn] = useState(0);
   const [metrics, setMetrics] = useState<MetricsState>({ status: "idle", report: null });
+  const enableSelfHostedSource = shouldEnableSelfHostedSource();
   const [githubForm, setGithubForm] = useState<BootstrapGithubForm>({
     enabled: true,
     token: "",
@@ -2007,8 +2110,10 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
   const metricsInFlight = useRef(false);
   const lastMetricsProgress = useRef(0);
   const morganVideoRef = useRef<HTMLVideoElement | null>(null);
-  const morganAudioRef = useRef<HTMLAudioElement | null>(null);
   const introAdvanceTimer = useRef<number | null>(null);
+  const startedMorganMediaKeys = useRef<Set<string>>(new Set());
+  const playedMorganVideoKeys = useRef<Set<string>>(new Set());
+  const playedMorganMediaKeys = useRef<Set<string>>(new Set());
   const selectedAiCliIds = useMemo(
     () => AI_CLIS.filter((cli) => selectedCliIds[cli.id]).map((cli) => cli.id),
     [selectedCliIds],
@@ -2130,15 +2235,16 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
     !isManualSourceTokenMode(sourceAuthMode) ||
     githubForm.token.trim().length > 0 ||
     sourceCredentialForm.token.trim().length > 0;
+  const savedAccessConnected = savedAccessState === "connected" && Boolean(savedAccessApplyResult);
   const sourceReady = selected5DOrigin
     ? sourceOriginAppCreated
-    : (shouldAskForSourceNamespace ? sourceNamespaceReady : true) && sourceAuthReady;
+    : (shouldAskForSourceNamespace ? sourceNamespaceReady : true) &&
+      (sourceAuthReady || savedAccessConnected);
   const clisReady = selectedProviderFilterCliIds.length > 0;
   const providersReady = selectedProviderCount > 0;
   const routingReady =
     selectedHarnessModelRoutes.length > 0 && effectivePrimaryHarnessModelRoute !== null;
   const harnessReady = harness !== null;
-  const canContinue = sourceReady && clisReady && harnessReady && providersReady;
   const configuredToolKeyCount = useMemo(
     () =>
       TOOL_API_KEYS.filter((tool) => (toolApiKeys[tool.name] ?? "").trim().length > 0).length,
@@ -2155,14 +2261,32 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
       ).length,
     [discordAgentTokens, enabledDiscordAgents],
   );
+  const canContinue = sourceReady && clisReady && harnessReady && providersReady;
   const morganMediaSlug =
     state === "checking"
       ? MORGAN_INSTALL_MEDIA_SLUG
       : state === "credentials" && MORGAN_VIDEO_SCREENS.has(setupScreen)
         ? MORGAN_MEDIA_SCREEN_SLUG[setupScreen]
         : null;
+  const bitwardenDetection = savedAccessDetection?.providers.find((provider) => provider.provider === "bitwarden");
+  const savedAccessCue = savedAccessCueFromDetection(savedAccessDetection, savedAccessState);
+  const savedAccessConditionalKey = savedAccessConditionalMediaKey(
+    savedAccessPrepMode,
+    savedAccessCue,
+    bitwardenDetection,
+  );
+  const cloudflareConditionalKey = cloudflareConditionalMediaKey(cloudflareEndpointMode);
+  const morganConditionalMediaKey =
+    setupScreen === "saved-access"
+      ? savedAccessConditionalKey
+      : setupScreen === "cloudflare"
+        ? cloudflareConditionalKey
+        : null;
+  const activeMorganMediaKey = state === "checking" ? "install-start" : morganConditionalMediaKey ?? setupScreen;
+  const morganMediaBasename = morganConditionalMediaKey ?? "morgan";
+  const morganCaptionBasename = morganConditionalMediaKey ?? "captions";
   const activeMorganPrompt =
-    setupScreen === "source"
+    setupScreen === "cloudflare" || setupScreen === "saved-access" || setupScreen === "source"
       ? ""
       : setupScreen === "harness"
         ? "Which harness should run your agents?"
@@ -2234,60 +2358,56 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  const playMorganVideo = useCallback(async () => {
-    const video = morganVideoRef.current;
-    if (!video) return;
+  const playMorganVideo = useCallback(
+    async (options: { restartEnded?: boolean; force?: boolean; audible?: boolean } = {}) => {
+      const video = morganVideoRef.current;
+      if (!video) return;
 
-    try {
-      video.muted = morganAudioMuted;
-      if (video.ended) {
-        video.currentTime = 0;
-      }
-      await video.play();
-    } catch (err) {
-      if (err instanceof DOMException && err.name === "NotAllowedError") {
-        console.info("Morgan video autoplay with audio is waiting for a user gesture.");
-        setAudioWarning("Enable audio playback so you can hear Morgan during setup.");
-        return;
-      }
-      if (err instanceof DOMException && err.name === "AbortError") {
-        return;
-      }
-      if (err instanceof DOMException && err.name === "NotSupportedError") {
-        setMorganVideoUnavailable(true);
-        return;
-      }
-      setError(`Could not play Morgan video: ${String(err)}`);
-    }
-  }, [morganAudioMuted]);
+      const mediaKey = video.dataset.morganMediaKey ?? "unknown";
+      const startedKey = `${mediaKey}:video`;
+      const shouldRestartEndedMedia = Boolean(options.restartEnded) && !playedMorganVideoKeys.current.has(mediaKey);
+      if (!options.force && startedMorganMediaKeys.current.has(startedKey) && !video.paused && !video.ended) return;
+      if (video.ended && !shouldRestartEndedMedia) return;
 
-  const playMorganAudio = useCallback(async () => {
-    const audio = morganAudioRef.current;
-    if (!audio) return;
-
-    try {
-      audio.muted = morganAudioMuted;
-      if (audio.ended) {
-        audio.currentTime = 0;
+      try {
+        video.muted = !options.audible;
+        video.defaultMuted = !options.audible;
+        if (options.audible) {
+          video.volume = 1;
+        }
+        if (video.ended && shouldRestartEndedMedia) {
+          video.currentTime = 0;
+        }
+        startedMorganMediaKeys.current.add(startedKey);
+        await video.play();
+      } catch (err) {
+        startedMorganMediaKeys.current.delete(startedKey);
+        if (err instanceof DOMException && err.name === "AbortError") {
+          return;
+        }
+        console.error("Morgan MP4 playback failed", {
+          mediaKey,
+          src: video.currentSrc || video.src,
+          error: err,
+        });
       }
-      await audio.play();
-    } catch (err) {
-      if (err instanceof DOMException && err.name === "NotAllowedError") {
-        setAudioWarning("Enable audio playback so you can hear Morgan during setup.");
-      }
-    }
-  }, [morganAudioMuted]);
+    },
+    [],
+  );
 
-  const speakMorganCue = useCallback(async (text: string, reason: "setup-selection" = "setup-selection") => {
-    if (morganAudioMuted || isLocalStackBootstrapPreview()) return;
-    try {
-      const client = setupSelectionVoiceClient.current ?? new VoiceClient();
-      setupSelectionVoiceClient.current = client;
-      await client.speakCue(text, reason);
-    } catch {
-      // Reactive Morgan audio is an enhancement. Selection should never block on voice-bridge.
-    }
-  }, [morganAudioMuted]);
+  const speakMorganCue = useCallback((text: string, reason = "setup-selection") => {
+    if (isLocalStackBootstrapPreview()) return;
+    const run = async () => {
+      try {
+        const client = setupSelectionVoiceClient.current ?? new VoiceClient();
+        setupSelectionVoiceClient.current = client;
+        await client.speakCue(text, reason);
+      } catch {
+        // Reactive Morgan audio is an enhancement. Selection should never block on voice-bridge.
+      }
+    };
+    window.setTimeout(() => void run(), 0);
+  }, []);
 
   const handleMorganSelection = useCallback(
     async (acknowledgement: string, applySelection: () => void) => {
@@ -2300,18 +2420,6 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
   );
 
   useEffect(() => {
-    if (morganVideoRef.current) {
-      morganVideoRef.current.muted = morganAudioMuted;
-    }
-    if (morganAudioRef.current) {
-      morganAudioRef.current.muted = morganAudioMuted;
-    }
-    if (morganAudioMuted) {
-      setAudioWarning(null);
-    }
-  }, [morganAudioMuted]);
-
-  useEffect(() => {
     return () => setupSelectionVoiceClient.current?.close();
   }, []);
 
@@ -2321,16 +2429,13 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
       return;
     }
 
-    const currentTime =
-      morganVideoRef.current && !morganVideoUnavailable
-        ? morganVideoRef.current.currentTime
-        : morganAudioRef.current?.currentTime;
+    const currentTime = morganVideoRef.current?.currentTime;
     const activeCue =
       typeof currentTime === "number"
         ? captionCues.find((cue) => currentTime >= cue.start && currentTime <= cue.end)
         : undefined;
     setActiveCaptionText(activeCue?.text ?? "");
-  }, [captionCues, captionsEnabled, morganVideoUnavailable]);
+  }, [captionCues, captionsEnabled]);
 
   const clearIntroAdvanceTimer = useCallback(() => {
     if (introAdvanceTimer.current === null) return;
@@ -2372,8 +2477,8 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
           progress: 100,
         });
         setDependencyPrepState("ready");
-        setPreviewBanner("Client Cluster baseline is ready. Now connect Source while CTO keeps the local stack warm.");
-        setSetupScreen("source");
+        setPreviewBanner("Client Cluster baseline is ready. Next I’ll check saved access.");
+        setSetupScreen("saved-access");
       } catch (err) {
         setDependencyPrepState("failed");
         setError(String(err));
@@ -2390,28 +2495,13 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
         progress: 100,
       });
       setDependencyPrepState("ready");
-      setPreviewBanner("Client Cluster baseline is ready. Now connect Source while CTO keeps the local stack warm.");
-      setSetupScreen("source");
+      setPreviewBanner("Client Cluster baseline is ready. Next I’ll check saved access.");
+      setSetupScreen("saved-access");
     } catch (err) {
       setDependencyPrepState("failed");
       setError(String(err));
     }
   }, [clearIntroAdvanceTimer, refreshMetrics]);
-
-  const navigateSetupForDev = useCallback(
-    (direction: "previous" | "next") => {
-      clearIntroAdvanceTimer();
-      setError(null);
-      setPreviewBanner(null);
-      setState("credentials");
-      setActiveCaptionText("");
-      setDependencyPrepState((current) => (current === "running" ? "idle" : current));
-      setSetupScreen((current) =>
-        direction === "previous" ? previousSetupScreen(current) : nextSetupScreen(current),
-      );
-    },
-    [clearIntroAdvanceTimer],
-  );
 
   const scheduleIntroAdvance = useCallback(
     (durationSeconds?: number) => {
@@ -2530,6 +2620,113 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
     );
   }, []);
 
+  const previewSavedAccess = useCallback(async (knownDetection?: SecretSourceDetectionResult) => {
+    setSavedAccessState("detecting");
+    setShowSavedAccessReview(false);
+    setSavedAccessPreview(null);
+    setSavedAccessApplyResult(null);
+    setError(null);
+    setScmProvisioningMessage("Checking approved access.");
+    try {
+      const detection = knownDetection ?? await withSavedAccessTimeout(
+        detectSecretSources(),
+        SAVED_ACCESS_DETECTION_TIMEOUT_MS,
+        "1Password readiness check",
+      );
+      setSavedAccessDetection(detection);
+      const onePassword = detection.providers.find((provider) => provider.provider === "onepassword");
+      if (!onePassword?.available) {
+        setSavedAccessState("unavailable");
+        setScmProvisioningMessage(detection.message || "Approved access is not ready yet.");
+        if (onePassword?.cliInstalled && onePassword?.desktopAppIntegrationEnabled === false) {
+          void openExternalUrl(ONEPASSWORD_DESKTOP_CLI_SETTINGS_URL).catch(() => undefined);
+        }
+        setShowSourceAdvanced(true);
+        return;
+      }
+
+      const preview = await withSavedAccessTimeout(
+        previewSecretSourceMatches({
+          provider: "onepassword",
+          targets: [sourceProvider === "github" ? "GITHUB_TOKEN" : "GITLAB_TOKEN"],
+        }),
+        SAVED_ACCESS_PREVIEW_TIMEOUT_MS,
+        "1Password metadata preview",
+      );
+      setSavedAccessPreview(preview);
+      setSavedAccessState("review");
+      setShowSavedAccessReview(true);
+      setScmProvisioningMessage(
+        preview.matches.length > 0
+          ? "Review before connecting. Values stay [REDACTED] until you approve."
+          : "No matching approved access was found. Paste token remains available.",
+      );
+    } catch (err) {
+      setSavedAccessState("failed");
+      setError(String(err));
+      setScmProvisioningMessage("Approved access could not be checked. Paste token is available.");
+      setShowSourceAdvanced(true);
+    }
+  }, [sourceProvider]);
+
+  const installSavedAccessCliAndRetry = useCallback(async () => {
+    setSavedAccessState("installing-cli");
+    setError(null);
+    setScmProvisioningMessage("Installing the official 1Password CLI, then I’ll check saved access again.");
+    try {
+      const detection = await withSavedAccessTimeout(
+        installOnePasswordCli(),
+        SAVED_ACCESS_DETECTION_TIMEOUT_MS,
+        "1Password CLI install check",
+      );
+      setSavedAccessDetection(detection);
+      await previewSavedAccess(detection);
+    } catch (err) {
+      setSavedAccessState("failed");
+      setError(String(err));
+      setScmProvisioningMessage("I could not install the 1Password CLI automatically. I opened the official setup guide instead.");
+      void openExternalUrl(ONEPASSWORD_CLI_INSTALL_URL).catch(() => undefined);
+    }
+  }, [previewSavedAccess]);
+
+
+  const applySavedAccess = useCallback(async () => {
+    const matches = savedAccessPreview?.matches ?? [];
+    if (matches.length === 0) {
+      setShowSourceAdvanced(true);
+      setScmProvisioningMessage("No approved access match is selected. Paste token is available.");
+      return;
+    }
+
+    setSavedAccessState("applying");
+    setError(null);
+    setScmProvisioningMessage("Applying approved saved access. Raw values stay out of the UI.");
+    try {
+      const result = await withSavedAccessTimeout(
+        applySecretSourceMatches({
+          provider: "onepassword",
+          approved: true,
+          matches: matches.map((match: SecretSourceMatchPreview) => ({
+            purpose: match.purpose,
+            targetSecretKey: match.targetSecretKey,
+            providerRef: match.providerRef,
+          })),
+        }),
+        SAVED_ACCESS_APPLY_TIMEOUT_MS,
+        "1Password approved field read",
+      );
+      setSavedAccessApplyResult(result);
+      setSavedAccessState("connected");
+      setShowSavedAccessReview(false);
+      setScmProvisioningMessage(result.message || "Access connected");
+    } catch (err) {
+      setSavedAccessState("failed");
+      setError(String(err));
+      setScmProvisioningMessage("Approved access was not applied. Paste token is available.");
+      setShowSourceAdvanced(true);
+    }
+  }, [savedAccessPreview]);
+
   const prepareOriginMirrorReview = useCallback(async () => {
     const hostedProvider = sourceProvider === "gitlab" ? "gitlab" : "github";
     const sourceConnectionId = sourceOwner.trim()
@@ -2619,6 +2816,11 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     setScmProvisioningMessage(null);
+    setSavedAccessState("idle");
+    setSavedAccessDetection(null);
+    setSavedAccessPreview(null);
+    setSavedAccessApplyResult(null);
+    setShowSavedAccessReview(false);
   }, [sourceHostMode, sourceHostUrl, sourceProvider]);
 
   const runBootstrap = useCallback(async () => {
@@ -2772,7 +2974,6 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const code = githubOAuthPrompt?.userCode?.trim();
-    if (morganAudioMuted) return;
     if (!code || spokenGithubOAuthCode.current === code) return;
 
     spokenGithubOAuthCode.current = code;
@@ -2793,7 +2994,7 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [githubOAuthPrompt?.userCode, morganAudioMuted]);
+  }, [githubOAuthPrompt?.userCode]);
 
   useEffect(() => {
     return () => {
@@ -2828,21 +3029,6 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
     };
   }, [applyBootstrapDefaults]);
 
-  useEffect(() => {
-    if (state !== "credentials") return;
-
-    let cancelled = false;
-    void invokeTauri<AudioOutputStatus>("audio_output_status")
-      .then((status) => {
-        if (cancelled) return;
-        setAudioWarning(status.warning);
-      })
-      .catch(() => undefined);
-
-    return () => {
-      cancelled = true;
-    };
-  }, [state]);
 
   useEffect(() => {
     if (retriedGithubDefaults.current) return;
@@ -2878,8 +3064,7 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
       };
     }
 
-    const captionSrc = `/uploads/morgan/${morganMediaSlug}/captions.vtt`;
-    setMorganVideoUnavailable(false);
+    const captionSrc = `/uploads/morgan/${morganMediaSlug}/${morganCaptionBasename}.vtt`;
     setActiveCaptionText("");
 
     void fetch(captionSrc)
@@ -2898,7 +3083,7 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [morganMediaSlug]);
+  }, [morganCaptionBasename, morganMediaSlug]);
 
   useEffect(() => {
     const allowed = new Set(providerOptions.map((provider) => provider.id));
@@ -2959,70 +3144,573 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!morganMediaSlug) return;
 
-    const playTimer = window.setTimeout(() => {
-      void playMorganVideo();
+    const mediaKey = activeMorganMediaKey;
+    const videoPlayTimer = window.setTimeout(() => {
+      void playMorganVideo({
+        restartEnded: !playedMorganVideoKeys.current.has(mediaKey),
+        audible: morganAudioUnlocked,
+      });
     }, 0);
     if (setupScreen === "intro") {
       scheduleIntroAdvance();
     }
 
     return () => {
-      window.clearTimeout(playTimer);
+      window.clearTimeout(videoPlayTimer);
       clearIntroAdvanceTimer();
     };
-  }, [clearIntroAdvanceTimer, morganMediaSlug, playMorganVideo, scheduleIntroAdvance, setupScreen]);
-
-  if (state === "ready" && !isLocalStackBootstrapPreview()) {
-    return <>{children}</>;
-  }
+  }, [clearIntroAdvanceTimer, activeMorganMediaKey, morganAudioUnlocked, morganMediaSlug, playMorganVideo, scheduleIntroAdvance, setupScreen]);
 
   const metricItems = buildMetricsItems(metrics);
   const isIntro = state === "credentials" && setupScreen === "intro";
   const isCredentialSetup = state === "credentials" && setupScreen !== "intro";
-  const hasMorganVideo = Boolean(morganMediaSlug) && !morganVideoUnavailable;
-  const morganVideoSrc = morganMediaSlug ? `/uploads/morgan/${morganMediaSlug}/morgan.mp4` : "";
-  const morganAudioSrc = morganMediaSlug ? `/uploads/morgan/${morganMediaSlug}/morgan.mp3` : "";
-  const morganCaptionSrc = morganMediaSlug ? `/uploads/morgan/${morganMediaSlug}/captions.vtt` : "";
-  const morganVariantKey = state === "checking" ? "install-start" : setupScreen;
+  const morganVideoSrc = morganMediaSlug ? `/uploads/morgan/${morganMediaSlug}/${morganMediaBasename}.mp4` : "";
+  const morganCaptionsSrc = morganMediaSlug ? `/uploads/morgan/${morganMediaSlug}/${morganCaptionBasename}.vtt` : "";
+  const morganVariantKey = activeMorganMediaKey;
+  const shouldShowMorganVideo = Boolean(morganConditionalMediaKey) || state === "checking" || !MORGAN_PORTRAIT_ONLY_SCREENS.has(setupScreen);
+  const hasMorganVideo = Boolean(morganMediaSlug) && shouldShowMorganVideo;
   const showDevReset = import.meta.env.DEV && !isLocalStackBootstrapPreview();
   const setupTitle =
     state === "credentials"
-      ? setupScreen === "source"
-        ? "Source"
-        : setupScreen === "harness"
-          ? "Harnesses"
-        : setupScreen === "clis"
-          ? "ACP CLIs"
-          : setupScreen === "profiles"
-            ? "Providers"
-            : setupScreen === "provider-models"
-              ? "Models"
-              : setupScreen === "harness-routing"
-                ? "Harness routing"
-              : setupScreen === "provider-auth"
-                ? "Provider auth"
-            : setupScreen === "tools"
-              ? "Tool keys"
-              : setupScreen === "agent-tokens"
-                ? "Agent tokens"
-              : "CTO"
+      ? setupScreen === "cloudflare"
+        ? "Cloudflare"
+        : setupScreen === "saved-access"
+          ? "Saved access"
+          : setupScreen === "source"
+            ? "Source"
+            : setupScreen === "harness"
+              ? "Harnesses"
+              : setupScreen === "clis"
+                ? "ACP CLIs"
+                : setupScreen === "profiles"
+                  ? "Providers"
+                  : setupScreen === "provider-models"
+                    ? "Models"
+                    : setupScreen === "harness-routing"
+                      ? "Harness routing"
+                      : setupScreen === "provider-auth"
+                        ? "Provider auth"
+                        : setupScreen === "tools"
+                          ? "Tool keys"
+                          : setupScreen === "agent-tokens"
+                            ? "Agent tokens"
+                            : "CTO"
       : "Installing";
   const handleMorganVideoEnded = () => {
+    playedMorganVideoKeys.current.add(morganVariantKey);
+    startedMorganMediaKeys.current.delete(`${morganVariantKey}:video`);
+    playedMorganMediaKeys.current.add(morganVariantKey);
     setActiveCaptionText("");
     if (isIntro && dependencyPrepState === "idle") {
       void prepareClusterDependencies();
     }
+  };
+  const handleMorganVideoCanPlay = () => {
+    if (playedMorganVideoKeys.current.has(morganVariantKey)) return;
+    const video = morganVideoRef.current;
+    if (video) {
+      video.muted = !morganAudioUnlocked;
+      video.defaultMuted = !morganAudioUnlocked;
+    }
+    void playMorganVideo({ restartEnded: true, force: true, audible: morganAudioUnlocked });
   };
   const handleMorganVideoLoadedMetadata = () => {
     const video = morganVideoRef.current;
     scheduleIntroAdvance(video?.duration);
   };
   const handleMorganVideoError = () => {
-    setMorganVideoUnavailable(true);
+    const video = morganVideoRef.current;
+    const mediaKey = video?.dataset.morganMediaKey ?? morganVariantKey;
+    startedMorganMediaKeys.current.delete(`${mediaKey}:video`);
+    console.error("Morgan visual video failed to load", {
+      mediaKey,
+      src: video?.currentSrc || video?.src || morganVideoSrc,
+      error: video?.error ? { code: video.error.code, message: video.error.message } : null,
+    });
     if (isIntro) {
       scheduleIntroAdvance();
     }
   };
+
+  const setMorganVideoRef = useCallback(
+    (node: HTMLVideoElement | null) => {
+      morganVideoRef.current = node;
+      if (!node) return;
+      node.muted = !morganAudioUnlocked;
+      node.defaultMuted = !morganAudioUnlocked;
+      if (playedMorganVideoKeys.current.has(node.dataset.morganMediaKey ?? morganVariantKey)) return;
+      window.setTimeout(() => {
+        void playMorganVideo({ restartEnded: true, force: true, audible: morganAudioUnlocked });
+      }, 0);
+    },
+    [morganAudioUnlocked, morganVariantKey, playMorganVideo],
+  );
+
+  const startMorganSetup = useCallback(() => {
+    setMorganAudioUnlocked(true);
+    const video = morganVideoRef.current;
+    if (video) {
+      video.currentTime = 0;
+      void playMorganVideo({ restartEnded: true, force: true, audible: true });
+    }
+    if (isIntro && dependencyPrepState === "idle") {
+      void prepareClusterDependencies();
+    }
+  }, [dependencyPrepState, isIntro, playMorganVideo, prepareClusterDependencies]);
+
+  const cloudflareEndpointReady = cloudflareEndpointMode !== "idle";
+  const savedAccessPrepReady = savedAccessPrepMode !== "idle" || savedAccessState !== "idle";
+
+  const savedAccessCueActionItem = savedAccessCueAction(savedAccessCue);
+  const savedAccessReadiness = savedAccessReadinessPercent(savedAccessCue);
+  const shouldShowBitwardenOption = showSavedAccessMoreOptions || Boolean(bitwardenDetection?.detected);
+
+  const handleSavedAccessCueAction = useCallback(() => {
+    if (!savedAccessCueActionItem) return;
+    if (savedAccessCueActionItem.action === "install-cli") {
+      void installSavedAccessCliAndRetry();
+      return;
+    }
+    if (savedAccessCue === "approval-pending") {
+      void previewSavedAccess();
+      return;
+    }
+    if (savedAccessCueActionItem.url) {
+      void openExternalUrl(savedAccessCueActionItem.url).catch(() => undefined);
+    }
+  }, [installSavedAccessCliAndRetry, previewSavedAccess, savedAccessCue, savedAccessCueActionItem]);
+
+  const officialBrandIcon = (src: string, label: string, className?: string) => (
+    <img className={className} src={src} alt="" aria-hidden="true" data-official-icon={label} />
+  );
+
+  const cloudflareEndpointPanel = (
+    <div className="local-bootstrap__wizard local-bootstrap__wizard--focus">
+      <section className="local-bootstrap__panel local-bootstrap__panel--focus" title="Morgan public endpoint">
+        <div className="local-bootstrap__panel-title sr-only">Cloudflare</div>
+        <div
+          className="local-bootstrap__auth-grid local-bootstrap__auth-grid--icons-only local-bootstrap__auth-grid--prep"
+          aria-label="Public endpoint options"
+          data-testid="cloudflare-endpoint-options"
+        >
+          <button
+            type="button"
+            aria-label="Sign in with Cloudflare"
+            title="Sign in with Cloudflare"
+            data-testid="cloudflare-endpoint-oauth"
+            className={`local-bootstrap__auth-choice local-bootstrap__auth-choice--icon-first local-bootstrap__auth-choice--cloudflare${cloudflareEndpointMode === "login" ? " is-selected" : ""}`}
+            onClick={() => {
+              setCloudflareEndpointMode("login");
+              setCloudflareEndpointUrl("");
+              setPreviewBanner("Morgan will use Cloudflare browser sign-in to create a durable public endpoint.");
+            }}
+          >
+            <span className="local-bootstrap__install-stack">
+              <span className="local-bootstrap__install-icons" aria-hidden="true">
+                <span className="local-bootstrap__brand-mark local-bootstrap__install-icon local-bootstrap__install-icon--brand local-bootstrap__install-icon--dark">
+                  {officialBrandIcon("/icons/cloudflare.svg", "Cloudflare")}
+                </span>
+              </span>
+              <span className="sr-only">Cloudflare</span>
+            </span>
+          </button>
+          <button
+            type="button"
+            aria-label="Find Cloudflare access in 1Password"
+            title="Find Cloudflare access in 1Password"
+            data-testid="cloudflare-endpoint-saved-access"
+            className={`local-bootstrap__auth-choice local-bootstrap__auth-choice--icon-first local-bootstrap__auth-choice--onepassword${cloudflareEndpointMode === "saved" ? " is-selected" : ""}`}
+            onClick={() => {
+              setCloudflareEndpointMode("saved");
+              setSavedAccessPrepMode("onepassword");
+              setPreviewBanner("Morgan will check 1Password for approved Cloudflare access before Source.");
+            }}
+          >
+            <span className="local-bootstrap__install-stack">
+              <span className="local-bootstrap__install-icons" aria-hidden="true">
+                <span className="local-bootstrap__brand-mark local-bootstrap__install-icon local-bootstrap__install-icon--brand local-bootstrap__install-icon--dark">
+                  {officialBrandIcon("/icons/1password.svg", "1Password")}
+                </span>
+              </span>
+              <span className="sr-only">1Password</span>
+            </span>
+          </button>
+          <button
+            type="button"
+            aria-label="Use a temporary Cloudflare tunnel"
+            title="Use a temporary Cloudflare tunnel"
+            data-testid="cloudflare-endpoint-quick-tunnel"
+            className={`local-bootstrap__auth-choice local-bootstrap__auth-choice--icon-first local-bootstrap__auth-choice--quick-tunnel${cloudflareEndpointMode === "quick" ? " is-selected" : ""}`}
+            onClick={() => {
+              setCloudflareEndpointMode("quick");
+              setCloudflareEndpointUrl("https://quick-tunnel.trycloudflare.com");
+              setPreviewBanner("Quick tunnel selected. Morgan can prefill webhook URLs for a live walkthrough.");
+            }}
+          >
+            <span className="local-bootstrap__install-stack">
+              <span className="local-bootstrap__install-icons" aria-hidden="true">
+                <span className="local-bootstrap__brand-mark local-bootstrap__install-icon local-bootstrap__install-icon--brand local-bootstrap__install-icon--dark">
+                  <IconGlobe size={30} />
+                </span>
+              </span>
+              <span className="sr-only">Quick tunnel</span>
+            </span>
+          </button>
+          <button
+            type="button"
+            aria-label="Continue without public webhooks"
+            title="Continue without public webhooks"
+            data-testid="cloudflare-endpoint-local"
+            className={`local-bootstrap__auth-choice local-bootstrap__auth-choice--icon-first local-bootstrap__auth-choice--quick-tunnel${cloudflareEndpointMode === "local" ? " is-selected" : ""}`}
+            onClick={() => {
+              setCloudflareEndpointMode("local");
+              setCloudflareEndpointUrl("");
+              setPreviewBanner("Local-only endpoint selected. Morgan can continue without public webhooks for now.");
+            }}
+          >
+            <span className="local-bootstrap__install-stack">
+              <span className="local-bootstrap__install-icons" aria-hidden="true">
+                <span className="local-bootstrap__brand-mark local-bootstrap__install-icon local-bootstrap__install-icon--brand local-bootstrap__install-icon--dark">
+                  <IconClose size={30} />
+                </span>
+              </span>
+              <span className="sr-only">Local only</span>
+            </span>
+          </button>
+        </div>
+        {cloudflareEndpointMode !== "idle" ? (
+          <div className="local-bootstrap__hint-row local-bootstrap__hint-row--compact" data-testid="cloudflare-endpoint-status">
+            {cloudflareEndpointMode === "login"
+              ? "Sign-in"
+              : cloudflareEndpointMode === "saved"
+                ? "1Password"
+                : cloudflareEndpointMode === "local"
+                  ? "Local"
+                  : "Tunnel"}
+          </div>
+        ) : null}
+        {cloudflareEndpointUrl ? (
+          <div className="local-bootstrap__hint-row" data-testid="cloudflare-endpoint-url">
+            Webhook base: <code>{cloudflareEndpointUrl}</code>
+          </div>
+        ) : null}
+        {error ? <div className="local-bootstrap__inline-error">{error}</div> : null}
+        <div className="local-bootstrap__actions local-bootstrap__actions--onepage">
+          <button className="ghost-btn" type="button" title="Back to saved access" onClick={() => setSetupScreen("saved-access")}>Back</button>
+          <button
+            className="primary-btn"
+            type="button"
+            title="Continue to Source"
+            data-testid="cloudflare-continue"
+            disabled={!cloudflareEndpointReady}
+            onClick={() => setSetupScreen("source")}
+          >
+            Continue
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+
+  const savedAccessPrepPanel = (
+    <div className="local-bootstrap__wizard local-bootstrap__wizard--focus">
+      <section className="local-bootstrap__panel local-bootstrap__panel--focus" title="Saved access">
+        <div className="local-bootstrap__panel-title sr-only">Saved access</div>
+        <div
+          className="local-bootstrap__auth-grid local-bootstrap__auth-grid--icons-only local-bootstrap__auth-grid--prep local-bootstrap__auth-grid--binary"
+          aria-label="Saved access options"
+          data-testid="saved-access-prep-options"
+        >
+          <button
+            type="button"
+            aria-label="Use 1Password saved access"
+            title="Use 1Password saved access"
+            data-testid="saved-access-onepassword"
+            className={`local-bootstrap__auth-choice local-bootstrap__auth-choice--icon-first local-bootstrap__auth-choice--onepassword${savedAccessPrepMode === "onepassword" ? " is-selected" : ""}`}
+            onClick={() => {
+              setSavedAccessPrepMode("onepassword");
+              setPreviewBanner("");
+              setSavedAccessModalOpen(true);
+              void speakMorganCue("I’m checking whether saved access is ready. The bar shows how close 1Password is, and I’ll explain the next step if something is missing.");
+              window.setTimeout(() => void previewSavedAccess(), 650);
+            }}
+            onKeyDown={(event) => {
+              if (event.key !== "Enter" && event.key !== " ") return;
+              event.preventDefault();
+              event.currentTarget.click();
+            }}
+          >
+            <span className="local-bootstrap__install-stack">
+              <span className="local-bootstrap__install-icons" aria-hidden="true">
+                <span className="local-bootstrap__brand-mark local-bootstrap__install-icon local-bootstrap__install-icon--brand local-bootstrap__install-icon--dark">
+                  {officialBrandIcon("/icons/1password.svg", "1Password")}
+                </span>
+              </span>
+              <span className="sr-only">Use 1Password saved access</span>
+            </span>
+          </button>
+          <button
+            type="button"
+            aria-label="More saved access options"
+            title="More saved access options"
+            data-testid="saved-access-more-options"
+            className={`local-bootstrap__auth-choice local-bootstrap__auth-choice--icon-first local-bootstrap__auth-choice--skip${showSavedAccessMoreOptions ? " is-selected" : ""}`}
+            onClick={() => {
+              setShowSavedAccessMoreOptions(true);
+              setPreviewBanner("Bitwarden stays in More options unless the local bw CLI is detected.");
+              void speakMorganCue("More saved access options selected. Bitwarden stays secondary unless I detect the local bw command line is already unlocked.");
+              if (!savedAccessDetection) {
+                void withSavedAccessTimeout(
+                  detectSecretSources(),
+                  SAVED_ACCESS_DETECTION_TIMEOUT_MS,
+                  "saved access provider detection",
+                )
+                  .then(setSavedAccessDetection)
+                  .catch(() => undefined);
+              }
+            }}
+          >
+            <span className="local-bootstrap__install-stack">
+              <span className="local-bootstrap__install-icons" aria-hidden="true">
+                <span className="local-bootstrap__brand-mark local-bootstrap__install-icon local-bootstrap__install-icon--brand local-bootstrap__install-icon--light local-bootstrap__install-icon--skip">
+                  <IconKey size={30} />
+                </span>
+              </span>
+              <span className="sr-only">More saved access options</span>
+            </span>
+          </button>
+          {shouldShowBitwardenOption ? (
+            <button
+              type="button"
+              aria-label="Bitwarden saved access"
+              title="Bitwarden saved access"
+              data-testid="saved-access-bitwarden"
+              data-secondary-provider="true"
+              className={`local-bootstrap__auth-choice local-bootstrap__auth-choice--icon-first local-bootstrap__auth-choice--skip${savedAccessPrepMode === "bitwarden" ? " is-selected" : ""}`}
+              onClick={() => {
+                setSavedAccessPrepMode("bitwarden");
+                setShowSavedAccessMoreOptions(true);
+                setPreviewBanner("Bitwarden is secondary for now. Morgan can detect an existing bw CLI session, but 1Password remains the local quick-connect path.");
+                void openExternalUrl(bitwardenDetection?.docsUrl || BITWARDEN_CLI_DOCS_URL).catch(() => undefined);
+              }}
+            >
+              <span className="local-bootstrap__install-stack">
+                <span className="local-bootstrap__install-icons" aria-hidden="true">
+                  <span className="local-bootstrap__brand-mark local-bootstrap__install-icon local-bootstrap__install-icon--brand local-bootstrap__install-icon--light local-bootstrap__install-icon--skip">
+                    <IconShield size={30} />
+                  </span>
+                </span>
+                <span className="sr-only">Bitwarden saved access</span>
+              </span>
+            </button>
+          ) : null}
+          <button
+            type="button"
+            aria-label="Continue without saved access"
+            title="Continue without saved access"
+            data-testid="saved-access-skip"
+            className={`local-bootstrap__auth-choice local-bootstrap__auth-choice--icon-first local-bootstrap__auth-choice--skip${savedAccessPrepMode === "skipped" ? " is-selected" : ""}`}
+            onClick={() => {
+              setSavedAccessPrepMode("skipped");
+              setSavedAccessModalOpen(false);
+              void speakMorganCue("Skipping saved access. I’ll keep manual setup available and only ask for credentials later when a provider truly needs them.");
+            }}
+          >
+            <span className="local-bootstrap__install-stack">
+              <span className="local-bootstrap__install-icons" aria-hidden="true">
+                <span className="local-bootstrap__brand-mark local-bootstrap__install-icon local-bootstrap__install-icon--brand local-bootstrap__install-icon--light local-bootstrap__install-icon--skip">
+                  <span className="local-bootstrap__skip-wordmark">Skip</span>
+                </span>
+              </span>
+              <span className="sr-only">Continue without saved access</span>
+            </span>
+          </button>
+        </div>
+        {savedAccessModalOpen ? (
+          <div className="local-bootstrap__source-modal-backdrop" role="presentation" onClick={() => setSavedAccessModalOpen(false)}>
+            <div
+              className="local-bootstrap__source-modal local-bootstrap__saved-access-modal"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="saved-access-modal-title"
+              data-testid="saved-access-onepassword-modal"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <button
+                className="local-bootstrap__source-modal-close"
+                type="button"
+                aria-label="Close 1Password setup"
+                title="Close"
+                onClick={() => setSavedAccessModalOpen(false)}
+              >
+                ×
+              </button>
+              <div className="local-bootstrap__source-modal-icon" aria-hidden="true">
+                <span className="local-bootstrap__brand-mark local-bootstrap__install-icon local-bootstrap__install-icon--brand local-bootstrap__install-icon--dark">
+                  {officialBrandIcon("/icons/1password.svg", "1Password")}
+                </span>
+              </div>
+              <h3 id="saved-access-modal-title" className="sr-only">1Password readiness</h3>
+              <div className="local-bootstrap__source-modal-body">
+                <div className="local-bootstrap__saved-access-flow" data-testid="saved-access-onepassword-flow">
+                  <div
+                    className={`local-bootstrap__saved-access-readiness is-${savedAccessCue}`}
+                    aria-label={`1Password readiness: ${savedAccessCueLabel(savedAccessCue, savedAccessState)}`}
+                    data-testid="saved-access-readiness"
+                    data-state={savedAccessCue}
+                  >
+                    <div className="local-bootstrap__saved-access-readiness-bar" aria-hidden="true">
+                      <span style={{ width: `${savedAccessReadiness}%` }} />
+                    </div>
+                    <div className="local-bootstrap__saved-access-readiness-meta">
+                      <span data-testid="saved-access-readiness-label">{savedAccessCueLabel(savedAccessCue, savedAccessState)}</span>
+                      <span>{savedAccessState === "detecting" ? "…" : `${savedAccessReadiness}%`}</span>
+                    </div>
+                  </div>
+                  {savedAccessCueActionItem ? (
+                    <button
+                      className="ghost-btn local-bootstrap__saved-access-action"
+                      type="button"
+                      data-testid="saved-access-condition-action"
+                      title={savedAccessCueActionItem.label}
+                      onClick={handleSavedAccessCueAction}
+                    >
+                      {savedAccessCueActionItem.label}
+                    </button>
+                  ) : null}
+                  {savedAccessState === "review" && savedAccessPreview ? (
+                    <div className="local-bootstrap__saved-access-review" data-testid="saved-access-review">
+                      {savedAccessPreview.matches.length > 0 ? (
+                        <>
+                          <ul aria-label="1Password matches ready for approval">
+                            {savedAccessPreview.matches.map((match) => (
+                              <li key={`${match.targetSecretKey}:${match.providerRef}`}>
+                                <span>{match.targetSecretKey}</span>
+                                <code>{match.redactedValuePreview}</code>
+                                <em>{match.confidence}</em>
+                              </li>
+                            ))}
+                          </ul>
+                          <button
+                            className="primary-btn"
+                            type="button"
+                            data-testid="saved-access-approve"
+                            onClick={() => void applySavedAccess()}
+                          >
+                            Connect
+                          </button>
+                        </>
+                      ) : (
+                        <span className="field__help">No match yet.</span>
+                      )}
+                    </div>
+                  ) : null}
+                  {savedAccessState === "connected" ? (
+                    <div className="local-bootstrap__hint-row local-bootstrap__hint-row--compact" data-testid="saved-access-connected">Connected.</div>
+                  ) : null}
+                </div>
+              </div>
+              <button
+                className="primary-btn"
+                type="button"
+                data-testid="saved-access-modal-continue"
+                title="Continue to Cloudflare"
+                onClick={() => {
+                  setSavedAccessModalOpen(false);
+                  setSetupScreen("cloudflare");
+                }}
+              >
+                Continue
+              </button>
+            </div>
+          </div>
+        ) : null}
+        {error ? <div className="local-bootstrap__inline-error">{error}</div> : null}
+        <div className="local-bootstrap__actions local-bootstrap__actions--onepage">
+          <button className="ghost-btn" type="button" title="Back to Client Cluster" onClick={() => setSetupScreen("intro")}>Back</button>
+          <button
+            className="primary-btn"
+            type="button"
+            title="Continue to Cloudflare"
+            data-testid="saved-access-continue"
+            disabled={!savedAccessPrepReady}
+            onClick={() => setSetupScreen("cloudflare")}
+          >
+            Continue
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+
+  const savedAccessPanel =
+    !selected5DOrigin && (sourceProvider === "github" || sourceProvider === "gitlab") ? (
+      <div className="local-bootstrap__saved-access" data-testid="source-saved-access">
+        <div className="local-bootstrap__saved-access-actions" aria-label="Saved access options">
+          <button
+            className="ghost-btn"
+            type="button"
+            data-testid="source-saved-access-use"
+            aria-label="Find my access from 1Password"
+            title="Find my access from 1Password"
+            disabled={savedAccessState === "detecting" || savedAccessState === "applying"}
+            onClick={() => void previewSavedAccess()}
+          >
+            <IconKey size={14} />
+            <span className="sr-only">Find my access</span>
+          </button>
+          <button
+            className="ghost-btn"
+            type="button"
+            data-testid="source-saved-access-paste"
+            aria-label="Paste token"
+            title="Paste token"
+            onClick={() => {
+              setShowSourceAdvanced(true);
+              setSourceAuthMode(sourceProvider === "github" ? "github-pat" : "gitlab-token");
+              setScmProvisioningMessage("Paste token is ready. CTO writes the token only to the local secret.");
+            }}
+          >
+            <IconKey size={14} />
+            <span className="sr-only">Paste token</span>
+          </button>
+        </div>
+        {showSavedAccessReview && savedAccessPreview ? (
+          <div className="local-bootstrap__saved-access-review" data-testid="source-saved-access-review">
+            <strong>Review before connecting</strong>
+            {savedAccessPreview.matches.length > 0 ? (
+              <ul>
+                {savedAccessPreview.matches.map((match) => (
+                  <li key={`${match.targetSecretKey}:${match.providerRef}`}>
+                    <span>{match.targetSecretKey}</span>
+                    <code>{match.redactedValuePreview}</code>
+                    <em>{match.confidence}</em>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <span className="field__help">No matching saved access found.</span>
+            )}
+            <button
+              className="primary-btn"
+              type="button"
+              data-testid="source-saved-access-approve"
+              disabled={savedAccessState === "applying" || savedAccessPreview.matches.length === 0}
+              onClick={() => void applySavedAccess()}
+            >
+              {savedAccessState === "applying" ? "Connecting..." : "Connect"}
+            </button>
+          </div>
+        ) : null}
+        {savedAccessState === "connected" ? (
+          <div className="local-bootstrap__hint-row" data-testid="source-saved-access-connected">
+            Access connected. Raw values were not shown or persisted in setup state.
+          </div>
+        ) : savedAccessState === "unavailable" && savedAccessDetection ? (
+          <div className="local-bootstrap__hint-row">{savedAccessDetection.message}</div>
+        ) : null}
+      </div>
+    ) : null;
 
   const sourceAdvancedPanel =
     showSourceAdvanced ? (
@@ -3119,26 +3807,30 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
                                 >
                                   Review details
                                 </button>
+                                {enableSelfHostedSource && showSourceAdvanced ? (
+                                      <>
+                                        <button
+                                          className="ghost-btn"
+                                          type="button"
+                                          data-testid="source-github-enterprise"
+                                          onClick={() => {
+                                            const nextHostMode = sourceHostMode === "self-hosted" ? "hosted" : "self-hosted";
+                                            setSourceHostMode(nextHostMode);
+                                            setSourceHostUrl(nextHostMode === "hosted" ? SOURCE_DEFAULT_URLS.github : "");
+                                            setSourceAuthMode(defaultAuthModeForSource("github", nextHostMode));
+                                            setScmProvisioningMessage(null);
+                                          }}
+                                        >
+                                          {sourceHostMode === "self-hosted" ? "Use GitHub.com" : "Using GitHub Enterprise?"}
+                                        </button>
+                                      </>
+                                    ) : null}
                                 {showSourceAdvanced ? (
-                                  <>
-                                    <button
-                                      className="ghost-btn"
-                                      type="button"
-                                      data-testid="source-github-enterprise"
-                                      onClick={() => {
-                                        const nextHostMode = sourceHostMode === "self-hosted" ? "hosted" : "self-hosted";
-                                        setSourceHostMode(nextHostMode);
-                                        setSourceHostUrl(nextHostMode === "hosted" ? SOURCE_DEFAULT_URLS.github : "");
-                                        setSourceAuthMode(defaultAuthModeForSource("github", nextHostMode));
-                                        setScmProvisioningMessage(null);
-                                      }}
-                                    >
-                                      {sourceHostMode === "self-hosted" ? "Use GitHub.com" : "Using GitHub Enterprise?"}
-                                    </button>
-                                    <button
-                                      className="ghost-btn"
-                                      type="button"
-                                      data-testid="source-auth-github-pat"
+                                      <>
+                                        <button
+                                          className="ghost-btn"
+                                          type="button"
+                                          data-testid="source-auth-github-pat"
                                       onClick={() => {
                                         setSourceHostMode("hosted");
                                         setSourceHostUrl(SOURCE_DEFAULT_URLS.github);
@@ -3296,7 +3988,7 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
                                 >
                                   Review details
                                 </button>
-                                {showSourceAdvanced ? (
+                                {enableSelfHostedSource && showSourceAdvanced ? (
                                   <>
                                     <button
                                       className="ghost-btn"
@@ -3312,6 +4004,10 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
                                     >
                                       {sourceHostMode === "self-hosted" ? "Use GitLab.com" : "Use existing self-hosted GitLab"}
                                     </button>
+                                  </>
+                                ) : null}
+                                {showSourceAdvanced ? (
+                                  <>
                                     <button
                                       className="ghost-btn"
                                       type="button"
@@ -3335,43 +4031,15 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
                           </div>
                         ) : null;
 
-  return (
+  return state === "ready" && !isLocalStackBootstrapPreview() ? (
+    <>{children}</>
+  ) : (
     <div className="local-bootstrap" role="status" aria-live="polite">
       <div className="local-bootstrap__grid" />
       <div className="local-bootstrap__scan" />
       <div className="local-bootstrap__field" />
       {showDevReset ? (
         <div className="local-bootstrap__dev-controls" aria-label="Development setup controls">
-          <button
-            type="button"
-            className="local-bootstrap__dev-control"
-            aria-label="Previous setup screen"
-            title="Previous setup screen"
-            onClick={() => navigateSetupForDev("previous")}
-            disabled={resettingFlow || state === "checking"}
-          >
-            <IconChevLeft size={16} />
-          </button>
-          <button
-            type="button"
-            className="local-bootstrap__dev-control"
-            aria-label="Next setup screen"
-            title="Next setup screen"
-              onClick={() => navigateSetupForDev("next")}
-              disabled={resettingFlow || state === "checking"}
-            >
-              <IconChevRight size={16} />
-            </button>
-          <button
-            type="button"
-            className={`local-bootstrap__dev-control${morganAudioMuted ? " is-active" : ""}`}
-            aria-label={morganAudioMuted ? "Unmute Morgan audio" : "Mute Morgan audio"}
-            aria-pressed={morganAudioMuted}
-            title={morganAudioMuted ? "Unmute Morgan audio" : "Mute Morgan audio"}
-            onClick={() => setMorganAudioMuted((muted) => !muted)}
-          >
-            {morganAudioMuted ? <IconVolumeOff size={16} /> : <IconVolume size={16} />}
-          </button>
           <button
             type="button"
             className="local-bootstrap__dev-control"
@@ -3395,9 +4063,7 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
       <main
         className={`local-bootstrap__content${
           isIntro
-            ? dependencyPrepState === "idle"
-              ? " local-bootstrap__content--intro"
-              : " local-bootstrap__content--intro local-bootstrap__content--intro-prep"
+            ? " local-bootstrap__content--intro local-bootstrap__content--intro-prep"
             : " local-bootstrap__content--setup"
         }`}
       >
@@ -3409,44 +4075,24 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
           <div className="local-bootstrap__avatar">
             {hasMorganVideo ? (
               <video
-                ref={morganVideoRef}
+                ref={setMorganVideoRef}
                 key={morganVariantKey}
                 className="local-bootstrap__avatar-video"
+                data-morgan-media-key={morganVariantKey}
                 src={morganVideoSrc}
-                poster={MORGAN_PORTRAIT_SRC}
-                autoPlay
-                muted={morganAudioMuted}
+                autoPlay={false}
+                muted={!morganAudioUnlocked}
                 playsInline
                 preload="auto"
                 loop={false}
-                onCanPlay={() => void playMorganVideo()}
+                onCanPlay={handleMorganVideoCanPlay}
                 onLoadedMetadata={handleMorganVideoLoadedMetadata}
                 onEnded={handleMorganVideoEnded}
                 onError={handleMorganVideoError}
                 onTimeUpdate={updateActiveCaption}
               >
-                <track kind="captions" src={morganCaptionSrc} srcLang="en" label="English" />
+                <track kind="captions" src={morganCaptionsSrc} srcLang="en" label="English" />
               </video>
-            ) : (
-              <img className="local-bootstrap__avatar-video" src={MORGAN_PORTRAIT_SRC} alt="" />
-            )}
-            {!hasMorganVideo && morganMediaSlug ? (
-              <audio
-                ref={morganAudioRef}
-                key={`${morganVariantKey}-audio`}
-                src={morganAudioSrc}
-                muted={morganAudioMuted}
-                preload="auto"
-                onCanPlay={() => void playMorganAudio()}
-                onLoadedMetadata={(event) => scheduleIntroAdvance(event.currentTarget.duration)}
-                onEnded={handleMorganVideoEnded}
-                onError={() => {
-                  if (isIntro) {
-                    scheduleIntroAdvance();
-                  }
-                }}
-                onTimeUpdate={updateActiveCaption}
-              />
             ) : null}
           </div>
           <button
@@ -3463,14 +4109,9 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
               {activeCaptionText}
             </div>
           ) : null}
-          {audioWarning ? (
-            <div className="local-bootstrap__audio-warning" role="status">
-              {audioWarning}
-            </div>
-          ) : null}
         </section>
 
-        {isIntro && dependencyPrepState === "idle" ? null : (
+        {(
           <section
             className={`local-bootstrap__copy${
               isIntro ? " local-bootstrap__copy--intro" : " local-bootstrap__copy--wizard"
@@ -3482,21 +4123,11 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
               {previewBanner}
             </div>
           ) : null}
-          {!isIntro ? (
-            <p className="local-bootstrap__tagline local-bootstrap__tagline--with-eyebrow">
-              local stack
-            </p>
-          ) : null}
-          <h1>{setupTitle}</h1>
-          {isIntro ? <p className="local-bootstrap__tagline">local stack</p> : null}
+          <h1 className={setupScreen === "saved-access" || setupScreen === "cloudflare" ? "sr-only" : undefined}>{setupTitle}</h1>
 
           {isIntro ? (
             <div key="intro" className="local-bootstrap__stage local-bootstrap__stage--intro">
               <div className="local-bootstrap__intro-prep-card" data-testid="cluster-dependencies-first-screen">
-                <div className="local-bootstrap__decision-card" role="status">
-                  <span className="local-bootstrap__decision-card-kicker">Morgan</span>
-                  <strong>I’ll prepare the Client Cluster first, then we’ll connect Source.</strong>
-                </div>
                 <section className="local-bootstrap__panel local-bootstrap__panel--focus" title="Client Cluster baseline">
                   <div className="local-bootstrap__panel-title">Client Cluster</div>
                   <div className="local-bootstrap__cluster-prep-grid local-bootstrap__cluster-prep-grid--baseline" aria-label="Client Cluster baseline prepared first">
@@ -3559,8 +4190,8 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
                       <button
                         className="primary-btn"
                         type="button"
-                        title="Continue to Source"
-                        onClick={() => setSetupScreen("source")}
+                        title="Continue to saved access"
+                        onClick={() => setSetupScreen("saved-access")}
                       >
                         Continue
                       </button>
@@ -3568,12 +4199,12 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
                       <button
                         className="primary-btn"
                         type="button"
-                        title="Prepare Client Cluster baseline"
+                        title="Start CTO setup"
                         data-testid="prepare-cluster-dependencies"
                         disabled={dependencyPrepState === "running"}
-                        onClick={() => void prepareClusterDependencies()}
+                        onClick={startMorganSetup}
                       >
-                        {dependencyPrepState === "running" ? "Preparing" : dependencyPrepState === "failed" ? "Retry" : "Prepare"}
+                        {dependencyPrepState === "running" ? "Starting" : dependencyPrepState === "failed" ? "Retry" : "Start"}
                       </button>
                     )}
                   </div>
@@ -3594,7 +4225,11 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
                   <strong>{activeMorganPrompt}</strong>
                 </div>
               ) : null}
-              {setupScreen === "source" ? (
+              {setupScreen === "cloudflare" ? (
+                cloudflareEndpointPanel
+              ) : setupScreen === "saved-access" ? (
+                savedAccessPrepPanel
+              ) : setupScreen === "source" ? (
                 <div className="local-bootstrap__wizard local-bootstrap__wizard--focus">
                   <section
                     className="local-bootstrap__panel local-bootstrap__panel--focus"
@@ -3670,44 +4305,46 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
                           <span className="sr-only">GitLab</span>
                         </span>
                       </button>
-                      <button
-                        type="button"
-                        aria-label="Prepare 5D Origin mirror or managed source"
-                        title="Prepare 5D Origin mirror or managed source"
-                        data-testid="source-install-5d-origin"
-                        data-intent="source-provider-5d-origin source-install-5d-origin"
-                        className={`local-bootstrap__auth-choice local-bootstrap__auth-choice--icon-first local-bootstrap__auth-choice--origin${sourceModalProvider === "origin" || selected5DOrigin ? " is-selected" : ""}`}
-                        onClick={() => {
-                          githubOAuthAttemptId.current += 1;
-                          if (githubOAuthTimeout.current !== null) {
-                            window.clearTimeout(githubOAuthTimeout.current);
-                            githubOAuthTimeout.current = null;
-                          }
-                          setGithubOAuthPrompt(null);
-                          setScmProvisioningBusy(false);
-                          setSourceProvider(sourceOriginEngine === "gitlab-compatible" ? "gitlab" : "gitea");
-                          setSourceHostMode("self-hosted");
-                          setSourceHostUrl("");
-                          setSourceOwner((current) => current.trim() || "cto");
-                          setSourceAuthMode(sourceOriginEngine === "gitlab-compatible" ? "gitlab-instance-oauth-app" : "gitlab-token");
-                          setSourceOriginPlan(null);
-                          setSourceOriginReviewOpen(false);
-                          setSourceOriginAppCreated(false);
-                          setShowSourceAdvanced(false);
-                          setScmProvisioningMessage(null);
-                          setSourceModalProvider("origin");
-                        }}
-                      >
-                        <span className="local-bootstrap__install-stack">
-                          <span className="local-bootstrap__install-icons" aria-hidden="true">
-                            <span className="local-bootstrap__brand-mark local-bootstrap__install-icon local-bootstrap__install-icon--brand local-bootstrap__install-icon--dark">
-                              <Icon5DOriginMono size={28} />
-                            </span>
+                      {enableSelfHostedSource ? (
+                        <button
+                          type="button"
+                          aria-label="Prepare 5D Origin mirror or managed source"
+                          title="Prepare 5D Origin mirror or managed source"
+                          data-testid="source-install-5d-origin"
+                          data-intent="source-provider-5d-origin source-install-5d-origin"
+                          className={`local-bootstrap__auth-choice local-bootstrap__auth-choice--icon-first local-bootstrap__auth-choice--origin${sourceModalProvider === "origin" || selected5DOrigin ? " is-selected" : ""}`}
+                          onClick={() => {
+                            githubOAuthAttemptId.current += 1;
+                            if (githubOAuthTimeout.current !== null) {
+                              window.clearTimeout(githubOAuthTimeout.current);
+                              githubOAuthTimeout.current = null;
+                            }
+                            setGithubOAuthPrompt(null);
+                            setScmProvisioningBusy(false);
+                            setSourceProvider(sourceOriginEngine === "gitlab-compatible" ? "gitlab" : "gitea");
+                            setSourceHostMode("self-hosted");
+                            setSourceHostUrl("");
+                            setSourceOwner((current) => current.trim() || "cto");
+                            setSourceAuthMode(sourceOriginEngine === "gitlab-compatible" ? "gitlab-instance-oauth-app" : "gitlab-token");
+                            setSourceOriginPlan(null);
+                            setSourceOriginReviewOpen(false);
+                            setSourceOriginAppCreated(false);
+                            setShowSourceAdvanced(false);
+                            setScmProvisioningMessage(null);
+                            setSourceModalProvider("origin");
+                          }}
+                        >
+                          <span className="local-bootstrap__install-stack">
+                            <span className="local-bootstrap__install-icons" aria-hidden="true">
+                              <span className="local-bootstrap__brand-mark local-bootstrap__install-icon local-bootstrap__install-icon--brand local-bootstrap__install-icon--dark">
+                                <Icon5DOriginMono size={28} />
+                              </span>
 
+                            </span>
+                            <span className="sr-only">5D Origin</span>
                           </span>
-                          <span className="sr-only">5D Origin</span>
-                        </span>
-                      </button>
+                        </button>
+                      ) : null}
                     </div>
 
 
@@ -3833,7 +4470,7 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
 
                     <div data-testid="source-shared-followup" />
 
-                    {sourceModalProvider === null && sourceHostMode === "self-hosted" && sourceProvider !== "gitea" ? (
+                    {enableSelfHostedSource && sourceModalProvider === null && sourceHostMode === "self-hosted" && sourceProvider !== "gitea" ? (
                       <div className="field">
                         <span className="field__label">
                           {sourceProvider === "github"
@@ -3855,6 +4492,8 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
                         />
                       </div>
                     ) : null}
+
+                    {sourceModalProvider === null ? savedAccessPanel : null}
 
                     {sourceModalProvider === null && shouldAskForSourceNamespace ? (
                       <div className="field">
@@ -3923,12 +4562,12 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
                       </div>
                     ) : null}
 
-                    {sourceModalProvider === null && showSourceAdvanced && isGitHubManifestMode(sourceAuthMode) ? (
+                    {sourceModalProvider === null && enableSelfHostedSource && showSourceAdvanced && isGitHubManifestMode(sourceAuthMode) ? (
                       <div className="local-bootstrap__hint-row">
                         GitHub Enterprise Server will use the app manifest exchange at
                         <code>/api/v3/app-manifests</code>.
                       </div>
-                    ) : sourceAuthMode === "gitlab-instance-oauth-app" ? (
+                    ) : enableSelfHostedSource && sourceAuthMode === "gitlab-instance-oauth-app" ? (
                       <div className="local-bootstrap__hint-row">
                         Self-managed GitLab will use the instance OAuth application API at
                         <code>/api/v4/applications</code>.

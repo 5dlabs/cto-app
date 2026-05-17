@@ -1,0 +1,13 @@
+WEBVTT
+
+1
+00:00:00.000 --> 00:00:02.803
+Okay, please select your source: GitHub or GitLab.
+
+2
+00:00:02.803 --> 00:00:06.223
+CTO also installs and maintains self-hosted GitHub or GitLab.
+
+3
+00:00:06.223 --> 00:00:12.669
+Choose the host for your repositories, then provide the OAuth or token credentials and namespace CTO should manage.

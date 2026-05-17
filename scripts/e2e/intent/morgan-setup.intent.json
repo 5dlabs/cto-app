@@ -1,0 +1,461 @@
+{
+  "name": "morgan-setup",
+  "version": 1,
+  "screens": [
+    {
+      "id": "saved-access",
+      "checkpoint": "02-saved-access",
+      "heading": "Saved access",
+      "docs": "docs/intent/morgan-setup/saved-access.md",
+      "requiredText": [],
+      "requiredControls": [
+        "Use 1Password saved access",
+        "Continue without saved access",
+        "Continue to Cloudflare"
+      ],
+      "inputs": [
+        "savedAccessPrepMode",
+        "secretSource",
+        "secretSourceProvider",
+        "secretRefs"
+      ],
+      "payloadPaths": [
+        "secretSources",
+        "secretRefs"
+      ],
+      "rules": [
+        "optional-secret-source",
+        "manual-fallback-visible",
+        "secrets-redacted",
+        "approval-required",
+        "morgan-narrated",
+        "icon-first"
+      ],
+      "secretSources": [
+        {
+          "id": "onepassword",
+          "label": "1Password",
+          "availability": "detected-first",
+          "tier": "free-local",
+          "rawSecretAccess": false
+        },
+        {
+          "id": "bitwarden",
+          "label": "Bitwarden",
+          "availability": "more-options",
+          "tier": "pro-team",
+          "priority": "secondary",
+          "firstView": false,
+          "rawSecretAccess": false,
+          "cli": {
+            "command": "bw",
+            "docs": "https://bitwarden.com/help/cli/",
+            "statusProbe": "bw status",
+            "statuses": [
+              "unauthenticated",
+              "locked",
+              "unlocked"
+            ],
+            "sessionInputs": [
+              "BW_SESSION",
+              "--session"
+            ],
+            "availableWhen": "status-unlocked",
+            "metadataPreview": "bw list items --search <target>",
+            "approvedRead": "bw get item <id>"
+          },
+          "safetyNotes": [
+            "Show Bitwarden only after More options or local bw detection; keep 1Password as the first quick-connect provider.",
+            "Do not ask for a Bitwarden master password; use an existing unlocked CLI session via BW_SESSION or --session.",
+            "Do not run bw list items before approval; use bw status first and require explicit user action before metadata preview.",
+            "Do not display, log, or persist item fields; values may exist only in memory during approved apply."
+          ]
+        },
+        {
+          "id": "lastpass",
+          "label": "LastPass",
+          "availability": "more-options",
+          "tier": "pro-team",
+          "rawSecretAccess": false
+        },
+        {
+          "id": "keeper",
+          "label": "Keeper",
+          "availability": "more-options",
+          "tier": "pro-team",
+          "rawSecretAccess": false
+        },
+        {
+          "id": "doppler",
+          "label": "Doppler",
+          "availability": "more-options",
+          "tier": "pro-team",
+          "rawSecretAccess": false
+        },
+        {
+          "id": "infisical",
+          "label": "Infisical",
+          "availability": "more-options",
+          "tier": "pro-team",
+          "rawSecretAccess": false
+        }
+      ],
+      "quickConnect": {
+        "provider": "onepassword",
+        "apis": [
+          "detect_secret_sources",
+          "preview_secret_source_matches",
+          "apply_secret_source_matches"
+        ],
+        "discovery": "metadata-only",
+        "approvalRequired": true,
+        "targets": [
+          "GITHUB_TOKEN",
+          "GITLAB_TOKEN",
+          "OPENAI_API_KEY",
+          "OPENROUTER_API_KEY",
+          "EXA_API_KEY",
+          "FIRECRAWL_API_KEY",
+          "TAVILY_API_KEY",
+          "DISCORD_BOT_TOKEN"
+        ]
+      },
+      "mediaFolder": "02_saved-access",
+      "conditionalMedia": [
+        "onepassword-ready",
+        "onepassword-missing-desktop",
+        "onepassword-missing-cli",
+        "onepassword-desktop-integration",
+        "onepassword-needs-access",
+        "onepassword-no-account",
+        "bitwarden-detected",
+        "bitwarden-locked",
+        "bitwarden-unlocked"
+      ]
+    },
+    {
+      "id": "endpoint",
+      "checkpoint": "03-endpoint",
+      "heading": "Cloudflare",
+      "docs": "docs/intent/morgan-setup/endpoint.md",
+      "mediaFolder": "03_endpoint",
+      "requiredText": [],
+      "requiredControls": [
+        "Sign in with Cloudflare",
+        "Find Cloudflare access in 1Password",
+        "Use a temporary Cloudflare tunnel",
+        "Continue to Source"
+      ],
+      "inputs": [
+        "endpointMode",
+        "endpointUrl"
+      ],
+      "payloadPaths": [
+        "source.webhookBaseUrl",
+        "source.webhookMode"
+      ],
+      "rules": [
+        "optional-public-endpoint",
+        "official-brand-icons",
+        "morgan-narrated",
+        "cloudflare-saved-access-conditional-media"
+      ],
+      "conditionalMedia": [
+        "cloudflare-login",
+        "cloudflare-saved-access",
+        "cloudflare-quick-tunnel",
+        "cloudflare-local"
+      ]
+    },
+    {
+      "id": "source",
+      "checkpoint": "04-source-configured",
+      "heading": "Source",
+      "docs": "docs/intent/morgan-setup/source-auth-matrix.md",
+      "requiredText": [
+        "Where is your code?",
+        "GitHub",
+        "GitLab",
+        "enterprise",
+        "self-managed"
+      ],
+      "requiredControls": [
+        "GitHub",
+        "GitLab",
+        "Using GitHub Enterprise?",
+        "Using self-managed GitLab?",
+        "Continue to harness selection"
+      ],
+      "inputs": [
+        "provider",
+        "hostMode",
+        "baseUrl",
+        "owner",
+        "repository",
+        "token"
+      ],
+      "payloadPaths": [
+        "source.provider",
+        "source.baseUrl",
+        "source.owner",
+        "source.connectionId"
+      ],
+      "rules": [
+        "continue-disabled-until-authorized",
+        "secrets-redacted"
+      ],
+      "authMatrix": [
+        {
+          "id": "github-oauth",
+          "provider": "github",
+          "host": "github.com",
+          "auth": "oauth",
+          "mustExpose": [
+            "Authorize with GitHub",
+            "device-code prompt boundary"
+          ],
+          "mustRedact": [
+            "github token",
+            "device code"
+          ]
+        },
+        {
+          "id": "github-pat",
+          "provider": "github",
+          "host": "github.com",
+          "auth": "manual-token",
+          "mustExpose": [
+            "GitHub PAT password input"
+          ],
+          "mustRedact": [
+            "github_pat value"
+          ]
+        },
+        {
+          "id": "github-enterprise",
+          "provider": "github",
+          "host": "custom",
+          "auth": "github-app-manifest",
+          "mustExpose": [
+            "enterprise base URL",
+            "GitHub App manifest setup URLs"
+          ],
+          "expectedProvisioning": [
+            "setup URLs use enterprise host",
+            "manifest exchange uses /api/v3"
+          ]
+        },
+        {
+          "id": "gitlab-dot-com",
+          "provider": "gitlab",
+          "host": "gitlab.com",
+          "auth": "manual-token",
+          "mustExpose": [
+            "GitLab token password input"
+          ],
+          "expectedProvisioning": [
+            "manual-token",
+            "manual-token-required",
+            "secret key token"
+          ]
+        },
+        {
+          "id": "self-managed-gitlab",
+          "provider": "gitlab",
+          "host": "custom",
+          "auth": "gitlab-instance-oauth-app",
+          "mustExpose": [
+            "GitLab base URL",
+            "admin applications endpoint"
+          ],
+          "expectedProvisioning": [
+            "/api/v4/applications",
+            "webhooks disabled by default"
+          ]
+        }
+      ],
+      "mediaFolder": "04_source"
+    },
+    {
+      "id": "harnesses",
+      "checkpoint": "10-harnesses",
+      "heading": "Harnesses",
+      "docs": "docs/intent/morgan-setup/harnesses.md",
+      "requiredText": [
+        "Hermes"
+      ],
+      "requiredControls": [
+        "Hermes",
+        "Continue to ACP CLIs"
+      ],
+      "inputs": [
+        "harness"
+      ],
+      "payloadPaths": [
+        "harness"
+      ],
+      "rules": [
+        "selected-harness-visible"
+      ],
+      "mediaFolder": "05_harness"
+    },
+    {
+      "id": "acp-clis",
+      "checkpoint": "20-acp-clis",
+      "heading": "ACP CLIs",
+      "docs": "docs/intent/morgan-setup/acp-clis.md",
+      "requiredText": [
+        "Copilot"
+      ],
+      "requiredControls": [
+        "Copilot",
+        "Continue to providers"
+      ],
+      "inputs": [
+        "cli"
+      ],
+      "payloadPaths": [
+        "clis"
+      ],
+      "rules": [
+        "selected-cli-visible"
+      ],
+      "mediaFolder": "06_clis"
+    },
+    {
+      "id": "providers",
+      "checkpoint": "30-providers",
+      "heading": "Providers",
+      "docs": "docs/intent/morgan-setup/providers.md",
+      "requiredText": [
+        "GitHub Copilot"
+      ],
+      "requiredControls": [
+        "GitHub Copilot",
+        "Configure provider authentication"
+      ],
+      "inputs": [
+        "provider"
+      ],
+      "payloadPaths": [
+        "providers"
+      ],
+      "rules": [
+        "selected-provider-visible"
+      ],
+      "mediaFolder": "07_providers"
+    },
+    {
+      "id": "models",
+      "checkpoint": "40-models",
+      "heading": "Models",
+      "docs": "docs/intent/morgan-setup/models.md",
+      "requiredText": [
+        "model"
+      ],
+      "requiredControls": [
+        "Choose harness routing"
+      ],
+      "inputs": [
+        "model"
+      ],
+      "payloadPaths": [
+        "models"
+      ],
+      "rules": [
+        "default-model-visible"
+      ],
+      "mediaFolder": "08_provider-models"
+    },
+    {
+      "id": "harness-routing",
+      "checkpoint": "50-harness-routing",
+      "heading": "Harness routing",
+      "docs": "docs/intent/morgan-setup/harness-routing.md",
+      "requiredText": [
+        "routing"
+      ],
+      "requiredControls": [
+        "Configure provider authentication"
+      ],
+      "inputs": [
+        "routing"
+      ],
+      "payloadPaths": [
+        "routing"
+      ],
+      "rules": [
+        "routing-visible"
+      ],
+      "mediaFolder": "09_harness-routing"
+    },
+    {
+      "id": "provider-auth",
+      "checkpoint": "60-provider-auth",
+      "heading": "Provider auth",
+      "docs": "docs/intent/morgan-setup/provider-auth.md",
+      "requiredText": [
+        "authentication"
+      ],
+      "requiredControls": [
+        "Configure tool API keys"
+      ],
+      "inputs": [
+        "providerAuth"
+      ],
+      "payloadPaths": [
+        "providerAuth"
+      ],
+      "rules": [
+        "secrets-redacted"
+      ],
+      "mediaFolder": "10_provider-auth"
+    },
+    {
+      "id": "tool-keys",
+      "checkpoint": "70-tool-keys",
+      "heading": "Tool keys",
+      "docs": "docs/intent/morgan-setup/tool-keys.md",
+      "requiredText": [
+        "API keys"
+      ],
+      "requiredControls": [
+        "Configure agent Discord tokens"
+      ],
+      "inputs": [
+        "toolKeys"
+      ],
+      "payloadPaths": [
+        "toolKeys"
+      ],
+      "rules": [
+        "optional-secrets-redacted"
+      ],
+      "mediaFolder": "11_tools"
+    },
+    {
+      "id": "agent-tokens",
+      "checkpoint": "80-agent-tokens",
+      "heading": "Agent tokens",
+      "docs": "docs/intent/morgan-setup/agent-tokens.md",
+      "requiredText": [
+        "Discord",
+        "Start"
+      ],
+      "requiredControls": [
+        "Start"
+      ],
+      "inputs": [
+        "agentTokens"
+      ],
+      "payloadPaths": [
+        "agentTokens"
+      ],
+      "rules": [
+        "start-enabled-when-required-inputs-valid",
+        "optional-secrets-redacted"
+      ],
+      "mediaFolder": "12_agent-tokens"
+    }
+  ]
+}

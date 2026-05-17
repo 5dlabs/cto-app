@@ -34,7 +34,10 @@ Cross-platform desktop application for the CTO platform, built with [Tauri 2](ht
 npm install --workspaces --include-workspace-root
 (cd src-tauri && cargo fetch)
 
-# run the desktop app in dev (Vite + Tauri)
+# run the desktop app in dev (Vite + Tauri) through the installed launcher
+cto-app start
+
+# equivalent from the repo checkout
 npm run tauri:dev
 
 # run only the React UI in a browser, without Rust/Tauri bootstrap

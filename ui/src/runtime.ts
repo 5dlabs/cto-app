@@ -17,10 +17,7 @@ export function isInitPreviewMode(): boolean {
   const bootstrapOverride = readBooleanSearchParam("bootstrapPreview");
   if (override !== null) return override;
   if (bootstrapOverride !== null) return bootstrapOverride;
-  return (
-    import.meta.env.VITE_CTO_INIT_PREVIEW === "1" ||
-    import.meta.env.VITE_CTO_FORCE_LOCAL_STACK_BOOTSTRAP === "1"
-  );
+  return import.meta.env.VITE_CTO_INIT_PREVIEW === "1";
 }
 
 /** Back-compat alias used by bootstrap + tauri helpers. */
@@ -32,11 +29,20 @@ export function shouldSkipLocalStackBootstrap(): boolean {
   if (isInitPreviewMode()) {
     return false;
   }
-  return !isTauriRuntime() || import.meta.env.VITE_CTO_SKIP_LOCAL_STACK_BOOTSTRAP === "1";
+  if (import.meta.env.VITE_CTO_FORCE_LOCAL_STACK_BOOTSTRAP === "1") {
+    return false;
+  }
+  return !isTauriRuntime();
 }
 
+/** When false (e.g. `VITE_CTO_MORGAN_AUTOSTART=0`), remote Morgan stays off — embed, LemonSlice, and voice bridge never connect while you work on the UI. */
 export function shouldAutostartMorgan(): boolean {
   const override = readBooleanSearchParam("morganAutostart");
   if (override !== null) return override;
   return import.meta.env.VITE_CTO_MORGAN_AUTOSTART !== "0";
+}
+
+/** Time-crunch launch switch: hide self-hosted Source lanes unless explicitly enabled. */
+export function shouldEnableSelfHostedSource(): boolean {
+  return import.meta.env.VITE_CTO_ENABLE_SELF_HOSTED_SOURCE === "1";
 }

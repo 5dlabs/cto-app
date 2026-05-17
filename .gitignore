@@ -42,3 +42,4 @@ Thumbs.db
 
 # Local bootstrap/E2E artifacts (bootstrap-runs, e2e-snapshots, probes)
 .local/
+.firecrawl/

@@ -16,10 +16,10 @@ export default defineConfig({
   server: {
     port: 5173,
     strictPort: true,
-    // Bind to `localhost` (not 127.0.0.1) so the app origin matches the
-    // gitlab.5dlabs.ai CSP `frame-ancestors` whitelist. `127.0.0.1` and
-    // `localhost` are considered different origins by browsers for CSP.
-    host: "localhost",
+    // Bind to all interfaces so the setup UI can be watched from another
+    // machine on the same network. The Tauri app still loads devUrl from
+    // http://localhost:5173, preserving the embedded GitLab CSP origin.
+    host: "0.0.0.0",
   },
   envPrefix: ["VITE_", "TAURI_"],
   build: {

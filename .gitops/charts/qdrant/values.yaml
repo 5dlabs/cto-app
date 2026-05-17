@@ -1,8 +1,8 @@
 ---
-namespace: cto-system
+namespace: cto
 createNamespace: false
 
-# The shipped desktop app expects qdrant.cto-system.svc.cluster.local:6333.
+# The shipped desktop app expects qdrant.cto.svc.cluster.local:6333.
 fullnameOverride: qdrant
 nameOverride: ""
 

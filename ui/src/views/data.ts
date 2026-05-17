@@ -618,13 +618,13 @@ function resolveCoderBaseUrl(): string {
   } catch {
     /* ignore */
   }
-  return "http://localhost:8080/morgan/code";
+  return "http://localhost:8080/hermes/code";
 }
 
-/** Base origin for Morgan's code-server host. */
+/** Base origin for Hermes' code-server host. */
 export const CODER_BASE_URL = resolveCoderBaseUrl();
 
-/** Parent dir inside the Morgan pod where repos are checked out. */
+/** Parent dir inside the Hermes pod where repos are checked out. */
 export const CODER_REPOS_ROOT = "/workspace/repos";
 
 /**

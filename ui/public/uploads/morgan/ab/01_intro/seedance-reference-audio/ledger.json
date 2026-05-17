@@ -1,0 +1,64 @@
+{
+  "schemaVersion": 1,
+  "sourceAudioAssetId": "asset_MW4ncj5gWkpdQg4aWqH58fvs",
+  "referenceImageAssetId": "asset_qD8pdsjsSaZhoyUxWG523aiU",
+  "jobs": {
+    "firstFrame_referenceAudio": {
+      "alias": "firstFrame_referenceAudio",
+      "modelId": "model_bytedance-seedance-2-0",
+      "jobId": "job_bi8PcpsaKhwbjznHo6BWbBAT",
+      "status": "success",
+      "body": {
+        "image": "asset_qD8pdsjsSaZhoyUxWG523aiU",
+        "referenceAudios": [
+          "asset_MW4ncj5gWkpdQg4aWqH58fvs"
+        ],
+        "prompt": "Morgan speaks to camera using the provided reference audio for Morgan voice, words, prosody, and timing. Keep Morgan identity, glasses, leather gloves, clipboard, outfit, friendly CTO setup-guide presence. Simple talking head, natural eye blinks and subtle presenter motion.",
+        "resolution": "720p",
+        "duration": 4,
+        "aspectRatio": "1:1",
+        "seed": 3101,
+        "generateAudio": true
+      },
+      "submittedAt": "2026-05-12T23:21:15.992Z",
+      "progress": 1,
+      "lastPolledAt": "2026-05-12T23:24:36.802Z",
+      "assetId": "asset_LzKqRyipscSmqD7Skz1Ycakx",
+      "localPath": "ui/public/uploads/morgan/ab/01_intro/seedance-reference-audio/firstFrame_referenceAudio.mp4",
+      "downloadedAt": "2026-05-12T23:24:38.728Z"
+    },
+    "namedRefs_image_audio": {
+      "alias": "namedRefs_image_audio",
+      "modelId": "model_bytedance-seedance-2-0",
+      "jobId": "job_2c8n5zWq2nrKhu2aaAtwkEMC",
+      "status": "success",
+      "body": {
+        "inputReferences": [
+          {
+            "name": "morgan_image",
+            "type": "image",
+            "assetId": "asset_qD8pdsjsSaZhoyUxWG523aiU"
+          },
+          {
+            "name": "morgan_voice",
+            "type": "audio",
+            "assetId": "asset_MW4ncj5gWkpdQg4aWqH58fvs"
+          }
+        ],
+        "prompt": "@morgan_image is Morgan. @morgan_voice is the exact Morgan/ElevenLabs reference audio: use this voice, words, prosody, and timing. Animate Morgan as a simple talking head, preserving glasses, leather gloves, clipboard, outfit, and calm CTO setup-guide presence.",
+        "resolution": "720p",
+        "duration": 4,
+        "aspectRatio": "1:1",
+        "seed": 3102,
+        "generateAudio": true
+      },
+      "submittedAt": "2026-05-12T23:21:16.527Z",
+      "progress": 1,
+      "lastPolledAt": "2026-05-12T23:24:37.142Z",
+      "assetId": "asset_KhrezBpk5WSC6cFW5YcPZ41P",
+      "localPath": "ui/public/uploads/morgan/ab/01_intro/seedance-reference-audio/namedRefs_image_audio.mp4",
+      "downloadedAt": "2026-05-12T23:24:39.932Z"
+    }
+  },
+  "updatedAt": "2026-05-12T23:24:39.932Z"
+}

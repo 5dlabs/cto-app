@@ -1,0 +1,148 @@
+{
+  "heading": "Saved access",
+  "text": " CC Saved access SAVED ACCESS Use 1Password saved access Continue without saved access Back Continue",
+  "media": [
+    {
+      "tag": "AUDIO",
+      "src": "http://localhost:5173/uploads/morgan/02_saved-access/morgan.mp3",
+      "paused": false,
+      "muted": false,
+      "currentTime": "3.44",
+      "duration": "24.01",
+      "readyState": 4,
+      "error": null
+    }
+  ],
+  "events": [
+    {
+      "t": 2060191,
+      "type": "play.call",
+      "heading": "Saved access",
+      "detail": {
+        "tag": "VIDEO",
+        "src": "http://localhost:5173/uploads/morgan/02_saved-access/morgan.mp4",
+        "muted": false,
+        "paused": true,
+        "currentTime": "0.00",
+        "readyState": 0
+      }
+    },
+    {
+      "t": 2060198,
+      "type": "play",
+      "heading": "Saved access",
+      "detail": {
+        "tag": "VIDEO",
+        "src": "http://localhost:5173/uploads/morgan/02_saved-access/morgan.mp4",
+        "muted": false,
+        "paused": false,
+        "currentTime": "0.00",
+        "duration": null,
+        "readyState": 0,
+        "error": null
+      }
+    },
+    {
+      "t": 2060209,
+      "type": "loadedmetadata",
+      "heading": "Saved access",
+      "detail": {
+        "tag": "AUDIO",
+        "src": "http://localhost:5173/uploads/morgan/02_saved-access/morgan.mp3",
+        "muted": false,
+        "paused": true,
+        "currentTime": "0.00",
+        "duration": "24.01",
+        "readyState": 1,
+        "error": null
+      }
+    },
+    {
+      "t": 2060214,
+      "type": "play.reject",
+      "heading": "Saved access",
+      "detail": {
+        "tag": "VIDEO",
+        "src": "http://localhost:5173/uploads/morgan/02_saved-access/morgan.mp4",
+        "name": "NotSupportedError",
+        "message": "The operation is not supported."
+      }
+    },
+    {
+      "t": 2060214,
+      "type": "error",
+      "heading": "Saved access",
+      "detail": {
+        "tag": "VIDEO",
+        "src": "http://localhost:5173/uploads/morgan/02_saved-access/morgan.mp4",
+        "muted": false,
+        "paused": false,
+        "currentTime": "0.00",
+        "duration": null,
+        "readyState": 0,
+        "error": {
+          "code": 4,
+          "message": ""
+        }
+      }
+    },
+    {
+      "t": 2060216,
+      "type": "play.call",
+      "heading": "Saved access",
+      "detail": {
+        "tag": "AUDIO",
+        "src": "http://localhost:5173/uploads/morgan/02_saved-access/morgan.mp3",
+        "muted": false,
+        "paused": true,
+        "currentTime": "0.00",
+        "readyState": 4
+      }
+    },
+    {
+      "t": 2060216,
+      "type": "canplay",
+      "heading": "Saved access",
+      "detail": {
+        "tag": "AUDIO",
+        "src": "http://localhost:5173/uploads/morgan/02_saved-access/morgan.mp3",
+        "muted": false,
+        "paused": false,
+        "currentTime": "0.00",
+        "duration": "24.01",
+        "readyState": 4,
+        "error": null
+      }
+    },
+    {
+      "t": 2060216,
+      "type": "play",
+      "heading": "Saved access",
+      "detail": {
+        "tag": "AUDIO",
+        "src": "http://localhost:5173/uploads/morgan/02_saved-access/morgan.mp3",
+        "muted": false,
+        "paused": false,
+        "currentTime": "0.00",
+        "duration": "24.01",
+        "readyState": 4,
+        "error": null
+      }
+    },
+    {
+      "t": 2060216,
+      "type": "playing",
+      "heading": "Saved access",
+      "detail": {
+        "tag": "AUDIO",
+        "src": "http://localhost:5173/uploads/morgan/02_saved-access/morgan.mp3",
+        "muted": false,
+        "paused": false,
+        "currentTime": "0.00",
+        "duration": "24.01",
+        "readyState": 4,
+        "error": null
+      }
+    }
+  ]
+}

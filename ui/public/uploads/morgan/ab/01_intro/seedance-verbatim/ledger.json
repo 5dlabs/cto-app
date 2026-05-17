@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "modelId": "model_bytedance-seedance-2-0",
+  "alias": "seedance-verbatim-first15s",
+  "sourceAudioPath": "ui/public/uploads/morgan/ab/01_intro/seedance-verbatim/source/morgan-first-15s.mp3",
+  "audioAssetId": "asset_hUjUFJZ8XUvPp6wrrWVutWUM",
+  "referenceImageAssetId": "asset_qD8pdsjsSaZhoyUxWG523aiU",
+  "body": {
+    "image": "asset_qD8pdsjsSaZhoyUxWG523aiU",
+    "referenceAudios": [
+      "asset_hUjUFJZ8XUvPp6wrrWVutWUM"
+    ],
+    "prompt": "Create a talking-head setup guide clip from the opening frame.\nThe opening frame / image1 is Morgan, a non-human anthropomorphic golden retriever dog character, not a human, not a woman, not a man. Preserve Morgan's dog muzzle, canine nose, fur, glasses, leather gloves, clipboard, outfit, and friendly CTO guide identity. Do not humanize Morgan.\nReference audio audio1 is the exact ElevenLabs Morgan narration. Sync the dialogue to audio1 verbatim; do not paraphrase, replace words, improvise, or use a different voice. The spoken words must be exactly from audio1.\nSubtle natural presenter motion only: small head turns, eye blinks, mouth movement on the canine muzzle, slight hand/clipboard motion. Keep the same single-character composition.",
+    "resolution": "720p",
+    "duration": 15,
+    "aspectRatio": "1:1",
+    "seed": 5101,
+    "generateAudio": true
+  },
+  "estimatedCreativeUnits": 546,
+  "jobId": "job_bt48KZzWNpfANaANce6PQCyG",
+  "status": "success",
+  "submittedAt": "2026-05-12T23:47:04.033Z",
+  "progress": 1,
+  "lastPolledAt": "2026-05-13T01:31:11.224Z",
+  "updatedAt": "2026-05-13T01:31:24.371Z",
+  "assetId": "asset_DqJEP5NQAfSmMyNYkbfAZLdP",
+  "consecutiveConnectionErrors": 0,
+  "localPath": "ui/public/uploads/morgan/ab/01_intro/seedance-verbatim/seedance-verbatim-first15s.mp4",
+  "downloadedAt": "2026-05-13T01:31:24.371Z"
+}

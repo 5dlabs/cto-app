@@ -1,5 +1,5 @@
 ---
-namespace: cto-system
+namespace: cto
 fullnameOverride: voice-bridge
 nameOverride: ""
 
@@ -32,7 +32,7 @@ service:
 env:
   LOG_LEVEL: INFO
   ALLOWED_ORIGINS: "http://localhost:5173,http://127.0.0.1:5173,http://localhost:8080,http://127.0.0.1:8080,http://tauri.localhost,https://tauri.localhost,tauri://localhost"
-  MORGAN_GATEWAY_URL: "http://openclaw-gateway-morgan.cto-system.svc.cluster.local:18789"
+  MORGAN_GATEWAY_URL: "http://openclaw-gateway-morgan.cto.svc.cluster.local:18789"
   MORGAN_GATEWAY_TOKEN: "openclaw-internal"
   MORGAN_MODEL: "openclaw/morgan"
   MORGAN_VOICE_ID: "iP95p4xoKVk53GoZ742B"

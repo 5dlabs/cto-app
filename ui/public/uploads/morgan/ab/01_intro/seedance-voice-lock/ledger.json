@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "jobId": "job_2TUZFtXUebUxZFuGqmjWHXBh",
+  "modelId": "model_bytedance-seedance-2-0",
+  "status": "success",
+  "progress": 1,
+  "assetId": "asset_jmE92H1yyuaWvsezSeXroevW",
+  "lastPolledAt": "2026-05-12T23:10:57.866Z",
+  "updatedAt": "2026-05-12T23:10:59.960Z",
+  "localPath": "ui/public/uploads/morgan/ab/01_intro/seedance-voice-lock/seedance-audio-input.mp4",
+  "downloadedAt": "2026-05-12T23:10:59.960Z"
+}

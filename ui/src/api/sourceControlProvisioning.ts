@@ -15,7 +15,8 @@ export type ScmConnectionStatus =
 
 export type RepositorySelection = "all" | "selected";
 
-export type SecretSourceProvider = "onepassword";
+export type SecretSourceProvider = "onepassword" | "bitwarden";
+export type SecretSourceQuickConnectProvider = "onepassword";
 
 export type OriginEngine = "standard" | "gitlab-compatible";
 export type OriginTransferMode = "mirror" | "migrate";
@@ -60,8 +61,17 @@ export interface OriginProvisionResult {
 export interface SecretSourceProviderStatus {
   provider: SecretSourceProvider;
   label: string;
+  desktopInstalled?: boolean;
+  cliInstalled?: boolean;
+  cliAccessReady?: boolean;
+  desktopAppIntegrationEnabled?: boolean;
+  accountConfigured?: boolean;
+  pendingUserPermission?: boolean;
   detected: boolean;
   available: boolean;
+  status?: string | null;
+  docsUrl?: string | null;
+  secondary?: boolean;
   version: string | null;
   reason: string | null;
   primaryAction: string;
@@ -74,12 +84,12 @@ export interface SecretSourceDetectionResult {
 }
 
 export interface SecretSourcePreviewRequest {
-  provider: SecretSourceProvider;
+  provider: SecretSourceQuickConnectProvider;
   targets?: string[];
 }
 
 export interface SecretSourceMatchPreview {
-  provider: SecretSourceProvider;
+  provider: SecretSourceQuickConnectProvider;
   purpose: string;
   targetSecretName: string;
   targetSecretKey: string;
@@ -91,14 +101,14 @@ export interface SecretSourceMatchPreview {
 }
 
 export interface SecretSourcePreviewResult {
-  provider: SecretSourceProvider;
+  provider: SecretSourceQuickConnectProvider;
   discovery: "metadata-only";
   matches: SecretSourceMatchPreview[];
   warnings: string[];
 }
 
 export interface SecretSourceApplyRequest {
-  provider: SecretSourceProvider;
+  provider: SecretSourceQuickConnectProvider;
   approved: boolean;
   matches: Array<{
     purpose: string;
@@ -108,7 +118,7 @@ export interface SecretSourceApplyRequest {
 }
 
 export interface SecretSourceApplyResult {
-  provider: SecretSourceProvider;
+  provider: SecretSourceQuickConnectProvider;
   applied: Array<{
     purpose: string;
     targetSecretName: string;
@@ -259,6 +269,10 @@ export function slugifyConnectionId(value: string): string {
 
 export function detectSecretSources(): Promise<SecretSourceDetectionResult> {
   return invokeTauri<SecretSourceDetectionResult>("detect_secret_sources");
+}
+
+export function installOnePasswordCli(): Promise<SecretSourceDetectionResult> {
+  return invokeTauri<SecretSourceDetectionResult>("install_onepassword_cli");
 }
 
 export function previewSecretSourceMatches(

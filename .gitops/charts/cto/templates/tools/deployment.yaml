@@ -41,6 +41,7 @@ spec:
               chown -R 1001:1001 /home/app
               chmod 755 /home/app/.npm
               mkdir -p /data/workspace
+              mkdir -p /data/npm-cache
               chown -R 1001:1001 /data
               {{- if .Values.tools.dockerInDocker.enabled }}
               mkdir -p /docker-data
@@ -54,6 +55,49 @@ spec:
             - name: docker-data
               mountPath: /docker-data
             {{- end }}
+        {{- if .Values.tools.prewarmMcpCache.enabled }}
+        - name: prewarm-mcp-cache
+          image: "{{ .Values.tools.image.repository }}:{{ .Values.tools.image.tag }}"
+          imagePullPolicy: {{ .Values.tools.image.pullPolicy }}
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -u
+              warm_npx() {
+                name="$1"
+                shift
+                echo "[mcp-cache] warming ${name}"
+                if command -v timeout >/dev/null 2>&1; then
+                  timeout "{{ .Values.tools.prewarmMcpCache.timeoutSeconds }}s" npx "$@" < /dev/null >/tmp/mcp-cache-${name}.log 2>&1 || true
+                else
+                  npx "$@" < /dev/null >/tmp/mcp-cache-${name}.log 2>&1 || true
+                fi
+              }
+              {{- range $name, $cfg := .Values.tools.servers }}
+              {{- if and $cfg.enabled (eq ($cfg.command | default "") "npx") }}
+              warm_npx {{ $name | quote }}{{ range $arg := $cfg.args }} {{ $arg | quote }}{{ end }}
+              {{- end }}
+              {{- end }}
+              echo "[mcp-cache] prewarm complete"
+          env:
+            - name: HOME
+              value: "/home/app"
+            - name: NPM_CONFIG_CACHE
+              value: "/data/npm-cache"
+            - name: NPM_CONFIG_AUDIT
+              value: "false"
+            - name: NPM_CONFIG_FUND
+              value: "false"
+            - name: NPM_CONFIG_UPDATE_NOTIFIER
+              value: "false"
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: home-app
+              mountPath: /home/app
+            - name: tmp
+              mountPath: /tmp
+        {{- end }}
       containers:
         - name: tools
           image: "{{ .Values.tools.image.repository }}:{{ .Values.tools.image.tag }}"
@@ -79,9 +123,20 @@ spec:
               value: "/config"
             - name: HOME
               value: "/home/app"
+            - name: NPM_CONFIG_CACHE
+              value: "/data/npm-cache"
+            - name: NPM_CONFIG_AUDIT
+              value: "false"
+            - name: NPM_CONFIG_FUND
+              value: "false"
+            - name: NPM_CONFIG_UPDATE_NOTIFIER
+              value: "false"
             {{- if .Values.tools.dockerInDocker.enabled }}
             - name: DOCKER_HOST
               value: "unix:///var/run/docker.sock"
+            {{- else }}
+            - name: DOCKER_HOST
+              value: ""
             {{- end }}
           envFrom:
             # Provider API keys shared with tools (e.g. CONTEXT7, BRAVE, MINIMAX, PERPLEXITY).
@@ -97,12 +152,7 @@ spec:
             {{- end }}
             {{- end }}
           resources:
-            requests:
-              cpu: 100m
-              memory: 256Mi
-            limits:
-              cpu: 1000m
-              memory: 1Gi
+            {{- toYaml .Values.tools.resources | nindent 12 }}
           readinessProbe:
             httpGet:
               path: /ready

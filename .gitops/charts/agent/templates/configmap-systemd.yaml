@@ -38,7 +38,7 @@ data:
     set -euo pipefail
 
     # Directories
-    CTO_DIR="${CTO_PROJECT_DIR:-/workspace/repos/cto}"
+    CTO_DIR="${CTO_PROJECT_DIR:-/workspace/repos/project}"
     PID_DIR="${CTO_PID_DIR:-/workspace/.cto-services/pids}"
     LOG_DIR="${CTO_LOG_DIR:-/workspace/.cto-services/logs}"
     BIN_DIR="${CTO_BIN_DIR:-$CTO_DIR/target/release}"
@@ -306,7 +306,7 @@ data:
         echo "Services: controller, pm-server, healer"
         echo ""
         echo "Environment:"
-        echo "  CTO_PROJECT_DIR  CTO repo path (default: /workspace/repos/cto)"
+        echo "  CTO_PROJECT_DIR  Project repo path (default: /workspace/repos/project)"
         echo "  CTO_BIN_DIR      Binary dir (default: \$CTO_PROJECT_DIR/target/release)"
         echo "  CTO_LOG_DIR      Log dir (default: /workspace/.cto-services/logs)"
         echo "  RUST_LOG         Log level (default: info)"

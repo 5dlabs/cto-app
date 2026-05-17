@@ -83,6 +83,8 @@ const BOOTSTRAP_TOOL_API_KEY_ENV_NAMES: &[&str] = &[
     "PERPLEXITY_API_KEY",
 ];
 const SECRET_SOURCE_PROVIDER_ONEPASSWORD: &str = "onepassword";
+const SECRET_SOURCE_PROVIDER_BITWARDEN: &str = "bitwarden";
+const BITWARDEN_CLI_DOCS_URL: &str = "https://bitwarden.com/help/cli/";
 const SECRET_SOURCE_CANONICAL_TARGETS: &[(&str, &str)] = &[
     ("GITHUB_TOKEN", "source.github.token"),
     ("GITLAB_TOKEN", "source.gitlab.token"),
@@ -309,8 +311,19 @@ pub struct GitHubCliOAuthPrompt {
 pub struct SecretSourceProviderStatus {
     provider: String,
     label: String,
+    desktop_installed: bool,
+    cli_installed: bool,
+    cli_access_ready: bool,
+    desktop_app_integration_enabled: bool,
+    account_configured: bool,
+    pending_user_permission: bool,
     detected: bool,
     available: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    docs_url: Option<String>,
+    secondary: bool,
     version: Option<String>,
     reason: Option<String>,
     primary_action: String,
@@ -1140,19 +1153,18 @@ async fn ensure_local_stack_cluster_dependencies(window: &Window) -> BootstrapRe
     ensure_kind_cluster(runtime_kind)?;
 
     emit(window, "ingress", "Configuring ingress...", 52);
-    apply_remote_manifest_server_side(INGRESS_NGINX_KIND_URL).await?;
-    wait_for_rollout(
-        "ingress-nginx",
-        "deployment/ingress-nginx-controller",
-        "240s",
-    )?;
+    ensure_ingress_nginx_for_kind().await?;
 
     emit(window, "metrics", "Installing Lens metrics support...", 60);
-    install_metrics_server_for_kind().await?;
+    ensure_metrics_server_for_kind().await?;
 
     emit(window, "gitops", "Starting Argo CD...", 68);
     ensure_namespace(ARGOCD_NAMESPACE)?;
-    install_argocd()?;
+    if argocd_core_workloads_exist()? {
+        tracing::info!("Argo CD core workloads already exist; skipping Helm install");
+    } else {
+        install_argocd()?;
+    }
     wait_for_crd("applications.argoproj.io", "120s")?;
     wait_for_crd("appprojects.argoproj.io", "120s")?;
     wait_for_rollout(ARGOCD_NAMESPACE, "deployment/argocd-server", "300s")?;
@@ -1180,6 +1192,12 @@ async fn ensure_local_stack_cluster_dependencies(window: &Window) -> BootstrapRe
 #[tauri::command]
 pub fn detect_secret_sources() -> SecretSourceDetectionResult {
     detect_secret_sources_inner()
+}
+
+#[tauri::command]
+pub async fn install_onepassword_cli() -> BootstrapResult<SecretSourceDetectionResult> {
+    install_onepassword_cli_inner().await?;
+    Ok(detect_secret_sources_inner())
 }
 
 #[tauri::command]
@@ -3127,16 +3145,43 @@ fn secret_source_targets(requested: &[String]) -> Vec<(&'static str, &'static st
 }
 
 fn detect_secret_sources_inner() -> SecretSourceDetectionResult {
-    // Contract probe: op --version
-    let output = run_tool("op", &["--version"]);
-    let (detected, available, version, reason) = match output {
+    let mut detection = onepassword_detection_from_probes(
+        onepassword_desktop_installed(),
+        run_tool("op", &["--version"]),
+        run_tool_with_timeout(
+            "op",
+            &["vault", "list", "--format", "json"],
+            Duration::from_secs(8),
+        ),
+    );
+    if let Some(bitwarden) = bitwarden_detection_from_probes(
+        run_tool("bw", &["--version"]),
+        if find_tool_binary("bw").is_some() {
+            run_tool_with_timeout("bw", &["status"], Duration::from_secs(5))
+        } else {
+            Err("Bitwarden CLI not found".to_string())
+        },
+    ) {
+        detection.providers.push(bitwarden);
+    }
+    detection
+}
+
+fn bitwarden_detection_from_probes(
+    version_output: BootstrapResult<std::process::Output>,
+    status_output: BootstrapResult<std::process::Output>,
+) -> Option<SecretSourceProviderStatus> {
+    let cli_installed = find_tool_binary("bw").is_some() || version_output.is_ok();
+    if !cli_installed {
+        return None;
+    }
+
+    let (version, version_error) = match version_output {
         Ok(output) if output.status.success() => {
             let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            (true, true, (!version.is_empty()).then_some(version), None)
+            ((!version.is_empty()).then_some(version), None)
         }
         Ok(output) => (
-            true,
-            false,
             None,
             Some(
                 sanitize_bootstrap_log_text(&String::from_utf8_lossy(&output.stderr))
@@ -3144,32 +3189,215 @@ fn detect_secret_sources_inner() -> SecretSourceDetectionResult {
                     .to_string(),
             ),
         ),
-        Err(error) => (false, false, None, Some(error)),
+        Err(error) => (None, Some(error)),
+    };
+
+    let (status, status_error) = match status_output {
+        Ok(output) if output.status.success() => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let parsed = serde_json::from_str::<Value>(&stdout)
+                .ok()
+                .and_then(|value| value.get("status").and_then(Value::as_str).map(str::to_string));
+            (parsed, None)
+        }
+        Ok(output) => (
+            None,
+            Some(
+                sanitize_bootstrap_log_text(&String::from_utf8_lossy(&output.stderr))
+                    .trim()
+                    .to_string(),
+            ),
+        ),
+        Err(error) => (None, Some(error)),
+    };
+
+    let status_value = status.unwrap_or_else(|| "unknown".to_string());
+    let available = status_value.eq_ignore_ascii_case("unlocked");
+    let account_configured = !status_value.eq_ignore_ascii_case("unauthenticated")
+        && !status_value.eq_ignore_ascii_case("unknown");
+    let reason = if available {
+        None
+    } else {
+        status_error.or(version_error).or_else(|| Some(format!("Bitwarden CLI status is {status_value}")))
+    };
+
+    Some(SecretSourceProviderStatus {
+        provider: SECRET_SOURCE_PROVIDER_BITWARDEN.to_string(),
+        label: "Bitwarden".to_string(),
+        desktop_installed: false,
+        cli_installed: true,
+        cli_access_ready: available,
+        desktop_app_integration_enabled: false,
+        account_configured,
+        pending_user_permission: false,
+        detected: true,
+        available,
+        status: Some(status_value),
+        docs_url: Some(BITWARDEN_CLI_DOCS_URL.to_string()),
+        secondary: true,
+        version,
+        reason,
+        primary_action: if available { "More options" } else { "Unlock Bitwarden CLI" }.to_string(),
+    })
+}
+
+fn onepassword_detection_from_probes(
+    desktop_installed: bool,
+    version_output: BootstrapResult<std::process::Output>,
+    vault_probe_output: BootstrapResult<std::process::Output>,
+) -> SecretSourceDetectionResult {
+    let cli_installed = find_tool_binary("op").is_some() || version_output.is_ok();
+    let (detected, version, version_error) = match version_output {
+        Ok(output) if output.status.success() => {
+            let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            (true, (!version.is_empty()).then_some(version), None)
+        }
+        Ok(output) => (
+            true,
+            None,
+            Some(
+                sanitize_bootstrap_log_text(&String::from_utf8_lossy(&output.stderr))
+                    .trim()
+                    .to_string(),
+            ),
+        ),
+        Err(error) => (false, None, Some(error)),
+    };
+
+    let (cli_access_ready, desktop_app_integration_enabled, account_configured, pending_user_permission, access_error) = if !cli_installed {
+        (false, false, false, false, version_error.clone())
+    } else {
+        match vault_probe_output {
+            Ok(output) if output.status.success() => (true, true, true, false, None),
+            Ok(output) => {
+                let stderr = sanitize_bootstrap_log_text(&String::from_utf8_lossy(&output.stderr))
+                    .trim()
+                    .to_string();
+                let stdout = sanitize_bootstrap_log_text(&String::from_utf8_lossy(&output.stdout))
+                    .trim()
+                    .to_string();
+                let reason = if stderr.is_empty() { stdout } else { stderr };
+                let lower = reason.to_ascii_lowercase();
+                let desktop_app_integration_enabled = onepassword_desktop_app_integration_enabled(&lower);
+                let account_configured = !lower.contains("no accounts configured")
+                    && !lower.contains("no account found");
+                let pending_user_permission = onepassword_cli_permission_pending(&lower);
+                (
+                    false,
+                    desktop_app_integration_enabled,
+                    account_configured,
+                    pending_user_permission,
+                    (!reason.is_empty()).then_some(reason),
+                )
+            }
+            Err(error) => {
+                let lower = error.to_ascii_lowercase();
+                let pending_user_permission = onepassword_cli_permission_pending(&lower);
+                let desktop_app_integration_enabled = onepassword_desktop_app_integration_enabled(&lower);
+                (false, desktop_app_integration_enabled, true, pending_user_permission, Some(error))
+            }
+        }
+    };
+
+    let available = desktop_installed && cli_installed && cli_access_ready;
+    let reason = if available {
+        None
+    } else {
+        access_error.or(version_error)
     };
 
     SecretSourceDetectionResult {
         providers: vec![SecretSourceProviderStatus {
             provider: SECRET_SOURCE_PROVIDER_ONEPASSWORD.to_string(),
             label: "1Password".to_string(),
+            desktop_installed,
+            cli_installed,
+            cli_access_ready,
+            desktop_app_integration_enabled,
+            account_configured,
+            pending_user_permission,
             detected,
             available,
+            status: None,
+            docs_url: None,
+            secondary: false,
             version,
             reason,
             primary_action: if available {
                 "Use saved access"
+            } else if !desktop_installed {
+                "Install desktop"
+            } else if !cli_installed {
+                "Install CLI"
+            } else if pending_user_permission {
+                "Approve access"
+            } else if !desktop_app_integration_enabled {
+                "Enable desktop app integration"
             } else {
-                "Paste instead"
+                "Enable CLI access"
             }
             .to_string(),
         }],
         manual_fallback_available: true,
         message: if available {
-            "1Password quick connect is available; review matches before connecting.".to_string()
+            "1Password CLI access is available; review matches before connecting.".to_string()
+        } else if !desktop_installed {
+            "1Password desktop is not installed yet; Morgan can open the install guide.".to_string()
+        } else if !cli_installed {
+            "1Password desktop is installed, but the op CLI was not found yet.".to_string()
+        } else if pending_user_permission {
+            "1Password is waiting for you to approve CLI access in the desktop prompt. Morgan will retry after approval."
+                .to_string()
+        } else if !desktop_app_integration_enabled {
+            "1Password desktop and CLI are installed, but desktop app integration is not enabled yet."
+                .to_string()
         } else {
-            "No optional saved-access provider is ready; paste instead remains available."
+            "1Password CLI was found, but CLI access is not ready. Unlock desktop and enable CLI integration."
                 .to_string()
         },
     }
+}
+
+fn onepassword_desktop_app_integration_enabled(lower_reason: &str) -> bool {
+    !lower_reason.contains("turn on the 1password desktop app integration")
+        && !lower_reason.contains("desktop app integration is not enabled")
+        && !lower_reason.contains("enable command line integration")
+}
+
+fn onepassword_cli_permission_pending(lower_reason: &str) -> bool {
+    ((lower_reason.contains("permission")
+        || lower_reason.contains("approval")
+        || lower_reason.contains("approve"))
+        && (lower_reason.contains("1password")
+            || lower_reason.contains("desktop")
+            || lower_reason.contains("app")))
+        || lower_reason.contains("timed out waiting for op vault list")
+        || lower_reason.contains("timed out waiting for op item list")
+        || lower_reason.contains("timed out waiting for op item get")
+}
+
+async fn install_onepassword_cli_inner() -> BootstrapResult<()> {
+    if find_tool_binary("op").is_some() {
+        return Ok(());
+    }
+    install_tool("1password-cli").await?;
+    if find_tool_binary("op").is_none() {
+        return Err("1Password CLI was installed but op is not visible on PATH".to_string());
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn onepassword_desktop_installed() -> bool {
+    Path::new("/Applications/1Password.app").exists()
+        || home_dir()
+            .map(|home| home.join("Applications").join("1Password.app").exists())
+            .unwrap_or(false)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn onepassword_desktop_installed() -> bool {
+    false
 }
 
 fn preview_secret_source_matches_inner(
@@ -3180,7 +3408,11 @@ fn preview_secret_source_matches_inner(
     let mut command = tool_command("op");
     command.args(["item", "list", "--format", "json"]);
     // Metadata-only discovery: `op item list` enumerates items without reading fields.
-    let output = run_command(command, "op item list --format json")?;
+    let output = run_command_with_timeout(
+        command,
+        "op item list --format json",
+        Duration::from_secs(12),
+    )?;
     if !output.status.success() {
         return Err(format!(
             "1Password metadata discovery failed; paste instead is still available: {}",
@@ -3272,7 +3504,11 @@ fn apply_secret_source_matches_inner(
             "--reveal",
         ]);
         // Approved field read: raw value is held only in memory long enough to build/apply the Kubernetes Secret.
-        let output = run_command(command, "op item get [approved field redacted]")?;
+        let output = run_command_with_timeout(
+            command,
+            "op item get [approved field redacted]",
+            Duration::from_secs(45),
+        )?;
         if !output.status.success() {
             return Err(format!(
                 "1Password approved field read failed for {target_key}: {}",
@@ -4538,10 +4774,16 @@ async fn install_tool(tool: &str) -> BootstrapResult<()> {
             "kubectl" => "kubernetes-cli",
             "helm" => "helm",
             "argocd" => "argocd",
+            "1password-cli" => "--cask 1password-cli",
             _ => tool,
         };
 
-        match brew_install(&["install", formula]) {
+        let brew_args = if formula == "--cask 1password-cli" {
+            vec!["install", "--cask", "1password-cli"]
+        } else {
+            vec!["install", formula]
+        };
+        match brew_install(&brew_args) {
             Ok(()) => return Ok(()),
             Err(error) if supports_direct_install(tool) => {
                 tracing::warn!(
@@ -5618,11 +5860,20 @@ async fn ensure_bootstrap_gitops_repository(
 fn gitops_repository_initialization_required(
     credentials: Option<&BootstrapGithubCredentials>,
     github_request: Option<&BootstrapGithubRequest>,
-    setup: Option<&BootstrapSetupProfile>,
+    _setup: Option<&BootstrapSetupProfile>,
 ) -> bool {
-    setup.is_some_and(|setup| setup.source.provider == BootstrapSourceProvider::GitHub)
-        || credentials.is_some()
-        || github_request.is_some_and(|github| github.enabled != Some(false))
+    credentials.is_some_and(|credentials| {
+        credentials
+            .token
+            .as_deref()
+            .is_some_and(|token| !token.trim().is_empty())
+    }) || github_request.is_some_and(|github| {
+        github.enabled == Some(true)
+            && github
+                .token
+                .as_deref()
+                .is_some_and(|token| !token.trim().is_empty())
+    })
 }
 
 fn gitops_repository_owner(
@@ -6023,15 +6274,77 @@ fn base64_encode(bytes: &[u8]) -> String {
     encoded
 }
 
-async fn install_metrics_server_for_kind() -> BootstrapResult<()> {
-    tracing::info!("Installing metrics-server for Lens metrics API discovery");
-    apply_remote_manifest_server_side(METRICS_SERVER_MANIFEST_URL)
-        .await
-        .map_err(|error| format!("Failed to apply metrics-server manifest for Lens: {error}"))?;
+async fn ensure_ingress_nginx_for_kind() -> BootstrapResult<()> {
+    if kubernetes_resource_exists("ingress-nginx", "deployment", "ingress-nginx-controller")? {
+        tracing::info!(
+            "ingress-nginx controller already exists; skipping remote manifest download"
+        );
+    } else {
+        apply_remote_manifest_server_side(INGRESS_NGINX_KIND_URL).await?;
+    }
+    wait_for_rollout(
+        "ingress-nginx",
+        "deployment/ingress-nginx-controller",
+        "240s",
+    )
+}
+
+async fn ensure_metrics_server_for_kind() -> BootstrapResult<()> {
+    if kubernetes_resource_exists(
+        METRICS_SERVER_NAMESPACE,
+        "deployment",
+        METRICS_SERVER_DEPLOYMENT.trim_start_matches("deployment/"),
+    )? {
+        tracing::info!("metrics-server already exists; skipping remote manifest download");
+    } else {
+        apply_remote_manifest_server_side(METRICS_SERVER_MANIFEST_URL)
+            .await
+            .map_err(|error| {
+                format!("Failed to apply metrics-server manifest for Lens: {error}")
+            })?;
+    }
     patch_metrics_server_for_kind()?;
     wait_for_rollout(METRICS_SERVER_NAMESPACE, METRICS_SERVER_DEPLOYMENT, "180s")
         .map_err(|error| format!("metrics-server rollout failed after Kind patch: {error}"))?;
     wait_for_api_service_available(METRICS_SERVER_API_SERVICE, "120s")
+}
+
+fn kubernetes_resource_exists(namespace: &str, kind: &str, name: &str) -> BootstrapResult<bool> {
+    let output = run_kubectl(&["-n", namespace, "get", kind, name])?;
+    if output.status.success() {
+        return Ok(true);
+    }
+
+    if remote_manifest_skip_reason(&output.stderr) {
+        return Ok(false);
+    }
+
+    Err(command_failure_message(
+        &format!("kubectl -n {namespace} get {kind} {name}"),
+        &output,
+    ))
+}
+
+fn remote_manifest_skip_reason(stderr: &[u8]) -> bool {
+    let stderr = String::from_utf8_lossy(stderr).to_lowercase();
+    stderr.contains("notfound") || stderr.contains("not found")
+}
+
+fn argocd_core_workloads_exist() -> BootstrapResult<bool> {
+    Ok(
+        kubernetes_resource_exists(ARGOCD_NAMESPACE, "deployment", "argocd-server")?
+            && kubernetes_resource_exists(ARGOCD_NAMESPACE, "deployment", "argocd-repo-server")?
+            && kubernetes_resource_exists(
+                ARGOCD_NAMESPACE,
+                "deployment",
+                "argocd-applicationset-controller",
+            )?
+            && kubernetes_resource_exists(
+                ARGOCD_NAMESPACE,
+                "statefulset",
+                "argocd-application-controller",
+            )?,
+    )
 }
 
 fn patch_metrics_server_for_kind() -> BootstrapResult<()> {
@@ -6264,6 +6577,16 @@ fn run_tool(name: &str, args: &[&str]) -> BootstrapResult<Output> {
     run_command(command, &format!("{} {}", name, args.join(" ")))
 }
 
+fn run_tool_with_timeout(
+    name: &str,
+    args: &[&str],
+    timeout: Duration,
+) -> BootstrapResult<Output> {
+    let mut command = tool_command(name);
+    command.args(args);
+    run_command_with_timeout(command, &format!("{} {}", name, args.join(" ")), timeout)
+}
+
 fn run_kubectl(args: &[&str]) -> BootstrapResult<Output> {
     let mut command = kubectl_command();
     command.args(args);
@@ -6287,6 +6610,45 @@ fn run_command(mut command: Command, label: &str) -> BootstrapResult<Output> {
         .map_err(|error| format!("Failed to run {label}: {error}"))?;
     log_command_output(label, &output);
     Ok(output)
+}
+
+fn run_command_with_timeout(
+    mut command: Command,
+    label: &str,
+    timeout: Duration,
+) -> BootstrapResult<Output> {
+    append_bootstrap_log(&format!("starting `{label}` with {}s timeout", timeout.as_secs()));
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    let mut child = command
+        .spawn()
+        .map_err(|error| format!("Failed to run {label}: {error}"))?;
+    let deadline = Instant::now() + timeout;
+    loop {
+        if child
+            .try_wait()
+            .map_err(|error| format!("Failed to poll {label}: {error}"))?
+            .is_some()
+        {
+            let output = child
+                .wait_with_output()
+                .map_err(|error| format!("Failed to collect {label}: {error}"))?;
+            log_command_output(label, &output);
+            return Ok(output);
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait_with_output();
+            append_bootstrap_log(&format!(
+                "command `{}` timed out after {}s",
+                sanitize_bootstrap_command_label(label),
+                timeout.as_secs()
+            ));
+            return Err(format!(
+                "Timed out waiting for {label}; approve the 1Password desktop prompt or retry after unlocking the app."
+            ));
+        }
+        thread::sleep(Duration::from_millis(120));
+    }
 }
 
 fn kubectl_command() -> Command {
@@ -6557,11 +6919,11 @@ mod tests {
         normalize_bootstrap_scm_secret_manifest, normalize_bootstrap_tool_api_keys,
         parse_cpu_quantity_to_milli, parse_kind_node_container_states, parse_kubelet_summary_usage,
         parse_kubernetes_nodes, parse_kubernetes_pods, parse_memory_quantity_to_bytes,
-        parse_runtime_stats_lines, prepare_origin_transfer_inner, terminal_argo_application_error,
-        validate_bootstrap_setup, BootstrapAgentKey, BootstrapAiCli, BootstrapAppMode,
-        BootstrapGithubCredentials, BootstrapGithubRequest, BootstrapHarnessMode,
-        BootstrapHarnessRouting, BootstrapLocalStackRequest, BootstrapModelRoute,
-        BootstrapProviderAuth, BootstrapProviderCredentialConfig,
+        parse_runtime_stats_lines, prepare_origin_transfer_inner, remote_manifest_skip_reason,
+        terminal_argo_application_error, validate_bootstrap_setup, BootstrapAgentKey,
+        BootstrapAiCli, BootstrapAppMode, BootstrapGithubCredentials, BootstrapGithubRequest,
+        BootstrapHarnessMode, BootstrapHarnessRouting, BootstrapLocalStackRequest,
+        BootstrapModelRoute, BootstrapProviderAuth, BootstrapProviderCredentialConfig,
         BootstrapProviderCredentialRequest, BootstrapProviderSelection, BootstrapProvidersRequest,
         BootstrapScmRequest, BootstrapSetupAgent, BootstrapSetupHarness, BootstrapSetupProfile,
         BootstrapSetupSource, BootstrapSourceCredentials, BootstrapSourceProvider,
@@ -6769,6 +7131,16 @@ mod tests {
         let patch = metrics_server_kind_patch(&deployment).unwrap();
 
         assert!(patch.is_empty());
+    }
+
+    #[test]
+    fn remote_manifest_skip_reason_recognizes_kubectl_not_found_errors() {
+        assert!(remote_manifest_skip_reason(
+            b"Error from server (NotFound): deployments.apps \"ingress-nginx-controller\" not found"
+        ));
+        assert!(!remote_manifest_skip_reason(
+            b"The connection to the server localhost:8080 was refused"
+        ));
     }
 
     #[test]

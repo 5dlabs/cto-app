@@ -1,0 +1,25 @@
+{
+  "modelId": "model_pruna-p-avatar",
+  "label": "P-Video Avatar / Pruna with current local Morgan MP3",
+  "sourceAudioPath": "ui/public/uploads/morgan/01_intro/morgan.mp3",
+  "referenceImageAssetId": "asset_qD8pdsjsSaZhoyUxWG523aiU",
+  "audioAssetId": "asset_vQHkR56iEkgwEGzgrHufD6Hi",
+  "estimatedCreativeUnits": 52,
+  "jobId": "job_LBCpXJhT4zKcns5o7roDcpS6",
+  "status": "success",
+  "submittedAt": "2026-05-13T03:29:56.077Z",
+  "body": {
+    "image": "asset_qD8pdsjsSaZhoyUxWG523aiU",
+    "audio": "asset_vQHkR56iEkgwEGzgrHufD6Hi",
+    "resolution": "720p",
+    "videoPrompt": "natural head motion, eye blinks, accurate mouth movement on the canine muzzle, subtle friendly presenter gestures, preserve Morgan as a non-human golden retriever dog character with glasses, leather gloves, clipboard, outfit, and calm CTO guide identity; no background music",
+    "voicePrompt": "use the uploaded audio exactly as the speech track; no generated voice, no music, no paraphrasing",
+    "disablePromptUpsampling": true,
+    "seed": 5102
+  },
+  "progress": 1,
+  "lastPolledAt": "2026-05-13T03:30:53.799Z",
+  "assetId": "asset_pQbbPUjoUN6P4HraZzdk4J8E",
+  "localPath": "ui/public/uploads/morgan/ab/01_intro/p-avatar-current-audio/p-avatar-current-audio.mp4",
+  "downloadedAt": "2026-05-13T03:31:05.780Z"
+}

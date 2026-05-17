@@ -1,0 +1,16 @@
+WEBVTT
+
+00:00.000 --> 00:08.000
+I’ll try to read what 1Password can safely show me from the command line.
+
+00:08.000 --> 00:18.000
+First I check that the desktop app is installed, then I check for the op CLI, and then I ask the CLI to list vault metadata.
+
+00:18.000 --> 00:29.000
+If the CLI is missing, I’ll install it and run the check again. If desktop integration is not enabled, I’ll open the official 1Password instructions.
+
+00:29.000 --> 00:39.000
+Once I can read vault metadata, I can show only redacted matches and ask before setting anything as a secret.
+
+00:39.000 --> 00:46.000
+If you do not want to use 1Password here, just continue. We can collect credentials later.

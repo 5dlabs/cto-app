@@ -25,14 +25,16 @@ spec:
     helm:
       releaseName: voice-bridge
       valuesObject:
-        namespace: cto-system
+        namespace: cto
         fullnameOverride: voice-bridge
         imagePullSecrets:
           - name: ghcr-pull-secret
+        env:
+          MORGAN_GATEWAY_URL: "http://openclaw-gateway-morgan.cto.svc.cluster.local:18789"
 
   destination:
     server: https://kubernetes.default.svc
-    namespace: cto-system
+    namespace: cto
 
   syncPolicy:
     automated:

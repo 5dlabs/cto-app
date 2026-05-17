@@ -1,5 +1,5 @@
 ---
-namespace: cto-system
+namespace: cto
 createNamespace: false
 
 nameOverride: ""
@@ -135,7 +135,7 @@ grafana:
   tolerations: []
   affinity: {}
 
-# Promtail is scoped to cto-system pod stdout/stderr logs and only renders when
+# Promtail is scoped to cto pod stdout/stderr logs and only renders when
 # Loki is enabled in this same chart, so Morgan never depends on Loki by default.
 promtail:
   enabled: true

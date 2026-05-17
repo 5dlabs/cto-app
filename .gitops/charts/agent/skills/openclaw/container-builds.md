@@ -24,43 +24,43 @@ Commands that **do not apply** (no daemon): `docker run`, `docker ps`, `docker s
 ### Basic build and push
 
 ```bash
-kubectl exec -n bots $(hostname) -c kaniko -- \
+kubectl exec -n "$POD_NAMESPACE" "$(hostname)" -c kaniko -- \
   /kaniko/executor \
-  --context=/workspace/repos/cto \
-  --dockerfile=/workspace/repos/cto/Dockerfile \
-  --destination=ghcr.io/5dlabs/myapp:1.0
+  --context=/workspace/repos/<project> \
+  --dockerfile=/workspace/repos/<project>/Dockerfile \
+  --destination=ghcr.io/<owner>/<image>:1.0
 ```
 
 ### Build with caching (recommended)
 
 ```bash
-kubectl exec -n bots $(hostname) -c kaniko -- \
+kubectl exec -n "$POD_NAMESPACE" "$(hostname)" -c kaniko -- \
   /kaniko/executor \
-  --context=/workspace/repos/cto \
-  --dockerfile=/workspace/repos/cto/Dockerfile \
-  --destination=ghcr.io/5dlabs/myapp:1.0 \
+  --context=/workspace/repos/<project> \
+  --dockerfile=/workspace/repos/<project>/Dockerfile \
+  --destination=ghcr.io/<owner>/<image>:1.0 \
   --cache=true \
-  --cache-repo=ghcr.io/5dlabs/kaniko-cache
+  --cache-repo=ghcr.io/<owner>/kaniko-cache
 ```
 
 ### Build with custom Dockerfile
 
 ```bash
-kubectl exec -n bots $(hostname) -c kaniko -- \
+kubectl exec -n "$POD_NAMESPACE" "$(hostname)" -c kaniko -- \
   /kaniko/executor \
-  --context=/workspace/repos/cto \
-  --dockerfile=/workspace/repos/cto/Dockerfile.dev \
-  --destination=ghcr.io/5dlabs/myapp:dev
+  --context=/workspace/repos/<project> \
+  --dockerfile=/workspace/repos/<project>/Dockerfile.dev \
+  --destination=ghcr.io/<owner>/<image>:dev
 ```
 
 ### Build with build args
 
 ```bash
-kubectl exec -n bots $(hostname) -c kaniko -- \
+kubectl exec -n "$POD_NAMESPACE" "$(hostname)" -c kaniko -- \
   /kaniko/executor \
-  --context=/workspace/repos/cto \
-  --dockerfile=/workspace/repos/cto/Dockerfile \
-  --destination=ghcr.io/5dlabs/myapp:1.0 \
+  --context=/workspace/repos/<project> \
+  --dockerfile=/workspace/repos/<project>/Dockerfile \
+  --destination=ghcr.io/<owner>/<image>:1.0 \
   --build-arg VERSION=1.0 \
   --build-arg NODE_ENV=production
 ```
@@ -68,20 +68,20 @@ kubectl exec -n bots $(hostname) -c kaniko -- \
 ### Build without pushing (test only)
 
 ```bash
-kubectl exec -n bots $(hostname) -c kaniko -- \
+kubectl exec -n "$POD_NAMESPACE" "$(hostname)" -c kaniko -- \
   /kaniko/executor \
-  --context=/workspace/repos/cto \
-  --dockerfile=/workspace/repos/cto/Dockerfile \
+  --context=/workspace/repos/<project> \
+  --dockerfile=/workspace/repos/<project>/Dockerfile \
   --no-push
 ```
 
 ### Build and save as tarball
 
 ```bash
-kubectl exec -n bots $(hostname) -c kaniko -- \
+kubectl exec -n "$POD_NAMESPACE" "$(hostname)" -c kaniko -- \
   /kaniko/executor \
-  --context=/workspace/repos/cto \
-  --dockerfile=/workspace/repos/cto/Dockerfile \
+  --context=/workspace/repos/<project> \
+  --dockerfile=/workspace/repos/<project>/Dockerfile \
   --no-push \
   --tar-path=/workspace/image.tar
 ```
@@ -89,12 +89,12 @@ kubectl exec -n bots $(hostname) -c kaniko -- \
 ### Multiple tags
 
 ```bash
-kubectl exec -n bots $(hostname) -c kaniko -- \
+kubectl exec -n "$POD_NAMESPACE" "$(hostname)" -c kaniko -- \
   /kaniko/executor \
-  --context=/workspace/repos/cto \
-  --dockerfile=/workspace/repos/cto/Dockerfile \
-  --destination=ghcr.io/5dlabs/myapp:1.0 \
-  --destination=ghcr.io/5dlabs/myapp:latest
+  --context=/workspace/repos/<project> \
+  --dockerfile=/workspace/repos/<project>/Dockerfile \
+  --destination=ghcr.io/<owner>/<image>:1.0 \
+  --destination=ghcr.io/<owner>/<image>:latest
 ```
 
 ## Executor Flags Reference
@@ -136,11 +136,11 @@ COPY --from=builder /app/dist /usr/share/nginx/html
 ### Build with specific target stage
 
 ```bash
-kubectl exec -n bots $(hostname) -c kaniko -- \
+kubectl exec -n "$POD_NAMESPACE" "$(hostname)" -c kaniko -- \
   /kaniko/executor \
-  --context=/workspace/repos/cto \
-  --dockerfile=/workspace/repos/cto/Dockerfile \
-  --destination=ghcr.io/5dlabs/myapp:dev \
+  --context=/workspace/repos/<project> \
+  --dockerfile=/workspace/repos/<project>/Dockerfile \
+  --destination=ghcr.io/<owner>/<image>:dev \
   --target=builder
 ```
 

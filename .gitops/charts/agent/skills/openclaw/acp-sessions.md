@@ -101,7 +101,7 @@ sessions_spawn({
 })
 ```
 
-Valid `agent` values (from embeddedHarness config):
+Valid `agent` values (from agent runtime config):
 - `claude` — Claude Code CLI (primary, always prefer this)
 - `codex` — OpenAI Codex CLI
 - `copilot` — GitHub Copilot CLI (Claude Opus 4.6)

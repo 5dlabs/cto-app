@@ -7,6 +7,62 @@
         "run",
         "mcp:tauri"
       ]
+    },
+    "shadcn-ui": {
+      "type": "local",
+      "command": "sh",
+      "args": [
+        "-lc",
+        "export GITHUB_PERSONAL_ACCESS_TOKEN=\"$(op read 'op://Operations/GitHub PAT - Tools MCP Server/credential')\"; exec npx -y @jpisnice/shadcn-ui-mcp-server"
+      ]
+    },
+    "magic-ui": {
+      "type": "local",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@magicuidesign/mcp"
+      ]
+    },
+    "magic-21st": {
+      "type": "local",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@21st-dev/magic"
+      ]
+    },
+    "exa": {
+      "type": "local",
+      "command": "sh",
+      "args": [
+        "-lc",
+        "export EXA_API_KEY=\"$(op read 'op://Operations/Exa API/credential')\"; exec npx -y exa-mcp-server"
+      ]
+    },
+    "scenario": {
+      "type": "local",
+      "command": "sh",
+      "args": [
+        "-lc",
+        "npm run mcp:scenario --silent"
+      ]
+    },
+    "firecrawl": {
+      "type": "local",
+      "command": "sh",
+      "args": [
+        "-lc",
+        "export FIRECRAWL_API_KEY=\"$(op read 'op://Operations/Firecrawl API Key/credential')\" FIRECRAWL_API_URL=\"${FIRECRAWL_API_URL:-https://api.firecrawl.dev}\"; exec npx -y firecrawl-mcp"
+      ]
+    },
+    "tavily": {
+      "type": "local",
+      "command": "sh",
+      "args": [
+        "-lc",
+        "export TAVILY_API_KEY=\"$(op read 'op://Operations/MCP-tavily API Key/credential')\"; exec npx -y tavily-mcp"
+      ]
     }
   }
 }
