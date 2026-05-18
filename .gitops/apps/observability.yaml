@@ -25,11 +25,11 @@ spec:
     helm:
       releaseName: observability
       valuesObject:
-        namespace: cto-system
+        namespace: cto
 
   destination:
     server: https://kubernetes.default.svc
-    namespace: cto-system
+    namespace: cto
 
   syncPolicy:
     automated:

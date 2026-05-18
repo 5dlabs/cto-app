@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+REPO_ROOT="/Users/edge_kase/5dlabs/cto-app"
+RUST_STABLE_BIN="$HOME/.rustup/toolchains/stable-aarch64-apple-darwin/bin"
+
+show_help() {
+  cat <<'HELP'
+Usage: cto-app start
+
+Commands:
+  start     Start CTO Desktop through the real Tauri app/setup path.
+  help      Show this help.
+
+Environment overrides:
+  CTO_APP_REPO_ROOT=/path/to/cto-app   Use another checkout.
+HELP
+}
+
+case "${1:-start}" in
+  start)
+    REPO_ROOT="${CTO_APP_REPO_ROOT:-$REPO_ROOT}"
+    if [[ ! -f "$REPO_ROOT/package.json" || ! -d "$REPO_ROOT/src-tauri" ]]; then
+      echo "cto-app: repository root not found at $REPO_ROOT" >&2
+      echo "Set CTO_APP_REPO_ROOT=/path/to/cto-app if you moved the checkout." >&2
+      exit 1
+    fi
+
+    export PATH="$RUST_STABLE_BIN:$HOME/.cargo/bin:/opt/homebrew/bin:/opt/homebrew/sbin:$PATH"
+    export VITE_CTO_FORCE_LOCAL_STACK_BOOTSTRAP=1
+    export VITE_CTO_MORGAN_AUTOSTART="${VITE_CTO_MORGAN_AUTOSTART:-1}"
+
+    cd "$REPO_ROOT"
+    exec npm run tauri:dev
+    ;;
+  help|--help|-h)
+    show_help
+    ;;
+  *)
+    echo "cto-app: unknown command '$1'" >&2
+    show_help >&2
+    exit 64
+    ;;
+esac

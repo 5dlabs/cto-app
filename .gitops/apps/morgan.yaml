@@ -2,7 +2,7 @@
 # Morgan — always-up local OpenClaw gateway/agent for CTO Desktop.
 #
 # Uses the published agent OCI chart and the chart-packaged Morgan values file.
-# The values intentionally deploy into cto-system so Morgan can use the local
+# The values intentionally deploy into cto so Morgan can use the local
 # cto-tools service without cross-namespace secrets or service discovery.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
@@ -21,16 +21,23 @@ spec:
   source:
     repoURL: ghcr.io/5dlabs/helm-charts
     chart: agent
-    targetRevision: 0.1.13
+    # Keep this pinned to a chart version that is actually published to GHCR.
+    # Clean desktop installs cannot reconcile against unpublished local chart
+    # source versions.
+    targetRevision: 0.1.15
     helm:
       releaseName: morgan
       valueFiles:
         - ci/values-morgan.yaml
       valuesObject:
+        harness: openclaw
+        namespace: cto
+        global:
+          namespace: cto
         openclaw:
-          # The desktop agents image already contains 2026.4.23. Installing
-          # newer OpenClaw versions at runtime fails in the non-root container.
-          version: "2026.4.23"
+          # The desktop agents image already includes OpenClaw. Do not install
+          # or downgrade the global package at runtime in the non-root container.
+          version: ""
         # Local-only credential hook. If this secret exists, private/internal
         # GHCR runtime images can pull; if packages are public, Kubernetes can
         # still pull anonymously even if the secret is absent.
@@ -81,13 +88,13 @@ spec:
             tag: "desktop-bun-1.3.13"
         mem0Plugin:
           # Match the working OVH Morgan memory provider settings. The vector
-          # store host remains local because desktop deploys Qdrant in cto-system.
+          # store host remains local because desktop deploys Qdrant in cto.
           userId: "jonathon"
           oss:
             vectorStore:
               provider: "qdrant"
               config:
-                host: "qdrant.cto-system.svc.cluster.local"
+                host: "qdrant.cto.svc.cluster.local"
                 port: 6333
             embedder:
               provider: "google"
@@ -99,10 +106,38 @@ spec:
               config:
                 model: "claude-3-5-haiku-latest"
                 apiKeyEnvVar: "ANTHROPIC_API_KEY"
+        telemetry:
+          promtail:
+            lokiUrl: "http://observability-loki.cto.svc.cluster.local:3100/loki/api/v1/push"
+        toolServer:
+          url: "http://cto-tools.cto.svc.cluster.local:3000/mcp"
+        workspace:
+          files:
+            TOOLS.md: |
+              # TOOLS.md -- Morgan
+
+              ## Local CTO Tools
+
+              - CTO tools MCP endpoint: `http://cto-tools.cto.svc.cluster.local:3000/mcp`
+              - Root workspace: `/workspace`
+              - User projects should live under `/workspace/repos/<slug>` when created.
+
+              ## ACP Sessions
+
+              Prefer one-shot ACP `run` sessions with an explicit `cwd` for coding tasks.
+              Use persistent ACP sessions only when the user explicitly asks for a
+              long-running coding session.
+            MEMORY.md: |
+              # MEMORY.md -- Morgan
+
+              - This Morgan instance backs the CTO Desktop local OpenClaw gateway.
+              - The runtime lives in the local kind cluster in the `cto` namespace.
+              - Long-term memory uses the local Qdrant service at
+                `qdrant.cto.svc.cluster.local:6333` through the mem0 plugin.
 
   destination:
     server: https://kubernetes.default.svc
-    namespace: cto-system
+    namespace: cto
 
   syncPolicy:
     automated:

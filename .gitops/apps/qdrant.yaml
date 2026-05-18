@@ -26,7 +26,7 @@ spec:
     helm:
       releaseName: qdrant
       valuesObject:
-        namespace: cto-system
+        namespace: cto
         fullnameOverride: qdrant
         persistence:
           enabled: true
@@ -35,13 +35,13 @@ spec:
 
   destination:
     server: https://kubernetes.default.svc
-    namespace: cto-system
+    namespace: cto
 
   ignoreDifferences:
     - group: apps
       kind: StatefulSet
       name: qdrant
-      namespace: cto-system
+      namespace: cto
       jqPathExpressions:
         # Kubernetes defaults these fields on StatefulSets and pod templates.
         - .spec.persistentVolumeClaimRetentionPolicy

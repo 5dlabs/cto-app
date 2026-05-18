@@ -20,7 +20,7 @@ data:
       - url: http://{{ include "observability.fullname" . }}-loki.{{ include "observability.namespace" . }}.svc.cluster.local:{{ .Values.loki.service.port }}/loki/api/v1/push
 
     scrape_configs:
-      - job_name: cto-system-pods
+      - job_name: cto-pods
         kubernetes_sd_configs:
           - role: pod
             namespaces:

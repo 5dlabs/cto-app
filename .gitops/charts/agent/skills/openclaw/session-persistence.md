@@ -67,7 +67,7 @@ After any interruption (compaction, provider switch, pod restart):
 
 1. `memory_search({ query: "latest checkpoint task progress" })` — find your last state
 2. Review the returned memories
-3. Check files on disk: `ls /workspace/repos/cto/` for recent changes
+3. Check files on disk: `ls /workspace/repos/<project>/` for recent changes
 4. Check git: `git log --oneline -5` for recent commits
 5. Resume from where you left off
 

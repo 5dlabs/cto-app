@@ -86,8 +86,7 @@ data:
           "cliBackends": {{ .Values.cliBackends | toJson }}
           {{- end }}
           {{- if and (hasKey $codexPlugin "enabled") $codexPlugin.enabled }},
-          "embeddedHarness": {
-            "runtime": "auto",
+          "agentRuntime": {
             "fallback": "pi"
           }
           {{- end }}
@@ -573,21 +572,6 @@ data:
           "search": { "enabled": {{ if hasKey $webSearch "enabled" }}{{ $webSearch.enabled }}{{ else }}true{{ end }} },
           "fetch": { "enabled": {{ if hasKey $webFetch "enabled" }}{{ $webFetch.enabled }}{{ else }}true{{ end }} }
         }
-        {{- if .Values.tools.acp.enabled }},
-        "acp": {
-          "enabled": true,
-          "backend": {{ .Values.tools.acp.backend | default "acpx" | quote }},
-          "defaultAgent": {{ .Values.tools.acp.defaultAgent | default "codex" | quote }},
-          "allowedAgents": {{ .Values.tools.acp.allowedAgents | default list | toJson }},
-          "maxConcurrentSessions": {{ .Values.tools.acp.maxConcurrentSessions | default 4 }},
-          "permissionMode": {{ .Values.tools.acp.permissionMode | default "approve-all" | quote }},
-          "nonInteractivePermissions": {{ .Values.tools.acp.nonInteractivePermissions | default "deny" | quote }},
-          "pluginToolsMcpBridge": {{ .Values.tools.acp.pluginToolsMcpBridge | default false }},
-          "dispatch": {{ .Values.tools.acp.dispatch | default dict | toJson }},
-          "stream": {{ .Values.tools.acp.stream | default dict | toJson }},
-          "runtime": {{ .Values.tools.acp.runtime | default dict | toJson }}
-        }
-        {{- end }}
       },
       {{- if .Values.logging }}
       "logging": {

@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Morgan Source Flow Alternatives</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background:
+      radial-gradient(circle at 20% 8%, rgba(112, 207, 255, .22), transparent 28%),
+      radial-gradient(circle at 86% 16%, rgba(138, 108, 255, .23), transparent 28%),
+      linear-gradient(135deg, #060715, #0b1024 54%, #050810);
+    color: #f7f4ff;
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    padding: 34px;
+  }
+  .wrap { max-width: 1420px; margin: 0 auto; }
+  .header { display:flex; justify-content:space-between; align-items:end; margin-bottom: 22px; gap: 24px; }
+  h1 { margin: 0; font-size: 26px; letter-spacing: -.04em; }
+  .sub { margin: 6px 0 0; color: rgba(247,244,255,.62); font-size: 13px; }
+  .mockups { display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px; align-items:start; }
+  .frame {
+    position: relative;
+    overflow: hidden;
+    min-height: 780px;
+    border: 1px solid rgba(170,160,255,.22);
+    border-radius: 32px;
+    background:
+      linear-gradient(145deg, rgba(13,17,39,.92), rgba(6,8,20,.9)),
+      radial-gradient(circle at 50% 10%, rgba(116,207,255,.14), transparent 36%);
+    box-shadow: 0 32px 90px rgba(0,0,0,.38), inset 0 1px 0 rgba(255,255,255,.08);
+    padding: 22px;
+  }
+  .label { display:flex; justify-content:space-between; align-items:center; margin-bottom: 18px; }
+  .label strong { font-size: 15px; letter-spacing: -.02em; }
+  .chip { font-size: 11px; color:#9ff7f1; border:1px solid rgba(116,255,233,.28); padding:6px 9px; border-radius:999px; background:rgba(116,255,233,.06); }
+  .app { display:grid; grid-template-columns: 190px 1fr; min-height: 690px; border-radius: 26px; overflow:hidden; border:1px solid rgba(255,255,255,.08); background:rgba(3,6,18,.62); }
+  .video { padding: 18px; border-right:1px solid rgba(255,255,255,.07); background:linear-gradient(180deg, rgba(23,28,60,.76), rgba(8,10,25,.72)); }
+  .portrait { height: 220px; border-radius: 24px; background: radial-gradient(circle at 50% 28%, #88ebff, transparent 15%), radial-gradient(circle at 46% 42%, #1b284d, #070a16 57%); box-shadow: inset 0 0 55px rgba(116,207,255,.18); margin-bottom: 14px; }
+  .caption { font-size: 12px; color:rgba(247,244,255,.66); line-height: 1.45; }
+  .main { padding: 22px; }
+  .title-row { display:flex; align-items:center; justify-content:space-between; gap: 12px; margin-bottom: 22px; }
+  .screen-title { font-size: 23px; font-weight: 860; letter-spacing:-.04em; }
+  .tiny { font-size: 11px; color:rgba(247,244,255,.48); }
+  .providers { display:grid; grid-template-columns: repeat(3, 1fr); gap: 13px; margin-bottom: 18px; }
+  .provider {
+    position: relative;
+    display:grid;
+    place-items:center;
+    height: 122px;
+    border-radius: 26px;
+    border:1px solid rgba(170,160,255,.18);
+    background: radial-gradient(circle at 50% 12%, rgba(116,207,255,.13), transparent 48%), rgba(11,16,37,.76);
+    box-shadow: 0 18px 42px rgba(0,0,0,.26), inset 0 1px 0 rgba(255,255,255,.07);
+    color:#74cfff;
+  }
+  .provider.origin { color:#f7f4ff; }
+  .provider.selected {
+    border-color: rgba(116,255,233,.58);
+    box-shadow: 0 0 0 1px rgba(116,255,233,.18), 0 24px 62px rgba(51,203,255,.17), inset 0 1px 0 rgba(255,255,255,.12);
+  }
+  .provider.selected::after,
+  .pulse::after {
+    content:"";
+    position:absolute; inset:-4px; border-radius:30px; pointer-events:none;
+    background: conic-gradient(from 140deg, transparent, rgba(116,255,233,.55), rgba(138,108,255,.52), transparent 62%);
+    filter: blur(12px); opacity:.54; z-index:-1;
+    animation: breathe 2.4s ease-in-out infinite;
+  }
+  @keyframes breathe { 0%,100% { transform:scale(.985); opacity:.28; } 50% { transform:scale(1.04); opacity:.7; } }
+  .logo { font-size: 34px; font-weight: 900; letter-spacing:-.06em; }
+  .expand {
+    border-radius: 28px;
+    border:1px solid rgba(116,255,233,.24);
+    background: radial-gradient(circle at 18% 0%, rgba(116,255,233,.14), transparent 36%), rgba(6,10,27,.78);
+    padding: 18px;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.07);
+  }
+  .flow { display:grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 12px; }
+  .flow-card { min-height: 92px; border-radius: 20px; border:1px solid rgba(170,160,255,.16); background:rgba(255,255,255,.035); display:grid; place-items:center; position:relative; }
+  .flow-card.active { border-color:rgba(116,255,233,.48); color:#9ff7f1; }
+  .detail { margin-top: 13px; display:grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .dest { border-radius:18px; padding:14px; border:1px solid rgba(255,255,255,.1); background:rgba(255,255,255,.04); display:flex; justify-content:space-between; align-items:center; }
+  .continue { margin-top: 14px; height: 44px; border-radius: 16px; border: 0; color:#061326; font-weight: 850; background:linear-gradient(135deg, #74ffe9, #74cfff 55%, #b8a6ff); box-shadow:0 18px 38px rgba(116,207,255,.22); }
+
+  .app.sidecar { grid-template-columns: 166px 1fr 270px; }
+  .sidecar .main { padding-right: 16px; }
+  .rail { border-left:1px solid rgba(255,255,255,.08); background:linear-gradient(180deg, rgba(14,19,46,.88), rgba(6,9,24,.76)); padding:18px 14px; }
+  .rail-head { height:42px; display:flex; align-items:center; gap:10px; margin-bottom: 14px; }
+  .orb { width:32px; aspect-ratio:1; border-radius:50%; background:radial-gradient(circle at 35% 25%, #fff, #74ffe9 28%, #635bff 72%); box-shadow:0 0 28px rgba(116,255,233,.32); }
+  .step { position:relative; padding:12px 12px 12px 34px; margin-bottom:10px; border-radius:17px; background:rgba(255,255,255,.035); color:rgba(247,244,255,.62); font-size:12px; line-height:1.35; border:1px solid transparent; }
+  .step::before { content:""; position:absolute; left:12px; top:16px; width:9px; aspect-ratio:1; border-radius:50%; background:rgba(170,160,255,.42); }
+  .step.live { color:#f7f4ff; border-color:rgba(116,255,233,.26); background:rgba(116,255,233,.06); }
+  .step.live::before { background:#74ffe9; box-shadow:0 0 16px rgba(116,255,233,.75); }
+  .note { margin-top: 16px; padding: 13px; border-radius:18px; color:rgba(247,244,255,.65); font-size:12px; line-height:1.45; background:rgba(116,207,255,.06); border:1px solid rgba(116,207,255,.14); }
+  .glow-line { height:1px; margin:14px 0; background:linear-gradient(90deg, transparent, rgba(116,255,233,.5), transparent); }
+  @media (max-width: 1100px) { .mockups { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="header">
+    <div>
+      <h1>Morgan Source flow alternatives</h1>
+      <p class="sub">No blocking modal. Same icon-first aesthetic, but progression stays grounded on the Source screen.</p>
+    </div>
+    <div class="chip">hover/pulse-ready trippy affordances</div>
+  </div>
+  <div class="mockups">
+    <section class="frame">
+      <div class="label"><strong>A · Ambient inline expansion</strong><span class="chip">best low-cognition path</span></div>
+      <div class="app">
+        <aside class="video">
+          <div class="portrait"></div>
+          <div class="caption">Morgan explains the decision. The selected card blooms open below without leaving the screen.</div>
+        </aside>
+        <main class="main">
+          <div class="title-row"><div class="screen-title">Source</div><div class="tiny">selection implies intent</div></div>
+          <div class="providers">
+            <div class="provider"><div class="logo">GH</div></div>
+            <div class="provider"><div class="logo">GL</div></div>
+            <div class="provider origin selected pulse"><div class="logo">5D</div></div>
+          </div>
+          <div class="expand">
+            <div class="tiny">5D Origin</div>
+            <div style="font-size:18px;font-weight:850;margin-top:4px;letter-spacing:-.03em">Where should Morgan begin?</div>
+            <div class="flow">
+              <div class="flow-card active"><div class="logo">＋</div></div>
+              <div class="flow-card"><div class="logo">GH</div></div>
+              <div class="flow-card"><div class="logo">GL</div></div>
+            </div>
+            <div class="detail">
+              <div class="dest"><span>Gitea</span><span>☕</span></div>
+              <div class="dest"><span>GitLab</span><span>🦊</span></div>
+            </div>
+            <button class="continue">Continue inside this section</button>
+          </div>
+        </main>
+      </div>
+    </section>
+
+    <section class="frame">
+      <div class="label"><strong>B · Right-side action rail</strong><span class="chip">best guided/progress feel</span></div>
+      <div class="app sidecar">
+        <aside class="video">
+          <div class="portrait"></div>
+          <div class="caption">Morgan stays visible. A side rail handles next steps, status, and gentle nudges.</div>
+        </aside>
+        <main class="main">
+          <div class="title-row"><div class="screen-title">Source</div><div class="tiny">main canvas remains calm</div></div>
+          <div class="providers">
+            <div class="provider"><div class="logo">GH</div></div>
+            <div class="provider selected"><div class="logo">GL</div></div>
+            <div class="provider origin"><div class="logo">5D</div></div>
+          </div>
+          <div class="expand" style="min-height:345px;display:grid;align-content:center;text-align:center">
+            <div style="font-size:42px;margin-bottom:10px">🦊</div>
+            <div style="font-size:19px;font-weight:860;letter-spacing:-.03em">GitLab selected</div>
+            <p class="sub" style="max-width:300px;margin:8px auto 0">No modal overlay. The right rail quietly opens the correct action path.</p>
+          </div>
+        </main>
+        <aside class="rail">
+          <div class="rail-head"><div class="orb"></div><strong>Next</strong></div>
+          <div class="step live">Install Morgan</div>
+          <div class="step">Detect namespace</div>
+          <div class="step">Confirm access</div>
+          <div class="glow-line"></div>
+          <button class="continue" style="width:100%">Authorize</button>
+          <div class="note">Good for visible progress. More chrome than inline expansion.</div>
+        </aside>
+      </div>
+    </section>
+  </div>
+</div>
+</body>
+</html>

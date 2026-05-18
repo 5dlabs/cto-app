@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 
 const source = readFileSync(new URL("../../ui/src/components/LocalStackBootstrap.tsx", import.meta.url), "utf8");
-const sourceScript = readFileSync(new URL("../../ui/public/uploads/morgan/02_source/script.md", import.meta.url), "utf8");
+const sourceScript = readFileSync(new URL("../../ui/public/uploads/morgan/04_source/script.md", import.meta.url), "utf8");
 const uxDoc = readFileSync(new URL("../../docs/2026-04/morgan-setup-ux-principles.md", import.meta.url), "utf8");
 
 function sourceRegion() {
@@ -14,7 +14,48 @@ function sourceRegion() {
   return source.slice(start, end);
 }
 
+function preSourceRegion() {
+  const start = source.indexOf("const cloudflareEndpointPanel = (");
+  const end = source.indexOf("const savedAccessPanel", start);
+  assert.notEqual(start, -1, "Cloudflare endpoint panel should exist before Source");
+  assert.notEqual(end, -1, "Source saved-access panel should follow pre-Source prep panels");
+  return source.slice(start, end);
+}
+
 describe("Source install actions", () => {
+  it("adds endpoint and saved-access prep screens before Source with official brand icons", () => {
+    const preSource = preSourceRegion();
+    assert.ok(source.indexOf('setSetupScreen("saved-access")') < source.indexOf('setupScreen === "source" ? ('), "setup should route to Saved access before Source");
+    assert.ok(source.indexOf('setupScreen === "saved-access" ? (') < source.indexOf('setupScreen === "source" ? ('), "Saved access should render before Source in flow order");
+    assert.match(preSource, /data-testid="cloudflare-endpoint-oauth"/);
+    assert.match(preSource, /aria-label="Sign in with Cloudflare"/);
+    assert.match(preSource, /\/icons\/cloudflare\.svg/);
+    assert.match(source, /data-official-icon=\{label\}/);
+    assert.match(preSource, /officialBrandIcon\("\/icons\/cloudflare\.svg", "Cloudflare"\)/);
+    assert.match(preSource, /data-testid="cloudflare-endpoint-saved-access"/);
+    assert.match(preSource, /data-testid="cloudflare-endpoint-quick-tunnel"/);
+    assert.match(preSource, /data-testid="saved-access-onepassword"/);
+    assert.match(preSource, /aria-label="Use 1Password saved access"/);
+    assert.match(preSource, /data-testid="saved-access-more-options"/);
+    assert.match(preSource, /data-testid="saved-access-bitwarden"/);
+    assert.match(preSource, /data-secondary-provider="true"/);
+    assert.match(preSource, /shouldShowBitwardenOption/);
+    assert.match(source, /Bitwarden stays in More options unless the local bw CLI is detected/);
+    assert.match(preSource, /data-testid="saved-access-onepassword-modal"/);
+    assert.match(preSource, /\/icons\/1password\.svg/);
+    assert.match(preSource, /data-testid="saved-access-readiness"/);
+    assert.match(source, /savedAccessCueFromDetection/);
+    assert.match(source, /savedAccessReadinessPercent/);
+    assert.match(source, /withSavedAccessTimeout/);
+    assert.match(source, /approval-pending/);
+    assert.match(source, /SAVED_ACCESS_DETECTION_TIMEOUT_MS/);
+    assert.match(source, /data-testid="cloudflare-endpoint-local"/);
+    assert.match(preSource, /data-testid="saved-access-skip"/);
+    assert.match(preSource, /local-bootstrap__skip-wordmark/);
+    assert.doesNotMatch(preSource, /IconClose size=\{44\}/);
+    assert.match(preSource, /speakMorganCue/);
+  });
+
   it("starts with three low-cognition source choices and keeps engines under 5D Origin", () => {
     const region = sourceRegion();
 

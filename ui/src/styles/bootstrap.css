@@ -115,9 +115,10 @@
   gap: clamp(18px, 3vw, 34px);
   align-items: center;
   width: min(1220px, calc(100vw - 32px));
-  height: min(690px, calc(100vh - 28px));
-  max-height: calc(100vh - 28px);
+  height: min(690px, calc(100vh - 56px));
+  max-height: calc(100vh - 56px);
   min-height: 0;
+  padding-block: clamp(18px, 3.5vh, 32px);
 }
 
 .local-bootstrap__content--intro {
@@ -141,6 +142,7 @@
   place-items: center;
   transform: none;
   text-align: left;
+  padding-inline: clamp(20px, 4vw, 54px);
 }
 
 .local-bootstrap__content--intro-prep .local-bootstrap__machine--hero {
@@ -436,7 +438,7 @@
   justify-items: stretch;
   width: min(680px, 100%);
   max-width: min(680px, 100%);
-  gap: 10px;
+  gap: 16px;
 }
 
 .local-bootstrap__copy--intro .local-bootstrap__eyebrow {
@@ -493,6 +495,17 @@
   line-height: 1;
   letter-spacing: -0.045em;
   text-wrap: balance;
+  color: transparent;
+  background: linear-gradient(135deg, #f7fbff 8%, #75ffe3 48%, #b8a6ff 88%);
+  background-clip: text;
+  -webkit-background-clip: text;
+  text-shadow: 0 0 30px rgba(104, 120, 255, 0.28);
+}
+
+.local-bootstrap__copy--intro > h1 {
+  justify-self: center;
+  margin-bottom: 2px;
+  text-align: center;
 }
 
 .local-bootstrap__content--setup h1 {
@@ -972,10 +985,28 @@
 
 .local-bootstrap__auth-grid--icons-only {
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  max-width: 420px;
+  max-width: 480px;
   margin: 0 auto;
   perspective: 1200px;
   transform-style: preserve-3d;
+}
+
+.local-bootstrap__auth-grid--prep {
+  max-width: 560px;
+  align-items: center;
+  justify-items: center;
+  margin: 0 auto;
+}
+
+.local-bootstrap__auth-grid--binary {
+  grid-template-columns: repeat(2, minmax(110px, 1fr));
+  max-width: 320px;
+  gap: 18px;
+}
+
+.local-bootstrap__auth-grid--prep-two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  max-width: 330px;
 }
 
 .local-bootstrap__decision-branch {
@@ -1132,34 +1163,86 @@
 }
 
 .local-bootstrap__auth-grid--icons-only .local-bootstrap__auth-choice--icon-first {
+  width: 100%;
   min-height: 126px;
   padding: 18px;
+  justify-content: center;
+  place-items: center;
+}
+
+.local-bootstrap__auth-grid--binary .local-bootstrap__auth-choice--icon-first {
+  min-height: 116px;
+  aspect-ratio: 1 / 1;
+  padding: 16px;
+}
+
+.local-bootstrap__auth-grid--binary .local-bootstrap__auth-choice--onepassword {
+  min-height: 144px;
+  padding: 14px;
 }
 
 .local-bootstrap__install-stack {
   display: grid;
   justify-items: center;
-  align-items: center;
-  gap: 9px;
+  gap: 8px;
+  text-align: center;
+}
+
+.local-bootstrap__auth-grid--binary .local-bootstrap__install-stack {
+  gap: 0;
+}
+
+.local-bootstrap__install-icon--skip {
+  --source-logo-bg-a: #f8fafc;
+  --source-logo-bg-b: #cbd5e1;
+  --source-logo-bg-c: #64748b;
+  --source-logo-fg: #334155;
+  --source-logo-border: rgba(148, 163, 184, 0.46);
+  color: #334155;
+  background:
+    radial-gradient(circle at 30% 20%, rgba(255, 255, 255, 0.92), transparent 34%),
+    linear-gradient(135deg, #f8fafc, #e2e8f0 52%, #cbd5e1);
+  border-color: rgba(148, 163, 184, 0.5);
+  box-shadow:
+    0 16px 32px rgba(15, 23, 42, 0.12),
+    0 0 0 1px rgba(255, 255, 255, 0.66) inset;
+}
+
+.local-bootstrap__skip-wordmark {
+  display: inline-grid;
+  place-items: center;
+  min-width: 44px;
+  height: 24px;
+  padding: 0 2px;
+  border-radius: 999px;
+  font-size: 0.82rem;
+  font-weight: 760;
+  letter-spacing: 0.015em;
+  line-height: 1;
+  color: #334155;
+  background: rgba(255, 255, 255, 0.7);
+  box-shadow: 0 0 0 1px rgba(100, 116, 139, 0.14) inset;
 }
 
 .local-bootstrap__install-icons {
   position: relative;
   display: grid;
-  width: 78px;
+  width: 88px;
   aspect-ratio: 1;
   place-items: center;
+  justify-self: center;
 }
 
 .local-bootstrap__install-icon {
   display: grid;
   place-items: center;
+  justify-self: center;
 }
 
 .local-bootstrap__install-icon--brand {
-  width: 68px;
+  width: 72px;
   aspect-ratio: 1;
-  border-radius: 21px;
+  border-radius: 22px;
 }
 
 .local-bootstrap__source-modal-icon .local-bootstrap__install-icon--brand {
@@ -1184,11 +1267,11 @@
 }
 
 .local-bootstrap__install-icon--dark {
-  --source-logo-bg-a: #061326;
-  --source-logo-bg-b: #0b2447;
-  --source-logo-bg-c: #172554;
-  --source-logo-fg: #74cfff;
-  --source-logo-border: rgba(116, 207, 255, 0.34);
+  --source-logo-bg-a: #f8fbff;
+  --source-logo-bg-b: #bae6fd;
+  --source-logo-bg-c: #c4b5fd;
+  --source-logo-fg: #061326;
+  --source-logo-border: rgba(248, 250, 252, 0.86);
 }
 
 .local-bootstrap__auth-grid--icons-only .local-bootstrap__install-icon--brand,
@@ -1199,8 +1282,9 @@
     radial-gradient(circle at 30% 18%, rgba(110, 255, 220, 0.18), transparent 34%),
     linear-gradient(135deg, var(--source-logo-bg-a, rgba(6, 9, 24, 0.98)), var(--source-logo-bg-b, rgba(14, 16, 42, 0.98)) 52%, var(--source-logo-bg-c, rgba(28, 20, 56, 0.96)));
   box-shadow:
-    0 16px 34px rgba(0, 0, 0, 0.3),
-    0 0 0 1px rgba(255, 255, 255, 0.04) inset;
+    0 18px 38px rgba(0, 0, 0, 0.28),
+    0 0 28px rgba(224, 242, 254, 0.14),
+    0 0 0 1px rgba(255, 255, 255, 0.24) inset;
 }
 
 .local-bootstrap__install-icon--light {
@@ -1231,8 +1315,58 @@
 }
 
 .local-bootstrap__auth-grid--icons-only .local-bootstrap__install-icon--brand svg {
-  width: 36px;
-  height: 36px;
+  width: 40px;
+  height: 40px;
+}
+
+.local-bootstrap__auth-grid--icons-only .local-bootstrap__install-icon--brand img {
+  width: 42px;
+  height: 42px;
+  filter: saturate(1.08) brightness(1.06) contrast(1.02);
+}
+
+.local-bootstrap__auth-choice--cloudflare .local-bootstrap__install-icon--brand {
+  --source-logo-bg-a: #fff3df;
+  --source-logo-bg-b: #ffbd6f;
+  --source-logo-bg-c: #5cc8ff;
+  --source-logo-fg: #f6821f;
+  --source-logo-border: rgba(255, 190, 111, 0.62);
+  color: #f97316;
+}
+
+.local-bootstrap__auth-choice--onepassword .local-bootstrap__install-icons {
+  width: 108px;
+}
+
+.local-bootstrap__auth-choice--onepassword .local-bootstrap__install-icon--brand {
+  width: 96px;
+  border-radius: 28px;
+  --source-logo-bg-a: #f5fbff;
+  --source-logo-bg-b: #8ed8ff;
+  --source-logo-bg-c: #315dff;
+  --source-logo-fg: #0057d9;
+  --source-logo-border: rgba(45, 139, 255, 0.68);
+  color: #0057d9;
+  box-shadow:
+    0 22px 46px rgba(0, 87, 217, 0.22),
+    0 0 34px rgba(116, 207, 255, 0.18),
+    0 0 0 1px rgba(255, 255, 255, 0.42) inset;
+}
+
+.local-bootstrap__source-modal-icon:has([data-official-icon="1Password"]) {
+  width: 104px;
+}
+
+.local-bootstrap__source-modal-icon .local-bootstrap__install-icon--brand:has([data-official-icon="1Password"]) {
+  width: 96px;
+  border-radius: 28px;
+}
+
+.local-bootstrap__auth-grid--icons-only .local-bootstrap__auth-choice--onepassword .local-bootstrap__install-icon--brand img,
+.local-bootstrap__source-modal-icon .local-bootstrap__install-icon--brand:has([data-official-icon="1Password"]) img {
+  width: 66px;
+  height: 66px;
+  filter: saturate(1.2) brightness(1.04) contrast(1.06) drop-shadow(0 8px 14px rgba(0, 68, 176, 0.2));
 }
 
 .local-bootstrap__auth-grid--icons-only .local-bootstrap__auth-choice:hover .local-bootstrap__install-icon--brand,
@@ -1393,15 +1527,15 @@
 
 .local-bootstrap__auth-choice.is-selected {
   z-index: 2;
-  border-color: rgba(110, 231, 183, 0.52);
+  border-color: rgba(116, 207, 255, 0.58);
   background:
-    radial-gradient(circle at 10% 0%, rgba(110, 231, 183, 0.18), transparent 42%),
+    radial-gradient(circle at 10% 0%, rgba(110, 231, 183, 0.15), transparent 42%),
     rgba(255, 255, 255, 0.07);
   box-shadow:
-    0 26px 72px rgba(0, 0, 0, 0.34),
-    0 0 46px rgba(116, 207, 255, 0.2),
+    0 20px 58px rgba(0, 0, 0, 0.3),
+    0 0 44px rgba(116, 207, 255, 0.24),
     0 1px 0 rgba(255, 255, 255, 0.16) inset;
-  transform: translateY(-8px) scale(1.04);
+  transform: translateY(0) scale(1.018);
 }
 
 .local-bootstrap__auth-choice.is-selected::before {
@@ -1410,15 +1544,15 @@
 }
 
 .local-bootstrap__auth-grid--icons-only:has(.local-bootstrap__auth-choice.is-selected) .local-bootstrap__auth-choice:not(.is-selected) {
-  opacity: 0.56;
-  filter: saturate(0.78) brightness(0.78);
-  transform: translateY(8px) scale(0.955);
+  opacity: 0.68;
+  filter: saturate(0.88) brightness(0.9);
+  transform: translateY(0) scale(0.965);
 }
 
 .local-bootstrap__auth-grid--icons-only:has(.local-bootstrap__auth-choice.is-selected) .local-bootstrap__auth-choice:not(.is-selected):hover {
-  opacity: 0.9;
-  filter: saturate(1.02) brightness(1);
-  transform: translateY(-3px) scale(1.005);
+  opacity: 0.78;
+  filter: saturate(0.96) brightness(0.96);
+  transform: translateY(0) scale(0.985);
 }
 
 .local-bootstrap__auth-choice strong,
@@ -1539,6 +1673,151 @@
   padding: 8px 10px;
   font-size: 11px;
   line-height: 1.4;
+}
+
+.local-bootstrap__hint-row--compact {
+  justify-self: center;
+  width: fit-content;
+  max-width: min(280px, 100%);
+  padding: 6px 10px;
+  color: rgba(248, 250, 252, 0.78);
+  background: rgba(255, 255, 255, 0.045);
+  border-color: rgba(170, 160, 255, 0.18);
+  text-align: center;
+}
+
+.local-bootstrap__saved-access-flow {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  width: min(420px, 100%);
+  margin: 2px auto 0;
+}
+
+.local-bootstrap__saved-access-readiness {
+  display: grid;
+  gap: 8px;
+  width: min(320px, 100%);
+  border: 1px solid rgba(170, 160, 255, 0.16);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  box-shadow: 0 18px 38px rgba(0, 0, 0, 0.22), 0 0 26px rgba(116, 207, 255, 0.12);
+  padding: 10px 12px 8px;
+}
+
+.local-bootstrap__saved-access-readiness-bar {
+  position: relative;
+  width: 100%;
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.68);
+}
+
+.local-bootstrap__saved-access-readiness-bar span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #38bdf8, #a78bfa, #6ee7b7);
+  box-shadow: 0 0 18px rgba(116, 207, 255, 0.34);
+  transition: width 420ms ease;
+}
+
+.local-bootstrap__saved-access-readiness.is-missing-desktop .local-bootstrap__saved-access-readiness-bar span,
+.local-bootstrap__saved-access-readiness.is-missing-cli .local-bootstrap__saved-access-readiness-bar span {
+  background: linear-gradient(90deg, #f59e0b, #fbbf24);
+  box-shadow: 0 0 18px rgba(251, 191, 36, 0.28);
+}
+
+.local-bootstrap__saved-access-readiness.is-desktop-integration .local-bootstrap__saved-access-readiness-bar span,
+.local-bootstrap__saved-access-readiness.is-needs-access .local-bootstrap__saved-access-readiness-bar span {
+  background: linear-gradient(90deg, #38bdf8, #fbbf24);
+}
+
+.local-bootstrap__saved-access-readiness-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: rgba(248, 250, 252, 0.78);
+  font-size: 10px;
+  font-weight: 820;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.local-bootstrap__saved-access-action {
+  width: fit-content;
+  justify-self: center;
+  padding-inline: 14px;
+}
+
+.local-bootstrap__saved-access {
+  display: grid;
+  gap: 8px;
+  border: 1px solid rgba(170, 160, 255, 0.14);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.028);
+  padding: 10px;
+}
+
+.local-bootstrap__saved-access-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.local-bootstrap__saved-access-actions .ghost-btn {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.local-bootstrap__saved-access-actions .ghost-btn[aria-label] {
+  width: 38px;
+  aspect-ratio: 1;
+  justify-content: center;
+  padding: 0;
+}
+
+.local-bootstrap__saved-access-review {
+  display: grid;
+  gap: 8px;
+  border: 1px solid rgba(116, 207, 255, 0.22);
+  border-radius: 12px;
+  background: rgba(116, 207, 255, 0.07);
+  padding: 10px;
+}
+
+.local-bootstrap__saved-access-review ul {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.local-bootstrap__saved-access-review li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
+  color: rgba(226, 224, 255, 0.72);
+  font-size: 11px;
+}
+
+.local-bootstrap__saved-access-review code {
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.22);
+  color: rgba(220, 255, 242, 0.86);
+  padding: 3px 7px;
+  font-size: 10px;
+}
+
+.local-bootstrap__saved-access-review em {
+  color: rgba(226, 224, 255, 0.48);
+  font-size: 10px;
+  font-style: normal;
 }
 
 .local-bootstrap__source-actions {

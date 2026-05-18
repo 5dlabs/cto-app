@@ -21,7 +21,7 @@ export const ErrorCodes = {
 };
 
 const DEFAULT_TOOLS_SERVER_URL =
-  "http://cto-tools.cto-system.svc.cluster.local:3000/mcp";
+  "http://cto-tools.cto.svc.cluster.local:3000/mcp";
 const DEFAULT_CLIENT_CONFIG_PATH = "/workspace/tools-config.json";
 const RETRY_DELAYS_MS = [1_000, 2_000, 4_000];
 let rpcId = 0;

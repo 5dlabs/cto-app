@@ -201,7 +201,7 @@ export default function App() {
                   </button>
                   <span className="titlebar__morgan-label">Morgan</span>
                 </div>
-                <div className="titlebar__center">CTO Desktop</div>
+                <div className="titlebar__center">CTO</div>
                 <div className="titlebar__actions">
                   <button
                     className="ghost-btn ghost-btn--icon"

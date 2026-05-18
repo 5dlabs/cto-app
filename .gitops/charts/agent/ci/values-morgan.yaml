@@ -7,10 +7,12 @@
 # Application consumes this file from the published agent chart package.
 # =============================================================================
 
-namespace: cto-system
+namespace: cto
+
+harness: openclaw
 
 global:
-  namespace: cto-system
+  namespace: cto
   createNamespace: false
 
 # Public/free desktop installs do not ship Datadog. Keep Datadog pod annotations
@@ -124,7 +126,6 @@ secrets:
   apiKeyNames:
     anthropic: "ANTHROPIC_API_KEY"
     brave: "BRAVE_API_KEY"
-    doInference: "DO_INFERENCE_KEY"
     factory: "FACTORY_API_KEY"
     firecrawl: "FIRECRAWL_API_KEY"
     fireworks: "FIREWORKS_API_KEY"
@@ -175,9 +176,6 @@ plugins:
   memoryCore:
     enabled: true
 
-openmemory:
-  enabled: false
-
 mem0:
   enabled: false
 
@@ -194,7 +192,7 @@ mem0Plugin:
     vectorStore:
       provider: "qdrant"
       config:
-        host: "qdrant.cto-system.svc.cluster.local"
+        host: "qdrant.cto.svc.cluster.local"
         port: 6333
     embedder:
       provider: "google"
@@ -212,7 +210,7 @@ mem0Plugin:
 telemetry:
   enabled: false
   promtail:
-    lokiUrl: "http://observability-loki.cto-system.svc.cluster.local:3100/loki/api/v1/push"
+    lokiUrl: "http://observability-loki.cto.svc.cluster.local:3100/loki/api/v1/push"
 
 # NATS is not shipped by cto-app's bootstrap yet.
 nats:
@@ -373,7 +371,7 @@ tools:
 # Existing CTO tools service from the cto chart. The agent chart normalizes this
 # /mcp URL for CLI stdio bridges, while OpenClaw can use it directly.
 toolServer:
-  url: "http://cto-tools.cto-system.svc.cluster.local:3000/mcp"
+  url: "http://cto-tools.cto.svc.cluster.local:3000/mcp"
 
 # Claude Code sidecar config is disabled for the local bootstrap to avoid
 # shipping MCP endpoints for services cto-app does not install yet. ACP still
@@ -462,7 +460,7 @@ workspace:
 
       ## Local CTO Tools
 
-      - CTO tools MCP endpoint: `http://cto-tools.cto-system.svc.cluster.local:3000/mcp`
+      - CTO tools MCP endpoint: `http://cto-tools.cto.svc.cluster.local:3000/mcp`
       - Root workspace: `/workspace`
       - User projects should live under `/workspace/repos/<slug>` when created.
 
@@ -483,6 +481,6 @@ workspace:
       # MEMORY.md -- Morgan
 
       - This Morgan instance backs the CTO Desktop local OpenClaw gateway.
-      - The runtime lives in the local kind cluster in the `cto-system` namespace.
+      - The runtime lives in the local kind cluster in the `cto` namespace.
       - Long-term memory uses the local Qdrant service at
-        `qdrant.cto-system.svc.cluster.local:6333` through the mem0 plugin.
+        `qdrant.cto.svc.cluster.local:6333` through the mem0 plugin.

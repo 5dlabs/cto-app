@@ -1,0 +1,13 @@
+WEBVTT
+
+1
+00:00:00.000 --> 00:00:03.174
+Now choose which coding agents should connect to Discord.
+
+2
+00:00:03.174 --> 00:00:05.178
+Paste bot tokens for enabled agents.
+
+3
+00:00:05.178 --> 00:00:09.744
+CTO stores those tokens locally and leaves any blank or disabled agents unchanged.

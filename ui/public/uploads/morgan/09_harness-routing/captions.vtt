@@ -1,0 +1,9 @@
+WEBVTT
+
+1
+00:00:00.000 --> 00:00:03.630
+Choose the primary model CTO should try first for the ACP harness.
+
+2
+00:00:03.630 --> 00:00:10.449
+Every selected provider model starts enabled as a fallback, so turn off only the routes you do not want in the harness pool.

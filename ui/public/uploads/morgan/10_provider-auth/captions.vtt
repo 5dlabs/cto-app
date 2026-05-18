@@ -1,0 +1,13 @@
+WEBVTT
+
+1
+00:00:00.000 --> 00:00:02.321
+Now connect the providers you selected.
+
+2
+00:00:02.321 --> 00:00:11.667
+Some providers use OAuth, some use API keys, cloud providers may need a profile or project, and local gateways may need an endpoint URL with an optional key.
+
+3
+00:00:11.667 --> 00:00:15.595
+Add what you have now, and you can fill in anything missing later.

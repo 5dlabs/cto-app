@@ -44,33 +44,49 @@ Thumbs.db
 .local/
 .firecrawl/
 
-# Morgan: scenario/A/B/motion-prompt experiments (local generation only)
+# Persisted setup profile and actualized bootstrap state (never commit real choices/keys)
+**/setup.json
+**/bootstrap/setup.json
+
+# Hermes/Copilot scratch probes and live UI captures (may contain tokens or account IDs)
+.hermes/tmp/
+.hermes/artifacts/
+
+# Local MCP and probe/report outputs with real API responses
+.mcp.json
+**/*-probe.json
+**/*-report.json
+**/*-dryrun.json
+**/scenario-ledger.json
+
+# GitOps value overrides with filled secrets (chart defaults stay empty placeholders)
+**/values-local.yaml
+**/values.local.yaml
+**/*-local-secrets.yaml
+
+# Morgan: scenario/A/B/motion-prompt and probe ledgers (ops only, not setup UI)
 ui/public/uploads/morgan/ab/
 ui/public/uploads/morgan/**/motion-prompt/
-ui/public/uploads/morgan/scenario-ledger.json
 ui/public/uploads/morgan/**/*-ledger.json
+ui/public/uploads/morgan/scenario-ledger.json
+ui/public/uploads/morgan/Untitled
 
-# Morgan: superseded screen folders (app uses 01_intro, 02_source … 10_install-start per LocalStackBootstrap)
-ui/public/uploads/morgan/02_saved-access/
-ui/public/uploads/morgan/03_endpoint/
-ui/public/uploads/morgan/04_source/
-ui/public/uploads/morgan/05_harness/
-ui/public/uploads/morgan/06_clis/
-ui/public/uploads/morgan/07_providers/
-ui/public/uploads/morgan/08_provider-models/
-ui/public/uploads/morgan/09_harness-routing/
-ui/public/uploads/morgan/10_provider-auth/
-ui/public/uploads/morgan/11_tools/
-ui/public/uploads/morgan/12_agent-tokens/
-ui/public/uploads/morgan/13_install-start/
+# Morgan: legacy renumbered folders (app uses 02_saved-access … 13_install-start)
+ui/public/uploads/morgan/02_source/
+ui/public/uploads/morgan/03_harness/
+ui/public/uploads/morgan/04_clis/
+ui/public/uploads/morgan/05_providers/
+ui/public/uploads/morgan/06_provider-models/
+ui/public/uploads/morgan/07_harness-routing/
+ui/public/uploads/morgan/07_provider-auth/
+ui/public/uploads/morgan/08_tools/
+ui/public/uploads/morgan/09_agent-tokens/
+ui/public/uploads/morgan/10_install-start/
 
-# Morgan: lip-sync video renders (regenerate via voice-bridge + Pruna; keep script.md + morgan.mp3 in repo)
-ui/public/uploads/morgan/**/morgan.mp4
+# Morgan: lip-sync and branch encodes (regenerate locally; ship script.md + captions.vtt + morgan.mp3)
 ui/public/uploads/morgan/**/*.mp4
-
-# Morgan: branch narration clips not wired in setup UI yet
-ui/public/uploads/morgan/02_saved-access/**/*.mp3
-ui/public/uploads/morgan/03_endpoint/**/*.mp3
+ui/public/uploads/morgan/**/*.mp3
+!ui/public/uploads/morgan/**/morgan.mp3
 
 # Deliberation / scratch uploads
 ui/public/uploads/deliberation/

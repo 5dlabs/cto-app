@@ -1,11 +1,11 @@
 # =============================================================================
-# OpenClaw Gateway Helm Chart - Default Values
+# Agent Gateway Helm Chart - Default Values
 # =============================================================================
 # Each agent is deployed as a separate Helm release via ArgoCD.
 # Per-agent overrides are provided via inline values in the ArgoCD Application.
 
 # -- Namespace for all resources
-namespace: bots
+namespace: cto
 
 # -- Create namespace (handled by ArgoCD syncOptions instead)
 createNamespace: false
@@ -17,20 +17,40 @@ createNamespace: false
 # (templates/pvc.yaml) as the workspace volume in both modes.
 deploymentMode: deployment
 
+# -- Agent harness runtime. Supported values: "openclaw" or "hermes".
+harness: openclaw
+
 # -- Image configuration
 image:
-  repository: registry.5dlabs.ai/5dlabs/openclaw
-  tag: "v2026.2.12"
-  pullPolicy: Always
+  repository: ghcr.io/5dlabs/agents
+  tag: latest
+  pullPolicy: IfNotPresent
 
 openclaw:
   # Optional npm package version to install before starting the gateway. Leave
   # empty to use the OpenClaw version baked into the image.
   version: ""
 
+hermes:
+  gateway:
+    # Local starts Hermes gateway in this pod. Remote is reserved for wiring a
+    # separately managed Hermes gateway endpoint once that API contract is
+    # validated for CTO Desktop.
+    mode: local
+    command: "hermes gateway"
+    allowedUsers: ""
+    homeChannel: ""
+    allowedRoles: ""
+  model:
+    provider: auto
+    default: ""
+  terminal:
+    backend: local
+    cwd: /workspace
+    timeout: 180
+
 # -- Image pull secrets
-imagePullSecrets:
-  - name: ghcr-secret
+imagePullSecrets: []
 
 # -- Resource requests (no CPU limits — let agents burst freely)
 resources:
@@ -489,9 +509,9 @@ kaniko:
   # compatible environment).
   image: gcr.io/kaniko-project/executor:v1.23.2-debug
   # Registry to push built images
-  registry: "registry.5dlabs.ai/5dlabs"
+  registry: "ghcr.io/5dlabs"
   # Cache repo for layer caching
-  cacheRepo: "registry.5dlabs.ai/5dlabs/kaniko-cache"
+  cacheRepo: "ghcr.io/5dlabs/kaniko-cache"
   cache: true
   resources:
     requests:
@@ -566,10 +586,6 @@ claudeCode:
   # invoked by an OpenClaw agent. Separate from OpenClaw's own tools.
   mcp:
     servers:
-      # OpenMemory — persistent long-term agent memory (shared across all agents)
-      openmemory:
-        type: "sse"
-        url: "http://openmemory.openmemory.svc.cluster.local:8080/mcp/sse"
       # Firecrawl — web scraping and content extraction
       firecrawl:
         command: "npx"
@@ -616,7 +632,20 @@ secrets:
   # -- Name of the Secret containing Discord bot tokens (one key per agent)
   discordTokensSecret: "openclaw-discord-tokens"
   # -- Name of the Secret containing shared API keys (Anthropic, OpenAI, etc.)
-  apiKeysSecret: "openclaw-api-keys"
+  apiKeysSecret: "cto-agent-keys"
+  # -- Key names in apiKeysSecret. Defaults match cto-agent-keys rendered by
+  # the CTO chart and desktop bootstrap form.
+  apiKeyNames:
+    anthropic: "ANTHROPIC_API_KEY"
+    brave: "BRAVE_API_KEY"
+    factory: "FACTORY_API_KEY"
+    firecrawl: "FIRECRAWL_API_KEY"
+    fireworks: "FIREWORKS_API_KEY"
+    gemini: "GEMINI_API_KEY"
+    github: "GITHUB_TOKEN"
+    gitlab: "GITLAB_TOKEN"
+    google: "GOOGLE_API_KEY"
+    openai: "OPENAI_API_KEY"
 
 # =============================================================================
 # Probes
@@ -680,7 +709,7 @@ telemetry:
 # Only one cloud provider should be enabled at a time.
 # Org policy: Amazon Bedrock stays disabled (cost); use Anthropic/OpenAI/Google APIs instead.
 cloudProviders:
-  # -- Amazon Bedrock (Claude via AWS) — leave disabled unless explicitly approved
+  # -- Amazon Bedrock (Claude via AWS)
   bedrock:
     enabled: false
     region: "us-east-2"

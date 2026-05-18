@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 
 const source = readFileSync(new URL("../../ui/src/components/LocalStackBootstrap.tsx", import.meta.url), "utf8");
-const sourceScript = readFileSync(new URL("../../ui/public/uploads/morgan/02_source/script.md", import.meta.url), "utf8");
+const sourceScript = readFileSync(new URL("../../ui/public/uploads/morgan/04_source/script.md", import.meta.url), "utf8");
 const uxDoc = readFileSync(new URL("../../docs/2026-04/morgan-setup-ux-principles.md", import.meta.url), "utf8");
 
 function sourceRegion() {

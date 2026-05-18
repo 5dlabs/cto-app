@@ -167,6 +167,8 @@ export function MorganView() {
   const workingCueIndexRef = useRef(0);
   const listenPausedUntilRef = useRef(0);
 
+  const autoStartMorgan = shouldAutostartMorgan();
+
   const appendUser = useCallback((text: string) => {
     const trimmed = text.trim();
     if (!trimmed) return;
@@ -279,6 +281,7 @@ export function MorganView() {
   }, [appendUser, appendMorganDelta, finalizeMorgan, completeTurn]);
 
   const connectVoice = useCallback(async () => {
+    if (!autoStartMorgan) return;
     setVoiceError(null);
     const client = ensureClient();
     try {
@@ -287,10 +290,11 @@ export function MorganView() {
     } catch (err) {
       setVoiceError(err instanceof Error ? err.message : String(err));
     }
-  }, [ensureClient]);
+  }, [autoStartMorgan, ensureClient]);
 
   const speakCue = useCallback(
     async (text: string, reason = "cue") => {
+      if (!autoStartMorgan) return;
       const cue = text.trim();
       if (!cue || cueInFlightRef.current) return;
       cueInFlightRef.current = true;
@@ -303,10 +307,11 @@ export function MorganView() {
         cueInFlightRef.current = false;
       }
     },
-    [ensureClient],
+    [autoStartMorgan, ensureClient],
   );
 
   const startUtterance = useCallback(async () => {
+    if (!autoStartMorgan) return;
     if (startingUtteranceRef.current) return;
     startingUtteranceRef.current = true;
     try {
@@ -324,7 +329,7 @@ export function MorganView() {
     } finally {
       startingUtteranceRef.current = false;
     }
-  }, [ensureClient, voiceConnected]);
+  }, [autoStartMorgan, ensureClient, voiceConnected]);
 
   const endUtterance = useCallback(async () => {
     try {
@@ -342,6 +347,7 @@ export function MorganView() {
   const sendTextTurn = useCallback(async () => {
     const draft = textDraft.trim();
     if (!draft) return;
+    if (!autoStartMorgan) return;
     const client = ensureClient();
     if (!voiceConnected) {
       try {
@@ -357,7 +363,7 @@ export function MorganView() {
     textEchoToIgnoreRef.current = draft;
     client.sendText(draft);
     setTextDraft("");
-  }, [ensureClient, textDraft, voiceConnected, appendUser, startPendingMorgan]);
+  }, [autoStartMorgan, ensureClient, textDraft, voiceConnected, appendUser, startPendingMorgan]);
 
   // Brief Morgan when a project is created or switched. We:
   //  - add a visible "system" chip to the chat so the human sees the context
@@ -421,7 +427,6 @@ export function MorganView() {
   const refreshWebView = useCallback(() => {
     window.location.reload();
   }, []);
-  const autoStartMorgan = shouldAutostartMorgan();
   const voicePresenceActive = mode === "video" || mode === "voice";
 
   // Warm the bridge immediately. This opens the socket and checks readiness,
@@ -828,7 +833,7 @@ export function MorganView() {
         <div className="debate__grid" />
         {mode === "video" ? (
           <div className="morgan-video-frame">
-            {CONFIGURED_MORGAN_AVATAR_EMBED_URL ? (
+            {autoStartMorgan && CONFIGURED_MORGAN_AVATAR_EMBED_URL ? (
               <iframe
                 className="morgan-livekit-frame"
                 src={CONFIGURED_MORGAN_AVATAR_EMBED_URL}
@@ -838,7 +843,7 @@ export function MorganView() {
                 loading="eager"
                 onLoad={() => setAvatarLoaded(true)}
               />
-            ) : CONFIGURED_PRODUCT_MORGAN_AGENT_ID ? (
+            ) : autoStartMorgan && CONFIGURED_PRODUCT_MORGAN_AGENT_ID ? (
               <LemonSliceWidget
                 agentId={CONFIGURED_PRODUCT_MORGAN_AGENT_ID}
                 autoStartConversation={false}
@@ -854,7 +859,7 @@ export function MorganView() {
                 <span>Local Morgan</span>
               </div>
             )}
-            {CONFIGURED_MORGAN_AVATAR_EMBED_URL && !avatarLoaded ? (
+            {autoStartMorgan && CONFIGURED_MORGAN_AVATAR_EMBED_URL && !avatarLoaded ? (
               <div className="morgan-video-preroll">
                 <MorganAvatar
                   inputAnalyser={inputAnalyser}
@@ -877,6 +882,7 @@ export function MorganView() {
               inputAnalyser={inputAnalyser}
               outputAnalyser={outputAnalyser}
               avatarState={avatarState}
+              backendEnabled={autoStartMorgan}
             />
           </div>
         ) : mode === "voice" ? (
@@ -891,6 +897,7 @@ export function MorganView() {
             inputAnalyser={inputAnalyser}
             outputAnalyser={outputAnalyser}
             avatarState={avatarState}
+            backendEnabled={autoStartMorgan}
           />
         ) : (
           <MorganChatPanel
@@ -926,9 +933,18 @@ interface MorganPresenceProps {
   inputAnalyser: AnalyserNode | null;
   outputAnalyser: AnalyserNode | null;
   avatarState: "idle" | "listening" | "thinking" | "speaking";
+  /** When false, copy reflects UI-only preview (no remote voice/embed). */
+  backendEnabled?: boolean;
 }
 
-function presenceHint(status: VoiceStatus, variant: "video" | "voice"): string {
+function presenceHint(
+  status: VoiceStatus,
+  variant: "video" | "voice",
+  backendEnabled: boolean,
+): string {
+  if (!backendEnabled) {
+    return "UI preview: remote Morgan (embed + voice bridge) stays off — set VITE_CTO_MORGAN_AUTOSTART=1 to enable.";
+  }
   if (status === "streaming_user") return "Speak normally. Morgan will stop listening when you pause.";
   if (status === "awaiting_reply") return "Morgan heard you and is working.";
   if (status === "speaking") return "Morgan is speaking.";
@@ -949,6 +965,7 @@ function MorganPresence({
   inputAnalyser,
   outputAnalyser,
   avatarState,
+  backendEnabled = true,
 }: MorganPresenceProps) {
   const hasExchange = Boolean(transcript || reply || cue);
   return (
@@ -966,7 +983,7 @@ function MorganPresence({
           <span>Morgan</span>
           <span className="debate__tile-speaking">● {statusLabel(status, connected)}</span>
         </div>
-        <div className="morgan-presence__hint">{presenceHint(status, variant)}</div>
+        <div className="morgan-presence__hint">{presenceHint(status, variant, backendEnabled)}</div>
         {error ? <div className="morgan-presence__error">voice-bridge: {error}</div> : null}
         {hasExchange ? (
           <div className="morgan-presence__exchange">

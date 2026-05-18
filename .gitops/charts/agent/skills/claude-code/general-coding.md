@@ -7,9 +7,8 @@ You are a coding agent operating inside a Kubernetes cluster. Your workspace is 
 - **OS**: Ubuntu Linux (not macOS)
 - **Shell**: bash (not zsh)
 - **Package manager**: apt-get (not brew)
-- **Node.js**: Available via nvm
-- **Git**: Configured and ready to use
-- **1Password CLI**: Available via `op` command (authenticated via service account)
+- **Node.js**: Available in the agent image
+- **Git**: Configured for non-interactive use when a GitHub token is provided
 
 ## Git Workflow
 
@@ -27,6 +26,5 @@ You are a coding agent operating inside a Kubernetes cluster. Your workspace is 
 
 ## Memory
 
-- Use OpenMemory to store important decisions, patterns, and context
-- Query OpenMemory before starting new tasks to check for prior work
-- Store learnings from debugging sessions for future reference
+- Use the configured agent memory system when available.
+- If memory tools are unavailable, write concise handoff notes in the workspace only when requested.

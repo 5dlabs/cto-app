@@ -22,17 +22,24 @@ spec:
     # Public OCI chart published by .github/workflows/publish-chart.yml
     repoURL: ghcr.io/5dlabs/helm-charts
     chart: cto
-    targetRevision: 0.1.9
+    # Keep this pinned to a chart version that is actually published to GHCR.
+    # Clean desktop installs cannot reconcile against unpublished local chart
+    # source versions.
+    targetRevision: 0.1.12
     helm:
       releaseName: cto
       # Values are supplied by the desktop bootstrap at install time via a
       # parameters override on this Application (bootstrap.rs patches
       # `.spec.source.helm.valuesObject` after the user enters API keys).
-      valuesObject: {}
+      valuesObject:
+        global:
+          namespace: cto
+          imagePullSecrets:
+            - name: ghcr-pull-secret
 
   destination:
     server: https://kubernetes.default.svc
-    namespace: cto-system
+    namespace: cto
 
   syncPolicy:
     automated:
