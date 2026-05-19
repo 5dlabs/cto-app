@@ -150,7 +150,7 @@ chart:publish:
     KIND_VERSION: v0.23.0
     K8S_VERSION: v1.30.0
     NS: cto-system
-    CHART_REPO: oci://registry.gitlab.com/5dlabs/cto-app/helm-charts/cto
+    CHART_REPO: oci://registry.5dlabs.ai/5dlabs/cto-app/helm-charts/cto
   rules:
     - if: '$CI_COMMIT_BRANCH == "main"'
       changes: [".gitops/charts/**/*"]
