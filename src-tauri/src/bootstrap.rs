@@ -308,6 +308,7 @@ pub struct GitHubCliOAuthPrompt {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(clippy::struct_excessive_bools)]
 pub struct SecretSourceProviderStatus {
     provider: String,
     label: String,
@@ -3253,6 +3254,7 @@ fn bitwarden_detection_from_probes(
     })
 }
 
+#[allow(clippy::too_many_lines)]
 fn onepassword_detection_from_probes(
     desktop_installed: bool,
     version_output: BootstrapResult<std::process::Output>,
@@ -3282,9 +3284,7 @@ fn onepassword_detection_from_probes(
         account_configured,
         pending_user_permission,
         access_error,
-    ) = if !cli_installed {
-        (false, false, false, false, version_error.clone())
-    } else {
+    ) = if cli_installed {
         match vault_probe_output {
             Ok(output) if output.status.success() => (true, true, true, false, None),
             Ok(output) => {
@@ -3323,6 +3323,8 @@ fn onepassword_detection_from_probes(
                 )
             }
         }
+    } else {
+        (false, false, false, false, version_error.clone())
     };
 
     let available = desktop_installed && cli_installed && cli_access_ready;
@@ -3416,9 +3418,7 @@ async fn install_onepassword_cli_inner() -> BootstrapResult<()> {
 #[cfg(target_os = "macos")]
 fn onepassword_desktop_installed() -> bool {
     Path::new("/Applications/1Password.app").exists()
-        || home_dir()
-            .map(|home| home.join("Applications").join("1Password.app").exists())
-            .unwrap_or(false)
+        || home_dir().is_some_and(|home| home.join("Applications").join("1Password.app").exists())
 }
 
 #[cfg(not(target_os = "macos"))]
