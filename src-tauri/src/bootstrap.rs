@@ -3197,7 +3197,12 @@ fn bitwarden_detection_from_probes(
             let stdout = String::from_utf8_lossy(&output.stdout);
             let parsed = serde_json::from_str::<Value>(&stdout)
                 .ok()
-                .and_then(|value| value.get("status").and_then(Value::as_str).map(str::to_string));
+                .and_then(|value| {
+                    value
+                        .get("status")
+                        .and_then(Value::as_str)
+                        .map(str::to_string)
+                });
             (parsed, None)
         }
         Ok(output) => (
@@ -3218,7 +3223,9 @@ fn bitwarden_detection_from_probes(
     let reason = if available {
         None
     } else {
-        status_error.or(version_error).or_else(|| Some(format!("Bitwarden CLI status is {status_value}")))
+        status_error
+            .or(version_error)
+            .or_else(|| Some(format!("Bitwarden CLI status is {status_value}")))
     };
 
     Some(SecretSourceProviderStatus {
@@ -3237,7 +3244,12 @@ fn bitwarden_detection_from_probes(
         secondary: true,
         version,
         reason,
-        primary_action: if available { "More options" } else { "Unlock Bitwarden CLI" }.to_string(),
+        primary_action: if available {
+            "More options"
+        } else {
+            "Unlock Bitwarden CLI"
+        }
+        .to_string(),
     })
 }
 
@@ -3264,7 +3276,13 @@ fn onepassword_detection_from_probes(
         Err(error) => (false, None, Some(error)),
     };
 
-    let (cli_access_ready, desktop_app_integration_enabled, account_configured, pending_user_permission, access_error) = if !cli_installed {
+    let (
+        cli_access_ready,
+        desktop_app_integration_enabled,
+        account_configured,
+        pending_user_permission,
+        access_error,
+    ) = if !cli_installed {
         (false, false, false, false, version_error.clone())
     } else {
         match vault_probe_output {
@@ -3278,7 +3296,8 @@ fn onepassword_detection_from_probes(
                     .to_string();
                 let reason = if stderr.is_empty() { stdout } else { stderr };
                 let lower = reason.to_ascii_lowercase();
-                let desktop_app_integration_enabled = onepassword_desktop_app_integration_enabled(&lower);
+                let desktop_app_integration_enabled =
+                    onepassword_desktop_app_integration_enabled(&lower);
                 let account_configured = !lower.contains("no accounts configured")
                     && !lower.contains("no account found");
                 let pending_user_permission = onepassword_cli_permission_pending(&lower);
@@ -3293,8 +3312,15 @@ fn onepassword_detection_from_probes(
             Err(error) => {
                 let lower = error.to_ascii_lowercase();
                 let pending_user_permission = onepassword_cli_permission_pending(&lower);
-                let desktop_app_integration_enabled = onepassword_desktop_app_integration_enabled(&lower);
-                (false, desktop_app_integration_enabled, true, pending_user_permission, Some(error))
+                let desktop_app_integration_enabled =
+                    onepassword_desktop_app_integration_enabled(&lower);
+                (
+                    false,
+                    desktop_app_integration_enabled,
+                    true,
+                    pending_user_permission,
+                    Some(error),
+                )
             }
         }
     };
@@ -6577,11 +6603,7 @@ fn run_tool(name: &str, args: &[&str]) -> BootstrapResult<Output> {
     run_command(command, &format!("{} {}", name, args.join(" ")))
 }
 
-fn run_tool_with_timeout(
-    name: &str,
-    args: &[&str],
-    timeout: Duration,
-) -> BootstrapResult<Output> {
+fn run_tool_with_timeout(name: &str, args: &[&str], timeout: Duration) -> BootstrapResult<Output> {
     let mut command = tool_command(name);
     command.args(args);
     run_command_with_timeout(command, &format!("{} {}", name, args.join(" ")), timeout)
@@ -6617,7 +6639,10 @@ fn run_command_with_timeout(
     label: &str,
     timeout: Duration,
 ) -> BootstrapResult<Output> {
-    append_bootstrap_log(&format!("starting `{label}` with {}s timeout", timeout.as_secs()));
+    append_bootstrap_log(&format!(
+        "starting `{label}` with {}s timeout",
+        timeout.as_secs()
+    ));
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut child = command
         .spawn()
