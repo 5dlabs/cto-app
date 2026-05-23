@@ -100,7 +100,7 @@ jobs:
             local refs_file="$refs_dir/${remote}-refs"
             echo "::group::prune deleted refs from ${remote}"
             git ls-remote --heads --tags "$remote" \
-              | awk '$2 !~ /\^{}$/ { print $2 }' \
+              | awk '$2 !~ /\^\{\}$/ { print $2 }' \
               | sort > "$refs_file"
             comm -13 "$source_refs" "$refs_file" | while IFS= read -r ref; do
               case "$ref" in
