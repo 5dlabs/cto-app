@@ -27,7 +27,7 @@ jobs:
     runs-on: [k8s-runner]
     timeout-minutes: 45
     env:
-      GITLAB_HOST: gitlab.5dlabs.ai
+      GITLAB_HOST: gitlab-gitlab-shell.gitlab.svc.cluster.local
       GITLAB_SSH_PORT: '22'
       GITLAB_SSH_USER: git
       GITLAB_NAMESPACE: 5dlabs
