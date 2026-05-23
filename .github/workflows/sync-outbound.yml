@@ -81,10 +81,16 @@ jobs:
 
           push_existing_refs() {
             local remote="$1"
+            local force_flag="--force"
             echo "::group::push existing refs to ${remote}"
             while IFS= read -r ref; do
               echo "-> ${remote} ${ref}"
-              git push --force "$remote" "$ref:$ref"
+              if [[ "$ref" == "refs/heads/main" ]]; then
+                force_flag=""
+              else
+                force_flag="--force"
+              fi
+              git push $force_flag "$remote" "$ref:$ref"
             done < "$source_refs"
             echo "::endgroup::"
           }
