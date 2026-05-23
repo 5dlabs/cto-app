@@ -28,6 +28,8 @@ jobs:
     timeout-minutes: 45
     env:
       GITLAB_HOST: gitlab.5dlabs.ai
+      GITLAB_SSH_PORT: '22'
+      GITLAB_SSH_USER: git
       GITLAB_NAMESPACE: 5dlabs
       LEGACY_GITHUB_NAMESPACE: 5dlabs
     steps:
@@ -36,12 +38,13 @@ jobs:
         env:
           SOURCE_GITHUB_TOKEN: ${{ github.token }}
           GITLAB_PUSH_TOKEN: ${{ secrets.GITLAB_PUSH_TOKEN }}
+          GITLAB_SSH_PRIVATE_KEY: ${{ secrets.GITLAB_SSH_PRIVATE_KEY }}
           LEGACY_GITHUB_PUSH_TOKEN: ${{ secrets.LEGACY_GITHUB_PUSH_TOKEN }}
         run: |
           set -euo pipefail
 
-          if [[ -z "${GITLAB_PUSH_TOKEN:-}" ]]; then
-            echo "::error::GITLAB_PUSH_TOKEN secret is not set"
+          if [[ -z "${GITLAB_PUSH_TOKEN:-}" && -z "${GITLAB_SSH_PRIVATE_KEY:-}" ]]; then
+            echo "::error::GITLAB_PUSH_TOKEN or GITLAB_SSH_PRIVATE_KEY secret is not set"
             exit 1
           fi
           if [[ -z "${LEGACY_GITHUB_PUSH_TOKEN:-}" ]]; then
@@ -51,8 +54,19 @@ jobs:
 
           repo_name="${GITHUB_REPOSITORY##*/}"
           source_remote="https://x-access-token:${SOURCE_GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-          gitlab_remote="https://oauth2:${GITLAB_PUSH_TOKEN}@${GITLAB_HOST}/${GITLAB_NAMESPACE}/${repo_name}.git"
           legacy_remote="https://x-access-token:${LEGACY_GITHUB_PUSH_TOKEN}@github.com/${LEGACY_GITHUB_NAMESPACE}/${repo_name}.git"
+
+          if [[ -n "${GITLAB_SSH_PRIVATE_KEY:-}" ]]; then
+            mkdir -p ~/.ssh
+            chmod 700 ~/.ssh
+            printf '%s\n' "$GITLAB_SSH_PRIVATE_KEY" > ~/.ssh/gitlab_mirror_key
+            chmod 600 ~/.ssh/gitlab_mirror_key
+            ssh-keyscan -p "$GITLAB_SSH_PORT" -H "$GITLAB_HOST" >> ~/.ssh/known_hosts
+            gitlab_remote="ssh://${GITLAB_SSH_USER}@${GITLAB_HOST}:${GITLAB_SSH_PORT}/${GITLAB_NAMESPACE}/${repo_name}.git"
+            export GIT_SSH_COMMAND="ssh -i ~/.ssh/gitlab_mirror_key -o IdentitiesOnly=yes"
+          else
+            gitlab_remote="https://oauth2:${GITLAB_PUSH_TOKEN}@${GITLAB_HOST}/${GITLAB_NAMESPACE}/${repo_name}.git"
+          fi
 
           git clone --mirror "$source_remote" repo.git
           cd repo.git
