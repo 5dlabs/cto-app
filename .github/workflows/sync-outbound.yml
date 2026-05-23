@@ -106,7 +106,7 @@ jobs:
               case "$ref" in
                 refs/heads/*|refs/tags/*)
                   echo "delete ${remote} ${ref}"
-                  git push "$remote" ":$ref"
+                  git push "$remote" ":$ref" || echo "::warning::failed to delete ${remote} ${ref}"
                   ;;
               esac
             done
