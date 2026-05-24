@@ -172,7 +172,7 @@ jobs:
             > "${render_dir}/voice-bridge.yaml"
           grep -q 'name: voice-bridge' "${render_dir}/voice-bridge.yaml"
           grep -q 'namespace: cto-system' "${render_dir}/voice-bridge.yaml"
-          grep -q 'ghcr.io/5dlabs/voice-bridge:desktop-python-3.11-v0.1.0' "${render_dir}/voice-bridge.yaml"
+          grep -q 'ghcr.io/5DLabsInc/voice-bridge:desktop-python-3.11-v0.1.0' "${render_dir}/voice-bridge.yaml"
           grep -q 'MORGAN_GATEWAY_URL' "${render_dir}/voice-bridge.yaml"
           grep -q 'http://openclaw-gateway-morgan.cto-system.svc.cluster.local:18789' "${render_dir}/voice-bridge.yaml"
           grep -q 'ELEVENLABS_API_KEY' "${render_dir}/voice-bridge.yaml"

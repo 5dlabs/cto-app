@@ -83,7 +83,7 @@ hermes --version || true
 
 If the binary is not present, decide on the durable install source before proceeding:
 
-- Bake Hermes into the `ghcr.io/5dlabs/agents` image and keep the chart command as `hermes gateway`.
+- Bake Hermes into the `ghcr.io/5DLabsInc/agents` image and keep the chart command as `hermes gateway`.
 - Or add a chart init/install step only if the install is deterministic, pinned, and does not require secrets.
 - Do not rely on an interactive workstation-only install for the Kind path.
 

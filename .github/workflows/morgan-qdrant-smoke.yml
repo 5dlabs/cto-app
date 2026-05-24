@@ -185,10 +185,10 @@ jobs:
             chart="$1"
             version="$2"
             log="${DEBUG_DIR}/helm-show-${chart}-${version}.log"
-            if helm show chart "oci://ghcr.io/5dlabs/helm-charts/${chart}" --version "${version}" >"${log}" 2>&1; then
+            if helm show chart "oci://ghcr.io/5DLabsInc/helm-charts/${chart}" --version "${version}" >"${log}" 2>&1; then
               echo "ok chart ${chart}:${version}" | tee -a "${summary}"
             else
-              note_failure "blocked chart ${chart}:${version}: ghcr.io/5dlabs/helm-charts is not anonymously readable or version is not published (see ${log})"
+              note_failure "blocked chart ${chart}:${version}: ghcr.io/5DLabsInc/helm-charts is not anonymously readable or version is not published (see ${log})"
             fi
           }
 
@@ -230,8 +230,8 @@ jobs:
           qdrant_chart_version="$(awk '/^version:/ {print $2; exit}' .gitops/charts/qdrant/Chart.yaml)"
           check_chart agent "${agent_chart_version}"
           check_chart qdrant "${qdrant_chart_version}"
-          check_ghcr_image ghcr.io/5dlabs/agents latest
-          check_ghcr_image ghcr.io/5dlabs/project-api latest
+          check_ghcr_image ghcr.io/5DLabsInc/agents latest
+          check_ghcr_image ghcr.io/5DLabsInc/project-api latest
 
           if [ "${failures}" -eq 0 ]; then
             echo "public_morgan=true" >> "${GITHUB_OUTPUT}"

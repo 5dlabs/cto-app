@@ -38,7 +38,7 @@ ctoConfig: {}
 controller:
   enabled: true
   image:
-    repository: ghcr.io/5dlabs/controller
+    repository: ghcr.io/5DLabsInc/controller
     tag: "latest"
     pullPolicy: IfNotPresent
   replicas: 1
@@ -79,45 +79,45 @@ controller:
 
 agent:
   image:
-    repository: ghcr.io/5dlabs/agents
+    repository: ghcr.io/5DLabsInc/agents
     tag: latest
     pullPolicy: IfNotPresent
   serviceAccountName: cto-agent
   cliImages:
     claude:
-      repository: ghcr.io/5dlabs/agents
+      repository: ghcr.io/5DLabsInc/agents
       tag: latest
       pullPolicy: IfNotPresent
     cursor:
-      repository: ghcr.io/5dlabs/agents
+      repository: ghcr.io/5DLabsInc/agents
       tag: latest
       pullPolicy: IfNotPresent
     codex:
-      repository: ghcr.io/5dlabs/agents
+      repository: ghcr.io/5DLabsInc/agents
       tag: latest
       pullPolicy: IfNotPresent
     code:
-      repository: ghcr.io/5dlabs/agents
+      repository: ghcr.io/5DLabsInc/agents
       tag: latest
       pullPolicy: IfNotPresent
     gemini:
-      repository: ghcr.io/5dlabs/agents
+      repository: ghcr.io/5DLabsInc/agents
       tag: latest
       pullPolicy: IfNotPresent
     factory:
-      repository: ghcr.io/5dlabs/agents
+      repository: ghcr.io/5DLabsInc/agents
       tag: latest
       pullPolicy: IfNotPresent
     opencode:
-      repository: ghcr.io/5dlabs/agents
+      repository: ghcr.io/5DLabsInc/agents
       tag: latest
       pullPolicy: IfNotPresent
     research:
-      repository: ghcr.io/5dlabs/agents
+      repository: ghcr.io/5DLabsInc/agents
       tag: latest
       pullPolicy: IfNotPresent
     grok:
-      repository: ghcr.io/5dlabs/agents
+      repository: ghcr.io/5DLabsInc/agents
       tag: latest
       pullPolicy: IfNotPresent
 
@@ -130,7 +130,7 @@ tools:
   dockerInDocker:
     enabled: false
   image:
-    repository: ghcr.io/5dlabs/tools
+    repository: ghcr.io/5DLabsInc/tools
     tag: "latest"
     pullPolicy: IfNotPresent
   resources:

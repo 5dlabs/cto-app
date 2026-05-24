@@ -112,7 +112,7 @@ PATH="$(/opt/homebrew/bin/rustup which cargo | xargs dirname):$PATH" cargo test 
 - Tauri/browser automation was flaky in this environment, so visual layout review should continue in the browser-only mode.
 - GitHub/GitLab CLI are selected as CLI surfaces for source-control compatibility but should not be treated as AI provider launchers.
 - OpenCLAW appears both as a CLI surface and as a harness concept. Keep the final harness choice separate from the earlier CLI/profile selection.
-- Desktop bootstrap Argo Applications must point to chart versions that are already published to `ghcr.io/5dlabs/helm-charts`. A clean Kind cluster cannot reconcile unpublished local chart versions.
+- Desktop bootstrap Argo Applications must point to chart versions that are already published to `ghcr.io/5DLabsInc/helm-charts`. A clean Kind cluster cannot reconcile unpublished local chart versions.
 
 ## Suggested next work
 

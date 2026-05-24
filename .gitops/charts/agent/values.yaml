@@ -22,7 +22,7 @@ harness: openclaw
 
 # -- Image configuration
 image:
-  repository: ghcr.io/5dlabs/agents
+  repository: ghcr.io/5DLabsInc/agents
   tag: latest
   pullPolicy: IfNotPresent
 
@@ -402,7 +402,7 @@ devServer:
 projectApi:
   enabled: false
   image:
-    repository: ghcr.io/5dlabs/project-api
+    repository: ghcr.io/5DLabsInc/project-api
     tag: "latest"
     pullPolicy: Always
   # HTTP port inside the pod
@@ -509,9 +509,9 @@ kaniko:
   # compatible environment).
   image: gcr.io/kaniko-project/executor:v1.23.2-debug
   # Registry to push built images
-  registry: "ghcr.io/5dlabs"
+  registry: "ghcr.io/5DLabsInc"
   # Cache repo for layer caching
-  cacheRepo: "ghcr.io/5dlabs/kaniko-cache"
+  cacheRepo: "ghcr.io/5DLabsInc/kaniko-cache"
   cache: true
   resources:
     requests:
@@ -842,7 +842,7 @@ mem0Plugin:
 narrator:
   enabled: false
   image:
-    repository: ghcr.io/5dlabs/narrator-sidecar-base
+    repository: ghcr.io/5DLabsInc/narrator-sidecar-base
     tag: latest
     pullPolicy: Always
   # Path the agent writes ACP NDJSON to (shared PV). Both sidecars tail this.

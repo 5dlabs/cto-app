@@ -30,7 +30,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  CHART_REPO: oci://ghcr.io/5dlabs/helm-charts/cto
+  CHART_REPO: oci://ghcr.io/5DLabsInc/helm-charts/cto
   NS: cto-system
   KIND_VERSION: v0.23.0
   K8S_VERSION: v1.30.0

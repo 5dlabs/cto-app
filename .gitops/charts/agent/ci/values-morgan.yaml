@@ -39,7 +39,7 @@ replicaCount: 1
 deploymentMode: statefulset
 
 image:
-  repository: "ghcr.io/5dlabs/agents"
+  repository: "ghcr.io/5DLabsInc/agents"
   tag: "latest"
   pullPolicy: IfNotPresent
 

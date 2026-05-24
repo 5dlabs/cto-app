@@ -3,7 +3,7 @@
 #
 # This uses the same published-chart flow as cto.yaml and morgan.yaml: the
 # qdrant chart in .gitops/charts/qdrant is packaged by publish-chart.yml and
-# pushed to ghcr.io/5dlabs/helm-charts. Keeping it as an OCI chart lets the
+# pushed to ghcr.io/5DLabsInc/helm-charts. Keeping it as an OCI chart lets the
 # desktop bootstrap hand Argo CD a public, in-cluster-resolvable source.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
@@ -20,7 +20,7 @@ spec:
   project: default
 
   source:
-    repoURL: ghcr.io/5dlabs/helm-charts
+    repoURL: ghcr.io/5DLabsInc/helm-charts
     chart: qdrant
     targetRevision: 0.1.3
     helm:
