@@ -19,7 +19,7 @@ spec:
   project: default
 
   source:
-    repoURL: ghcr.io/5DLabsInc/helm-charts
+    repoURL: ghcr.io/5dlabsinc/helm-charts
     chart: observability
     targetRevision: 0.1.0
     helm:

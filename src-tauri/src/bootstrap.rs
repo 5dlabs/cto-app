@@ -3454,7 +3454,7 @@ fn bitwarden_detection_from_probes(
         available,
         status: Some(status_value),
         docs_url: Some(BITWARDEN_CLI_DOCS_URL.to_string()),
-        secondary: true,
+        secondary: false,
         version,
         reason,
         primary_action: if available { "More options" } else { "Unlock Bitwarden CLI" }.to_string(),
@@ -6526,7 +6526,7 @@ type: Opaque
 stringData:
   type: helm
   name: ghcr-helm-charts
-  url: {GHCR_REGISTRY}/5dlabs/helm-charts
+  url: {GHCR_REGISTRY}/5dlabsinc/helm-charts
   enableOCI: "true"
   username: {quoted_username}
   password: {quoted_token}
@@ -8973,7 +8973,7 @@ stringData:
         assert!(manifest.contains("namespace: argocd"));
         assert!(manifest.contains("argocd.argoproj.io/secret-type: repository"));
         assert!(manifest.contains("type: helm"));
-        assert!(manifest.contains("url: ghcr.io/5DLabsInc/helm-charts"));
+        assert!(manifest.contains("url: ghcr.io/5dlabsinc/helm-charts"));
         assert!(manifest.contains("enableOCI: \"true\""));
         assert!(manifest.contains("username: \"kaseonedge\""));
         assert!(manifest.contains("password: \"github_pat_example\""));

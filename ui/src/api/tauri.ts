@@ -187,7 +187,7 @@ async function invokeBootstrapPreview<T>(command: string, args?: TauriInvokeArgs
           },
         ],
         manualFallbackAvailable: true,
-        message: "Browser preview keeps saved access optional; Paste token remains available.",
+        message: "Browser preview keeps secrets optional; Paste token remains available.",
       } as T;
     case "preview_secret_source_matches":
       return {

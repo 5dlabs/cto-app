@@ -7,9 +7,12 @@
 #   - publish   <-> .github/workflows/publish-chart.yml
 
 stages:
+  - ci
+  - security
   - lint
   - publish
   - smoke
+  - release
 
 variables:
   HELM_VERSION: v3.16.2
@@ -21,16 +24,71 @@ default:
   before_script:
     - apk add --no-cache bash curl yq yamllint
 
+.ci-rules: &ci-rules
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_PIPELINE_SOURCE == "push"'
+
+ui:
+  stage: ci
+  image: node:20-bookworm
+  <<: *ci-rules
+  script:
+    - npm ci --workspaces --include-workspace-root
+    - npm --workspace ui run typecheck
+    - |
+      if grep -R -nE 'morgan-(ide|project-api|voice)\.5dlabs\.ai' ui/src; then
+        echo "Morgan desktop defaults must use localhost ingress paths" >&2
+        exit 1
+      fi
+    - npm --workspace ui run build
+
+ci-tools:
+  stage: ci
+  image: rust:1.80-bookworm
+  <<: *ci-rules
+  script:
+    - rustup component add rustfmt clippy
+    - cargo fmt --manifest-path crates/ci-tools/Cargo.toml --all -- --check
+    - cargo test --manifest-path crates/ci-tools/Cargo.toml
+    - cargo clippy --manifest-path crates/ci-tools/Cargo.toml --all-targets -- -W clippy::pedantic -D warnings
+
+rust:
+  stage: ci
+  image: rust:1.80-bookworm
+  <<: *ci-rules
+  before_script:
+    - apt-get update
+    - apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev libasound2-dev build-essential curl wget file pkg-config
+    - rustup component add rustfmt clippy
+    - cd src-tauri
+  script:
+    - cargo fmt --all -- --check
+    - cargo clippy --all-targets -- -W clippy::pedantic -D warnings
+
+security:semgrep:
+  stage: security
+  image: semgrep/semgrep:latest
+  <<: *ci-rules
+  script:
+    - semgrep scan --config auto --error
+
 .chart-rules: &chart-rules
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
       changes:
         - .gitops/**/*
+        - crates/ci-tools/**/*
+        - .github/workflows/chart-ci.yml
+        - .github/workflows/morgan-qdrant-smoke.yml
         - .gitlab-ci.yml
         - .yamllint.yaml
     - if: '$CI_COMMIT_BRANCH == "main"'
       changes:
         - .gitops/**/*
+        - crates/ci-tools/**/*
+        - .github/workflows/chart-ci.yml
+        - .github/workflows/morgan-qdrant-smoke.yml
         - .gitlab-ci.yml
         - .yamllint.yaml
     - if: '$CI_COMMIT_TAG =~ /^chart-v/'
@@ -79,7 +137,7 @@ schema-validation:
         [ -f "$chart/Chart.yaml" ] || continue
         value_files=()
         if [ -d "$chart/ci" ]; then
-          for f in "$chart"ci/values-*.yaml; do
+          for f in "$chart"/ci/values-*.yaml; do
             [ -f "$f" ] && value_files+=("$f")
           done
         fi
@@ -100,6 +158,34 @@ schema-validation:
         done
       done
       exit $EXIT_CODE
+
+morgan-qdrant-smoke:
+  stage: smoke
+  image: ubuntu:24.04
+  <<: *chart-rules
+  when: manual
+  allow_failure: true
+  before_script:
+    - apt-get update
+    - apt-get install -y --no-install-recommends ca-certificates curl bash gcc g++ make pkg-config libssl-dev
+    - curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+    - curl -fsSL -o /tmp/kubectl "https://dl.k8s.io/release/v1.30.0/bin/linux/amd64/kubectl"
+    - install -m 0755 /tmp/kubectl /usr/local/bin/kubectl
+    - curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal
+    - . "$HOME/.cargo/env"
+    - rustup component add rustfmt clippy
+  script:
+    - . "$HOME/.cargo/env"
+    - cargo fmt --manifest-path crates/ci-tools/Cargo.toml --all -- --check
+    - cargo test --manifest-path crates/ci-tools/Cargo.toml
+    - cargo clippy --manifest-path crates/ci-tools/Cargo.toml --all-targets -- -W clippy::pedantic -D warnings
+    - cargo build --manifest-path crates/ci-tools/Cargo.toml --bin cto-ci-assert
+    - mkdir -p .chart-ci-rendered
+    - helm template qdrant .gitops/charts/qdrant --namespace cto-system > .chart-ci-rendered/qdrant-local-smoke.yaml
+    - helm template morgan .gitops/charts/agent --namespace cto-system -f .gitops/charts/agent/ci/values-morgan.yaml > .chart-ci-rendered/agent-morgan-local-smoke.yaml
+    - crates/ci-tools/target/debug/cto-ci-assert qdrant-render-config < .chart-ci-rendered/qdrant-local-smoke.yaml
+    - crates/ci-tools/target/debug/cto-ci-assert morgan-mem0-config < .chart-ci-rendered/agent-morgan-local-smoke.yaml
+    - crates/ci-tools/target/debug/cto-ci-assert morgan-diagnostics-config < .chart-ci-rendered/agent-morgan-local-smoke.yaml
 
 chart:publish:
   stage: publish
@@ -150,7 +236,7 @@ chart:publish:
     KIND_VERSION: v0.23.0
     K8S_VERSION: v1.30.0
     NS: cto-system
-    CHART_REPO: oci://registry.gitlab.com/5dlabs/cto-app/helm-charts/cto
+    CHART_REPO: oci://${CI_REGISTRY_IMAGE}/helm-charts/cto
   rules:
     - if: '$CI_COMMIT_BRANCH == "main"'
       changes: [".gitops/charts/**/*"]
@@ -169,7 +255,7 @@ chart:publish:
 
 chart:smoke-controller:
   <<: *smoke-common
-  needs: [chart:publish]
+  needs: ["chart:publish"]
   script:
     - |
       set -eu
@@ -191,13 +277,30 @@ chart:smoke-controller:
         --set controller.skillsCache.enabled=false \
         --wait --timeout=6m
 
-      DEP=$(kubectl -n "$NS" get deploy -l app.kubernetes.io/component=controller -o name | head -1)
+      DEP=$(kubectl -n "$NS" get deploy -l app.kubernetes.io/name=controller -o name | head -1)
       if [ -z "$DEP" ]; then
         kubectl -n "$NS" get all
         echo "No controller deployment found" >&2; exit 1
       fi
       kubectl -n "$NS" wait "$DEP" --for=condition=Available --timeout=3m
       echo "✅ controller up"
+      kubectl wait --for=condition=Established crd/coderuns.agents.platform --timeout=90s
+      kubectl api-resources --api-group=agents.platform
+      kubectl -n "$NS" apply -f - <<'YAML'
+      apiVersion: agents.platform/v1
+      kind: CodeRun
+      metadata:
+        name: smoke-coderun
+      spec:
+        runType: documentation
+        service: smoke
+        repositoryUrl: https://github.com/5DLabsInc/cto
+        docsRepositoryUrl: https://github.com/5DLabsInc/cto
+        workingDirectory: .
+        githubApp: smoke-test
+      YAML
+      kubectl -n "$NS" get coderun smoke-coderun -o jsonpath='{.spec.service}{"\n"}'
+      echo "✅ CodeRun CRD accepts objects"
   after_script:
     - |
       kubectl -n "$NS" get events --sort-by=.lastTimestamp | tail -40 || true
@@ -207,7 +310,7 @@ chart:smoke-controller:
 
 chart:smoke-tools:
   <<: *smoke-common
-  needs: [chart:smoke-controller]
+  needs: ["chart:smoke-controller"]
   script:
     - |
       set -eu
@@ -244,3 +347,75 @@ chart:smoke-tools:
       kubectl -n "$NS" logs -l app.kubernetes.io/component=tools --tail=200 --all-containers || true
     - helm uninstall cto -n "$NS" --wait || true
     - kind delete cluster --name cto-smoke-tools || true
+
+tauri:e2e:
+  stage: smoke
+  image: ubuntu:24.04
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes:
+        - .gitlab-ci.yml
+        - .github/workflows/tauri-e2e.yml
+        - e2e/**/*
+        - scripts/e2e/**/*
+        - src-tauri/**/*
+        - ui/**/*
+        - package.json
+        - package-lock.json
+      when: manual
+      allow_failure: true
+    - if: '$CI_PIPELINE_SOURCE == "web"'
+      when: manual
+      allow_failure: true
+  variables:
+    CTO_E2E_START_BOOTSTRAP: "0"
+    CTO_E2E_RESET: "0"
+    VITE_CTO_MORGAN_AUTOSTART: "0"
+    VITE_CTO_FORCE_LOCAL_STACK_BOOTSTRAP: "1"
+  before_script:
+    - apt-get update
+    - apt-get install -y --no-install-recommends libayatana-appindicator3-dev libasound2-dev webkit2gtk-4.1 webkit2gtk-driver xvfb curl ca-certificates build-essential pkg-config libssl-dev
+    - curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+    - apt-get install -y --no-install-recommends nodejs
+    - curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal
+    - . "$HOME/.cargo/env"
+  script:
+    - npm ci
+    - . "$HOME/.cargo/env"
+    - cargo install tauri-driver --locked
+    - |
+      if compgen -G "e2e/tauri/**/*.e2e.mjs" > /dev/null; then
+        xvfb-run -a npm run e2e:tauri
+      else
+        echo "No Tauri Selenium specs found; skipping."
+      fi
+  artifacts:
+    when: always
+    expire_in: 1 week
+    paths:
+      - .local/bootstrap-runs
+
+release:linux:
+  stage: release
+  image: ubuntu:24.04
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v.*/'
+    - if: '$CI_PIPELINE_SOURCE == "web"'
+      when: manual
+  before_script:
+    - apt-get update
+    - apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev libasound2-dev build-essential curl wget file pkg-config ca-certificates
+    - curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+    - apt-get install -y --no-install-recommends nodejs
+    - curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal
+    - . "$HOME/.cargo/env"
+  script:
+    - npm ci --workspaces --include-workspace-root
+    - npm --workspace ui run build
+    - . "$HOME/.cargo/env"
+    - npm run tauri:build -- --target x86_64-unknown-linux-gnu
+  artifacts:
+    when: always
+    expire_in: 2 weeks
+    paths:
+      - src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/**/*

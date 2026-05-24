@@ -30,7 +30,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  CHART_REPO: oci://ghcr.io/5DLabsInc/helm-charts/cto
+  CHART_REPO: oci://ghcr.io/5dlabsinc/helm-charts/cto
   NS: cto-system
   KIND_VERSION: v0.23.0
   K8S_VERSION: v1.30.0
@@ -135,8 +135,8 @@ jobs:
           spec:
             runType: documentation
             service: smoke
-            repositoryUrl: https://github.com/5dlabs/cto-app
-            docsRepositoryUrl: https://github.com/5dlabs/cto-app
+            repositoryUrl: https://github.com/5DLabsInc/cto
+            docsRepositoryUrl: https://github.com/5DLabsInc/cto
             workingDirectory: .
             githubApp: smoke-test
           YAML

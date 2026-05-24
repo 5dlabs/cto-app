@@ -309,6 +309,12 @@ export const IconKey = (p: IconProps) => (
     <path d="M10 11l11-11M17 7l3 3M19 5l3 3" />
   </Icon>
 );
+export const IconKeyboard = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="2" y="6" width="20" height="12" rx="2" />
+    <path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M6 14h.01M10 14h.01M14 14h.01M18 14h.01M8 18h8" />
+  </Icon>
+);
 export const IconEye = (p: IconProps) => (
   <Icon {...p}>
     <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />

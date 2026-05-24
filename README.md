@@ -59,7 +59,7 @@ cluster.
 
 The local Argo CD Applications are embedded from `.gitops/apps/*.yaml` at build
 time and applied into the Kind cluster; they pull public OCI charts from
-`ghcr.io/5DLabsInc/helm-charts`. For the temporary GitHub bootstrap flow, set
+`ghcr.io/5dlabsinc/helm-charts`. For the temporary GitHub bootstrap flow, set
 `CTO_GITHUB_PAT` and optionally `CTO_GITHUB_OWNER` before launching the app. The
 first-run GitHub form is prefilled from those environment variables and applies
 the PAT only to the local `cto-system/cto-agent-keys` Kubernetes Secret so
@@ -166,7 +166,7 @@ act workflow_dispatch -W .github/workflows/morgan-qdrant-smoke.yml \
 `require_public_artifacts=false` is an explicit local-development skip for the
 current GHCR blocker: the workflow still renders Morgan, runs Rust assertions,
 and smoke-tests Qdrant, then skips live Morgan pod checks if the agent chart or
-`ghcr.io/5DLabsInc/agents:latest` / `ghcr.io/5DLabsInc/project-api:latest` are not
+`ghcr.io/5dlabsinc/agents:latest` / `ghcr.io/5dlabsinc/project-api:latest` are not
 publicly pullable. Omit that input once the chart and images are public to make
 the preflight fail clearly on regressions.
 
@@ -175,9 +175,15 @@ the preflight fail clearly on regressions.
 Push a `v*` tag (e.g. `v0.1.0`) on `main`. The `release.yml` workflow builds
 macOS (universal), Windows, and Linux bundles, then publishes a GitHub Release.
 
+Helm charts under `.gitops/charts/` publish to
+`oci://ghcr.io/5dlabsinc/helm-charts` when chart changes land on `main`, when a
+`chart-v*` tag is pushed, or through the `publish-chart` manual workflow. The
+workflow uploads packaged `.tgz` charts as run artifacts and attaches them to
+`chart-v*` GitHub releases.
+
 ## Mirror
 
-This repo mirrors to `gitlab.5dlabs.ai/5dlabs/cto-app` on every push to `main`
+This repo mirrors to `gitlab.5dlabs.ai/5dlabs/cto` on every push to `main`
 via `.github/workflows/mirror-to-gitlab.yml`.
 
 ## Design

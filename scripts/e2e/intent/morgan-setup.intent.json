@@ -173,17 +173,14 @@
       "heading": "Source",
       "docs": "docs/intent/morgan-setup/source-auth-matrix.md",
       "requiredText": [
-        "Where is your code?",
         "GitHub",
-        "GitLab",
-        "enterprise",
-        "self-managed"
+        "GitLab"
       ],
       "requiredControls": [
         "GitHub",
         "GitLab",
-        "Using GitHub Enterprise?",
-        "Using self-managed GitLab?",
+        "Find my access",
+        "Paste token",
         "Continue to harness selection"
       ],
       "inputs": [
