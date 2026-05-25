@@ -34,6 +34,8 @@ jobs:
       # conditions (GitHub Actions doesn't allow `secrets.*` in step ifs).
       GITLAB_DEPLOY_TOKEN: ${{ secrets.GITLAB_DEPLOY_TOKEN }}
       GHCR_ADMIN_TOKEN: ${{ secrets.GHCR_ADMIN_TOKEN }}
+      GHCR_PUSH_TOKEN: ${{ secrets.LEGACY_GITHUB_PACKAGES_TOKEN || secrets.GITHUB_TOKEN }}
+      GHCR_PUSH_USER: ${{ vars.LEGACY_GITHUB_PACKAGES_USER || github.actor }}
     steps:
       - uses: actions/checkout@v4
 
@@ -76,9 +78,9 @@ jobs:
 
       - name: Login to GHCR
         run: |
-          echo "${{ secrets.GITHUB_TOKEN }}" \
+          echo "${GHCR_PUSH_TOKEN}" \
             | helm registry login "${GHCR_REGISTRY}" \
-              --username "${{ github.actor }}" \
+              --username "${GHCR_PUSH_USER}" \
               --password-stdin
 
       - name: Push to GHCR (public)
