@@ -33,7 +33,6 @@ jobs:
       # Exposing secrets via env lets us reference them in step `if:`
       # conditions (GitHub Actions doesn't allow `secrets.*` in step ifs).
       GITLAB_DEPLOY_TOKEN: ${{ secrets.GITLAB_DEPLOY_TOKEN }}
-      GHCR_ADMIN_TOKEN: ${{ secrets.GHCR_ADMIN_TOKEN }}
       GHCR_PUSH_TOKEN: ${{ secrets.LEGACY_GITHUB_PACKAGES_TOKEN || secrets.GITHUB_TOKEN }}
       GHCR_PUSH_USER: ${{ vars.LEGACY_GITHUB_PACKAGES_USER || github.actor }}
     steps:
@@ -123,23 +122,26 @@ jobs:
             helm push "$pkg" "${repo}"
           done
 
-      - name: Make GHCR chart packages public
-        if: ${{ env.GHCR_ADMIN_TOKEN != '' }}
+      - name: Verify GHCR chart packages are public
         env:
-          GH_TOKEN: ${{ env.GHCR_ADMIN_TOKEN }}
+          GHCR_NAMESPACE_RESOLVED: ${{ steps.ghcr.outputs.namespace }}
         run: |
           set -euo pipefail
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "${tmp}"' EXIT
+          export HOME="${tmp}"
+          export HELM_REGISTRY_CONFIG="${tmp}/registry.json"
+          export HELM_REPOSITORY_CONFIG="${tmp}/repositories.yaml"
+          export HELM_REPOSITORY_CACHE="${tmp}/cache"
+          repo="oci://${GHCR_REGISTRY}/${GHCR_NAMESPACE_RESOLVED}/helm-charts"
           for pkg in dist/*.tgz; do
             chart_name="$(helm show chart "$pkg" | awk '/^name:/ {print $2; exit}')"
-            gh api \
-              -X PATCH \
-              -H "Accept: application/vnd.github+json" \
-              "/orgs/${GITHUB_REPOSITORY_OWNER}/packages/container/helm-charts%2F${chart_name}/visibility" \
-              -f visibility=public
+            chart_version="$(helm show chart "$pkg" | awk '/^version:/ {print $2; exit}')"
+            echo "Verifying anonymous Helm pull: ${repo}/${chart_name}:${chart_version}"
+            helm show chart "${repo}/${chart_name}" --version "${chart_version}" >/dev/null
           done
 
-      # NOTE: GHCR package visibility cannot be changed by the default
-      # GITHUB_TOKEN (requires admin:packages scope on an org-owned package).
-      # Flip once per chart via
-      #   https://github.com/orgs/5DLabsInc/packages/container/helm-charts%2F<chart>/settings
-      # or set GHCR_ADMIN_TOKEN to a PAT with admin:packages so the workflow can flip it.
+      # NOTE: GitHub's documented package APIs do not expose a reliable
+      # visibility mutation for container packages. Existing CTO chart packages
+      # must be public for zero-auth desktop bootstrap; this workflow verifies
+      # that contract with a clean Helm registry config.
