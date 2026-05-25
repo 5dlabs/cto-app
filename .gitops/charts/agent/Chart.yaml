@@ -2,7 +2,9 @@ apiVersion: v2
 name: agent
 description: Agent gateway deployment with OpenClaw and Hermes harness modes
 type: application
-version: 0.1.15
+sources:
+  - https://github.com/5DLabsInc/cto-app
+version: 0.1.16
 appVersion: "1.0.0"
 maintainers:
   - name: Jonathon Fritz

@@ -2,7 +2,9 @@ apiVersion: v2
 name: observability
 description: Optional local Loki, Prometheus, Grafana, and Promtail stack for CTO Desktop
 type: application
-version: 0.1.0
+sources:
+  - https://github.com/5DLabsInc/cto-app
+version: 0.1.1
 appVersion: "local"
 keywords:
   - observability

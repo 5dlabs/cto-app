@@ -19,12 +19,12 @@ spec:
   project: default
 
   source:
-    repoURL: ghcr.io/5dlabs/helm-charts
+    repoURL: ghcr.io/5dlabsinc/helm-charts
     chart: agent
     # Keep this pinned to a chart version that is actually published to GHCR.
     # Clean desktop installs cannot reconcile against unpublished local chart
     # source versions.
-    targetRevision: 0.1.15
+    targetRevision: 0.1.16
     helm:
       releaseName: morgan
       valueFiles:

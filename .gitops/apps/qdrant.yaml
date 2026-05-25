@@ -20,9 +20,9 @@ spec:
   project: default
 
   source:
-    repoURL: ghcr.io/5dlabs/helm-charts
+    repoURL: ghcr.io/5dlabsinc/helm-charts
     chart: qdrant
-    targetRevision: 0.1.3
+    targetRevision: 0.1.4
     helm:
       releaseName: qdrant
       valuesObject:

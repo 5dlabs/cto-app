@@ -2,7 +2,9 @@ apiVersion: v2
 name: qdrant
 description: Lightweight local Qdrant vector database for CTO Desktop and Morgan mem0
 type: application
-version: 0.1.3
+sources:
+  - https://github.com/5DLabsInc/cto-app
+version: 0.1.4
 appVersion: "v1.17.1"
 keywords:
   - qdrant

@@ -134,11 +134,13 @@ jobs:
           export HELM_REPOSITORY_CONFIG="${tmp}/repositories.yaml"
           export HELM_REPOSITORY_CACHE="${tmp}/cache"
           repo="oci://${GHCR_REGISTRY}/${GHCR_NAMESPACE_RESOLVED}/helm-charts"
+          expected_source="https://github.com/${GITHUB_REPOSITORY}"
           for pkg in dist/*.tgz; do
             chart_name="$(helm show chart "$pkg" | awk '/^name:/ {print $2; exit}')"
             chart_version="$(helm show chart "$pkg" | awk '/^version:/ {print $2; exit}')"
             echo "Verifying anonymous Helm pull: ${repo}/${chart_name}:${chart_version}"
-            helm show chart "${repo}/${chart_name}" --version "${chart_version}" >/dev/null
+            chart_metadata="$(helm show chart "${repo}/${chart_name}" --version "${chart_version}")"
+            grep -F "${expected_source}" <<<"${chart_metadata}" >/dev/null
           done
 
       # NOTE: GitHub's documented package APIs do not expose a reliable

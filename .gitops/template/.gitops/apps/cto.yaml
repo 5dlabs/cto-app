@@ -20,12 +20,12 @@ spec:
 
   source:
     # Public OCI chart published by .github/workflows/publish-chart.yml
-    repoURL: ghcr.io/5dlabs/helm-charts
+    repoURL: ghcr.io/5dlabsinc/helm-charts
     chart: cto
     # Keep this pinned to a chart version that is actually published to GHCR.
     # Clean desktop installs cannot reconcile against unpublished local chart
     # source versions.
-    targetRevision: 0.1.12
+    targetRevision: 0.1.13
     helm:
       releaseName: cto
       # Values are supplied by the desktop bootstrap at install time via a

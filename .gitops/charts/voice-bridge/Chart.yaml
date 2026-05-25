@@ -2,7 +2,9 @@ apiVersion: v2
 name: voice-bridge
 description: Local Morgan voice WebSocket bridge for CTO Desktop
 type: application
-version: 0.1.3
+sources:
+  - https://github.com/5DLabsInc/cto-app
+version: 0.1.4
 appVersion: "desktop-python-3.11-v0.1.0"
 keywords:
   - morgan
