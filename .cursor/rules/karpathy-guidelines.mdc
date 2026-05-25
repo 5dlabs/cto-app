@@ -1,5 +1,5 @@
 ---
-description: Andrej Karpathy behavioral guidelines (4 principles: Think Before Coding, Simplicity First, Surgical Changes, Goal-Driven Execution). Always apply alongside META v2.0 Principal Architect rules for all coding, reviewing, and refactoring in this workspace. Reduces overcomplication, ensures surgical changes, surfaces assumptions, and drives verifiable success criteria.
+description: "Andrej Karpathy behavioral guidelines (4 principles: Think Before Coding, Simplicity First, Surgical Changes, Goal-Driven Execution). Always apply alongside META v2.0 Principal Architect rules for all coding, reviewing, and refactoring in this workspace. Reduces overcomplication, ensures surgical changes, surfaces assumptions, and drives verifiable success criteria."
 alwaysApply: true
 ---
 

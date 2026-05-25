@@ -1,6 +1,6 @@
 ---
 name: karpathy-guidelines
-description: Andrej Karpathy-inspired behavioral guidelines (4 principles) to reduce common LLM coding mistakes: Think Before Coding, Simplicity First, Surgical Changes, Goal-Driven Execution. Complements META v2.0 Principal Architect for disciplined, minimal, verifiable work. Enforced for all coding and delegation tasks.
+description: "Andrej Karpathy-inspired behavioral guidelines (4 principles) to reduce common LLM coding mistakes: Think Before Coding, Simplicity First, Surgical Changes, Goal-Driven Execution. Complements META v2.0 Principal Architect for disciplined, minimal, verifiable work. Enforced for all coding and delegation tasks."
 model: sonnet
 risk_level: MEDIUM
 ---
