@@ -16,7 +16,7 @@ export type ScmConnectionStatus =
 export type RepositorySelection = "all" | "selected";
 
 export type SecretSourceProvider = "onepassword" | "bitwarden";
-export type SecretSourceQuickConnectProvider = "onepassword";
+export type SecretSourceQuickConnectProvider = "onepassword" | "bitwarden";
 
 export type OriginEngine = "standard" | "gitlab-compatible";
 export type OriginTransferMode = "mirror" | "migrate";

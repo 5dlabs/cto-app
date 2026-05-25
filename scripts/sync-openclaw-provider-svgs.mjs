@@ -148,7 +148,7 @@ function readSimpleIcon(slug) {
 async function fetchSvg(url) {
   const r = await fetch(url, {
     headers: {
-      "User-Agent": "cto-app-icon-sync/1.0 (+https://github.com/5dlabs/cto-app)",
+      "User-Agent": "cto-app-icon-sync/1.0 (+https://github.com/5DLabsInc/cto)",
     },
   });
   if (!r.ok) throw new Error(`${r.status} ${url}`);

@@ -4,7 +4,7 @@
   "releaseSource": {
     "owner": "5dlabs",
     "repo": "cto-app",
-    "repository": "5dlabs/cto-app",
+    "repository": "5DLabsInc/cto",
     "artifactName": "cto-gitops-template.tar.gz",
     "channels": {
       "stable": {
@@ -20,7 +20,7 @@
     }
   },
   "source": {
-    "repository": "5dlabs/cto-app",
+    "repository": "5DLabsInc/cto",
     "path": ".gitops/template",
     "description": "Client-owned CTO Desktop GitOps repository seed template."
   },

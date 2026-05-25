@@ -1,24 +1,30 @@
 name: publish-chart
 
-# Publishes the stripped CTO Helm chart to two OCI registries:
-#   - ghcr.io/5dlabs           (public; primary for desktop bootstrap)
+# Publishes the CTO Helm charts to two OCI registries:
+#   - ghcr.io/<lowercase-owner>   (public; primary for desktop bootstrap)
 #   - registry.gitlab.com/... OR self-hosted gitlab.5dlabs.ai (mirror)
 #
-# Triggers only on explicit chart-v* tags or manual dispatch so that merging
-# chart source to main never auto-publishes. Cut a tag to release.
+# Runs when chart source lands on main, on explicit chart-v* tags, or by manual
+# dispatch. Existing OCI chart versions are immutable and skipped.
 
 on:
   push:
+    branches: [main]
     tags: ["chart-v*"]
+    paths:
+      - ".gitops/charts/**"
+      - ".github/workflows/publish-chart.yml"
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   packages: write
 
 env:
   GHCR_REGISTRY: ghcr.io
+  GHCR_NAMESPACE: ${{ vars.GHCR_NAMESPACE || github.repository_owner }}
   GITLAB_REGISTRY: ${{ vars.GITLAB_REGISTRY || 'registry.gitlab.com' }}
+  GITLAB_HELM_PATH: ${{ vars.GITLAB_HELM_PATH }}
 
 jobs:
   publish:
@@ -27,8 +33,23 @@ jobs:
       # Exposing secrets via env lets us reference them in step `if:`
       # conditions (GitHub Actions doesn't allow `secrets.*` in step ifs).
       GITLAB_DEPLOY_TOKEN: ${{ secrets.GITLAB_DEPLOY_TOKEN }}
+      GHCR_ADMIN_TOKEN: ${{ secrets.GHCR_ADMIN_TOKEN }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Resolve GHCR namespace
+        id: ghcr
+        shell: bash
+        run: |
+          set -euo pipefail
+          namespace="${GHCR_NAMESPACE:-${GITHUB_REPOSITORY_OWNER}}"
+          namespace="$(printf '%s' "${namespace}" | tr '[:upper:]' '[:lower:]')"
+          if ! [[ "${namespace}" =~ ^[a-z0-9][a-z0-9._-]*$ ]]; then
+            echo "Invalid GHCR namespace: ${namespace}" >&2
+            exit 1
+          fi
+          echo "namespace=${namespace}" >> "${GITHUB_OUTPUT}"
+          echo "Using GHCR namespace: ${namespace}"
 
       - name: Install Helm
         uses: azure/setup-helm@v4
@@ -53,6 +74,13 @@ jobs:
           done
           ls -la dist/
 
+      - name: Upload packaged charts
+        uses: actions/upload-artifact@v4
+        with:
+          name: helm-charts-${{ github.run_number }}
+          path: dist/*.tgz
+          if-no-files-found: error
+
       - name: Login to GHCR
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" \
@@ -61,14 +89,24 @@ jobs:
               --password-stdin
 
       - name: Push to GHCR (public)
+        env:
+          GHCR_NAMESPACE_RESOLVED: ${{ steps.ghcr.outputs.namespace }}
         run: |
+          set -euo pipefail
+          repo="oci://${GHCR_REGISTRY}/${GHCR_NAMESPACE_RESOLVED}/helm-charts"
           for pkg in dist/*.tgz; do
-            echo "Pushing $pkg -> oci://${GHCR_REGISTRY}/${{ github.repository_owner }}/helm-charts"
-            helm push "$pkg" "oci://${GHCR_REGISTRY}/${{ github.repository_owner }}/helm-charts"
+            chart_name="$(helm show chart "$pkg" | awk '/^name:/ {print $2; exit}')"
+            chart_version="$(helm show chart "$pkg" | awk '/^version:/ {print $2; exit}')"
+            if helm show chart "${repo}/${chart_name}" --version "${chart_version}" >/dev/null 2>&1; then
+              echo "Already published: ${repo}/${chart_name}:${chart_version}; skipping immutable OCI version."
+              continue
+            fi
+            echo "Pushing $pkg -> ${repo}"
+            helm push "$pkg" "${repo}"
           done
 
       - name: Login to GitLab registry
-        if: ${{ vars.GITLAB_REGISTRY != '' && env.GITLAB_DEPLOY_TOKEN != '' }}
+        if: ${{ env.GITLAB_HELM_PATH != '' && env.GITLAB_DEPLOY_TOKEN != '' }}
         run: |
           echo "${GITLAB_DEPLOY_TOKEN}" \
             | helm registry login "${GITLAB_REGISTRY}" \
@@ -76,14 +114,50 @@ jobs:
               --password-stdin
 
       - name: Push to GitLab (mirror)
-        if: ${{ vars.GITLAB_REGISTRY != '' && env.GITLAB_DEPLOY_TOKEN != '' }}
+        if: ${{ env.GITLAB_HELM_PATH != '' && env.GITLAB_DEPLOY_TOKEN != '' }}
         run: |
+          set -euo pipefail
           for pkg in dist/*.tgz; do
-            helm push "$pkg" "oci://${GITLAB_REGISTRY}/${{ vars.GITLAB_HELM_PATH }}"
+            repo="oci://${GITLAB_REGISTRY}/${GITLAB_HELM_PATH}"
+            chart_name="$(helm show chart "$pkg" | awk '/^name:/ {print $2; exit}')"
+            chart_version="$(helm show chart "$pkg" | awk '/^version:/ {print $2; exit}')"
+            if helm show chart "${repo}/${chart_name}" --version "${chart_version}" >/dev/null 2>&1; then
+              echo "Already published: ${repo}/${chart_name}:${chart_version}; skipping immutable OCI version."
+              continue
+            fi
+            helm push "$pkg" "${repo}"
           done
+
+      - name: Make GHCR chart packages public
+        if: ${{ env.GHCR_ADMIN_TOKEN != '' }}
+        env:
+          GH_TOKEN: ${{ env.GHCR_ADMIN_TOKEN }}
+        run: |
+          set -euo pipefail
+          for pkg in dist/*.tgz; do
+            chart_name="$(helm show chart "$pkg" | awk '/^name:/ {print $2; exit}')"
+            gh api \
+              -X PATCH \
+              -H "Accept: application/vnd.github+json" \
+              "/orgs/${GITHUB_REPOSITORY_OWNER}/packages/container/helm-charts%2F${chart_name}/visibility" \
+              -f visibility=public
+          done
+
+      - name: Publish chart release assets
+        if: startsWith(github.ref, 'refs/tags/chart-v')
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: CTO Helm Charts ${{ github.ref_name }}
+          body: |
+            Packaged CTO Desktop Helm charts published to:
+
+            `oci://${{ env.GHCR_REGISTRY }}/${{ steps.ghcr.outputs.namespace }}/helm-charts`
+          make_latest: "false"
+          files: dist/*.tgz
 
       # NOTE: GHCR package visibility cannot be changed by the default
       # GITHUB_TOKEN (requires admin:packages scope on an org-owned package).
       # Flip once per chart via
-      #   https://github.com/orgs/5dlabs/packages/container/helm-charts%2F<chart>/settings
-      # or via a PAT with admin:packages.
+      #   https://github.com/orgs/5DLabsInc/packages/container/helm-charts%2F<chart>/settings
+      # or set GHCR_ADMIN_TOKEN to a PAT with admin:packages so the workflow can flip it.

@@ -39,7 +39,7 @@ replicaCount: 1
 deploymentMode: statefulset
 
 image:
-  repository: "ghcr.io/5dlabs/agents"
+  repository: "ghcr.io/5dlabsinc/agents"
   tag: "latest"
   pullPolicy: IfNotPresent
 
@@ -368,6 +368,15 @@ tools:
       pi:
         command: "pi-acp"
 
+  # Principal Engineer Charters (META v2.0 + Karpathy) — enforced for all 12+ ACP agents above
+  # and all cliBackends. OpenClaw orchestrator prefixes every child invocation and verifies
+  # compliance (see skills/openclaw/meta-principal-architect.md + karpathy-surgical-guidelines.md
+  # mounted into the pod, plus root CLAUDE.md and workspace .agents/.cursor/ files).
+  principalEngineer:
+    enabled: true
+    prefixExcerpt: |
+      Operate under the full META v2.0 Principal Architect (R1–R11 + Zero-Pause continuous execution, (executed/inspected/assumed) tags, executable success criteria, one pushback, reversibility, ≥7 parallel threads, humanpending.md only for true gates) **and** Karpathy surgical guidelines (Think Before Coding, Simplicity First, Surgical Changes, Goal-Driven Execution). Full charters in workspace CLAUDE.md, .agents/skills/, .cursor/rules/. Tag every claim. Define verifiable criteria before coding. Ship only minimal, request-traceable, surgical changes. [ZP rules if active in task].
+
 # Existing CTO tools service from the cto chart. The agent chart normalizes this
 # /mcp URL for CLI stdio bridges, while OpenClaw can use it directly.
 toolServer:
@@ -385,6 +394,11 @@ codexPlugin:
   sandbox: "workspace-write"
   authSecretKey: "CODEX_AUTH_SUB1"
   authSecretKeySub2: "CODEX_AUTH_SUB2"
+  # Codex (and codex-acp) always receives the platform principalEngineer charters
+  # (META v2.0 + Karpathy surgical) via ACP prefix from the orchestrator (see
+  # tools.principalEngineer and skills/codex/meta-karpathy.md). Full enforcement
+  # (tags, executable criteria, surgical changes, Zero-Pause when triggered)
+  # is identical to the other 7 CLIs. Orchestrator post-audit is mandatory.
 
 cloudProviders:
   bedrock:

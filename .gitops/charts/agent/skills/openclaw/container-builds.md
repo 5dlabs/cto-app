@@ -155,7 +155,7 @@ kubectl exec -n "$POD_NAMESPACE" "$(hostname)" -c kaniko -- \
 
 ## Registry Credentials
 
-The kaniko sidecar has GHCR credentials pre-mounted at `/kaniko/.docker/config.json` (from `ghcr-secret`). Pushes to `ghcr.io/5dlabs/*` work without additional setup.
+The kaniko sidecar has GHCR credentials pre-mounted at `/kaniko/.docker/config.json` (from `ghcr-secret`). Pushes to `ghcr.io/5dlabsinc/*` work without additional setup.
 
 ## Important
 
