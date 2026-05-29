@@ -1,8 +1,8 @@
 name: Sync outbound mirrors
 
-# Temporary source-of-truth fan-out:
-#   5DLabsInc/<repo> -> gitlab.5dlabs.ai/5dlabs/<repo>
-#   5DLabsInc/<repo> -> github.com/5dlabs/<repo>
+# Temporary source-of-truth fan-out with explicit repo mapping:
+#   5DLabsInc/cto     -> gitlab.5dlabs.ai/5dlabs/cto     + github.com/5dlabs/cto
+#   5DLabsInc/cto-app -> gitlab.5dlabs.ai/5dlabs/cto-app + github.com/5dlabs/cto-app
 #
 # The repository-owner guard intentionally makes this workflow inert when the
 # file is mirrored back into the legacy 5dlabs org.
@@ -52,7 +52,19 @@ jobs:
             exit 1
           fi
 
-          repo_name="${GITHUB_REPOSITORY##*/}"
+          case "${GITHUB_REPOSITORY}" in
+            5DLabsInc/cto)
+              repo_name="cto"
+              ;;
+            5DLabsInc/cto-app)
+              repo_name="cto-app"
+              ;;
+            *)
+              echo "::error::No outbound mirror mapping for ${GITHUB_REPOSITORY}"
+              exit 1
+              ;;
+          esac
+
           source_remote="https://x-access-token:${SOURCE_GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           legacy_remote="https://x-access-token:${LEGACY_GITHUB_PUSH_TOKEN}@github.com/${LEGACY_GITHUB_NAMESPACE}/${repo_name}.git"
 
@@ -73,60 +85,26 @@ jobs:
           git config http.postBuffer 157286400
           git remote add gitlab "$gitlab_remote"
           git remote add legacy "$legacy_remote"
-          refs_dir="$PWD/.sync-refs"
-          mkdir -p "$refs_dir"
-          source_refs="$refs_dir/source-refs"
 
-          git for-each-ref --format='%(refname)' refs/heads refs/tags | sort > "$source_refs"
-
-          push_existing_refs() {
+          mirror_heads_and_tags() {
             local remote="$1"
-            local force_flag="--force"
-            echo "::group::push existing refs to ${remote}"
-            while IFS= read -r ref; do
-              echo "-> ${remote} ${ref}"
-              if [[ "$ref" == "refs/heads/main" ]]; then
-                force_flag=""
-              else
-                force_flag="--force"
+            local max_attempts=6
+            echo "::group::mirror heads and tags to ${remote}"
+            for ((attempt = 1; attempt <= max_attempts; attempt++)); do
+              if git push --prune --force "$remote" 'refs/heads/*:refs/heads/*' 'refs/tags/*:refs/tags/*'; then
+                echo "::endgroup::"
+                return 0
               fi
-              git push $force_flag "$remote" "$ref:$ref"
-            done < "$source_refs"
-            echo "::endgroup::"
-          }
-
-          prune_deleted_refs() {
-            local remote="$1"
-            local refs_file="$refs_dir/${remote}-refs"
-            echo "::group::prune deleted refs from ${remote}"
-            git ls-remote --heads --tags "$remote" \
-              | awk '$2 !~ /\^\{\}$/ { print $2 }' \
-              | sort > "$refs_file"
-            comm -13 "$source_refs" "$refs_file" | while IFS= read -r ref; do
-              case "$ref" in
-                refs/heads/*|refs/tags/*)
-                  echo "delete ${remote} ${ref}"
-                  git push "$remote" ":$ref" || echo "::warning::failed to delete ${remote} ${ref}"
-                  ;;
-              esac
+              echo "::warning::mirror push to ${remote} failed on attempt ${attempt}"
+              if [[ "$attempt" -lt "$max_attempts" ]]; then
+                sleep $((attempt * 10))
+              fi
             done
             echo "::endgroup::"
+            return 1
           }
 
-          push_existing_refs gitlab &
-          gitlab_push_pid=$!
-          push_existing_refs legacy &
-          legacy_push_pid=$!
+          mirror_heads_and_tags gitlab
+          mirror_heads_and_tags legacy
 
-          wait "$gitlab_push_pid"
-          wait "$legacy_push_pid"
-
-          prune_deleted_refs gitlab &
-          gitlab_prune_pid=$!
-          prune_deleted_refs legacy &
-          legacy_prune_pid=$!
-
-          wait "$gitlab_prune_pid"
-          wait "$legacy_prune_pid"
-
-          echo "Outbound sync complete for ${GITHUB_REPOSITORY}"
+          echo "Outbound sync complete for ${GITHUB_REPOSITORY} -> ${LEGACY_GITHUB_NAMESPACE}/${repo_name}"
