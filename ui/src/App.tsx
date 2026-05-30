@@ -113,7 +113,7 @@ const TITLES: Record<NavKey, { title: string; sub: string }> = {
   },
   agents: {
     title: "Agents",
-    sub: "Roster — harness, CLI, and models per agent · manifests optionally on-chain",
+    sub: "Roster — harness, agent surface, and models per agent · manifests optionally on-chain",
   },
   skills: {
     title: "Skills",

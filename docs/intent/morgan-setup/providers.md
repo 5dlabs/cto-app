@@ -2,11 +2,11 @@
 
 ## Purpose
 
-Choose model/provider integrations compatible with the selected CLI lane.
+Choose model/provider integrations compatible with the selected agent surfaces in the Dynamic workflows lane.
 
 ## Required visible language
 
-- GitHub Copilot
+- Anthropic
 - provider
 
 ## Inputs and defaults
@@ -15,7 +15,7 @@ Choose model/provider integrations compatible with the selected CLI lane.
 
 ## Required actions
 
-- Select GitHub Copilot
+- Select Anthropic or another compatible provider
 - Continue to model selection or provider configuration
 
 ## Blocking behavior

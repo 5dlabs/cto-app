@@ -81,7 +81,9 @@ function matches(haystack, needle) {
 }
 
 function containsSecretMaterial(value) {
-  return /github_pat_[A-Za-z0-9_]{12,}|gh[pousr]_[A-Za-z0-9_]+|\b[A-Z0-9]{4}-[A-Z0-9]{4}\b|dummy-e2e-token/i.test(value);
+  return /github_pat_[A-Za-z0-9_]{12,}|gh[pousr]_[A-Za-z0-9_]+|\b[A-Z0-9]{4}-[A-Z0-9]{4}\b|dummy-e2e-token/i.test(
+    String(value).replace(/tool-keys/gi, ""),
+  );
 }
 
 function escapeRegExp(value) {

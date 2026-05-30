@@ -1,11 +1,49 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { delimiter, join } from "node:path";
 import { describe, it } from "node:test";
 
 const bootstrapRs = readFileSync(new URL("../../src-tauri/src/bootstrap.rs", import.meta.url), "utf8");
 const libRs = readFileSync(new URL("../../src-tauri/src/lib.rs", import.meta.url), "utf8");
 const tauriApi = readFileSync(new URL("../../ui/src/api/tauri.ts", import.meta.url), "utf8");
 const bridgeSource = readFileSync(new URL("../../src-tauri/src/secret_source_sdk_bridge.mjs", import.meta.url), "utf8");
+
+function bridgeFunctionBody(name) {
+  const start = bridgeSource.indexOf(`async function ${name}`);
+  assert.notEqual(start, -1, `${name} should exist in SDK bridge`);
+  const next = bridgeSource.indexOf("\nasync function ", start + 1);
+  return bridgeSource.slice(start, next === -1 ? bridgeSource.length : next);
+}
+
+function runBridgeWithCliTrap(request, env = {}) {
+  const trapDir = mkdtempSync(join(tmpdir(), "cto-sdk-cli-trap-"));
+  const marker = join(trapDir, "cli-called.txt");
+  try {
+    for (const name of ["op", "bw"]) {
+      const script = `#!/bin/sh\necho ${name} >> ${JSON.stringify(marker)}\necho "CLI trap executed: ${name}" >&2\nexit 92\n`;
+      const path = join(trapDir, name);
+      writeFileSync(path, script, { mode: 0o755 });
+    }
+    const result = spawnSync(process.execPath, ["src-tauri/src/secret_source_sdk_bridge.mjs"], {
+      cwd: new URL("../..", import.meta.url),
+      input: JSON.stringify(request),
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        ...env,
+        PATH: `${trapDir}${delimiter}${process.env.PATH ?? ""}`,
+      },
+    });
+    const markerText = result.status === 92 || result.stderr.includes("CLI trap executed")
+      ? readFileSync(marker, "utf8")
+      : "";
+    return { result, markerText };
+  } finally {
+    rmSync(trapDir, { recursive: true, force: true });
+  }
+}
 
 describe("secret-source Tauri API contract", () => {
   it("exposes provider-neutral detect, preview, and apply commands", () => {
@@ -70,6 +108,73 @@ describe("secret-source Tauri API contract", () => {
     assert.doesNotMatch(probeSource, /master password|password field|password login/i);
   });
 
+  it("aligns 1Password SDK bridge calls with installed package declarations and never shells out to op", () => {
+    const sdkTypes = readFileSync(new URL("../../node_modules/@1password/sdk/dist/sdk.d.ts", import.meta.url), "utf8");
+    const clientTypes = readFileSync(new URL("../../node_modules/@1password/sdk/dist/client.d.ts", import.meta.url), "utf8");
+    const itemsTypes = readFileSync(new URL("../../node_modules/@1password/sdk/dist/items.d.ts", import.meta.url), "utf8");
+    const vaultsTypes = readFileSync(new URL("../../node_modules/@1password/sdk/dist/vaults.d.ts", import.meta.url), "utf8");
+    const onePasswordSource = [
+      bridgeFunctionBody("onePasswordClient"),
+      bridgeFunctionBody("probeOnePasswordDesktopAuth"),
+      bridgeFunctionBody("probeOnePasswordServiceAccount"),
+      bridgeFunctionBody("previewOnePassword"),
+      bridgeFunctionBody("applyOnePassword"),
+    ].join("\n");
+
+    assert.match(sdkTypes, /createClient/);
+    assert.match(sdkTypes, /DesktopAuth/);
+    assert.match(clientTypes, /class Client/);
+    assert.match(vaultsTypes, /list\(params\?: VaultListParams\): Promise<VaultOverview\[\]>/);
+    assert.match(itemsTypes, /list\(vaultId: string, \.\.\.filters: ItemListFilter\[\]\): Promise<ItemOverview\[\]>/);
+    assert.match(itemsTypes, /get\(vaultId: string, itemId: string\)/);
+    assert.match(onePasswordSource, /import\("@1password\/sdk"\)/);
+    assert.match(onePasswordSource, /new sdk\.DesktopAuth\(accountName\)|new sdk\.DesktopAuth\(account\)/);
+    assert.match(onePasswordSource, /sdk\.createClient\(/);
+    assert.match(onePasswordSource, /client\.vaults\.list\(\)/);
+    assert.match(onePasswordSource, /client\.items\.list\(vault\.id\)/);
+    assert.match(onePasswordSource, /client\.items\.get\(vaultId, itemId\)/);
+    assert.doesNotMatch(onePasswordSource, /tool_command|run_tool|spawnSync|execFile/);
+  });
+
+  it("aligns Bitwarden SDK bridge calls with installed package declarations and never shells out to bw", () => {
+    const bitwardenTypes = readFileSync(new URL("../../node_modules/@bitwarden/sdk-napi/dist/bitwarden_client/index.d.ts", import.meta.url), "utf8");
+    const schemas = readFileSync(new URL("../../node_modules/@bitwarden/sdk-napi/dist/bitwarden_client/schemas.d.ts", import.meta.url), "utf8");
+    const bitwardenSource = [
+      bridgeFunctionBody("bitwardenClient"),
+      bridgeFunctionBody("probeBitwardenSecretsManager"),
+      bridgeFunctionBody("previewBitwarden"),
+      bridgeFunctionBody("applyBitwarden"),
+    ].join("\n");
+
+    assert.match(bitwardenTypes, /class BitwardenClient/);
+    assert.match(bitwardenTypes, /loginAccessToken\(accessToken: string, stateFile\?: string\)/);
+    assert.match(bitwardenTypes, /list\(organizationId: string\): Promise<SecretIdentifiersResponse>/);
+    assert.match(bitwardenTypes, /get\(id: string\): Promise<SecretResponse>/);
+    assert.match(schemas, /export interface SecretIdentifiersResponse[\s\S]*data: SecretIdentifierResponse\[\]/);
+    assert.match(schemas, /export interface SecretResponse[\s\S]*value: string/);
+    assert.match(bitwardenSource, /import\("@bitwarden\/sdk-napi"\)/);
+    assert.match(bitwardenSource, /new sdk\.BitwardenClient\(\)/);
+    assert.match(bitwardenSource, /client\.auth\(\)\.loginAccessToken\(accessToken, stateFile \|\| undefined\)/);
+    assert.match(bitwardenSource, /client\.secrets\(\)\.list\(organizationId\)/);
+    assert.match(bitwardenSource, /client\.secrets\(\)\.get\(match\[2\]\)/);
+    assert.doesNotMatch(bitwardenSource, /tool_command|run_tool|spawnSync|execFile|\bbw\b/);
+  });
+
+  it("executes SDK bridge fixture preview with op/bw PATH traps without invoking provider CLIs", () => {
+    const { result, markerText } = runBridgeWithCliTrap({
+      provider: "fixture",
+      operation: "preview",
+      targets: [{ targetSecretKey: "ANTHROPIC_API_KEY", purpose: "provider.anthropic.apiKey" }],
+      fixtures: [{ key: "ANTHROPIC_API_KEY", id: "anthropic" }],
+    });
+
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.equal(markerText, "", "SDK bridge fixture preview should not call op or bw from PATH");
+    const output = JSON.parse(result.stdout);
+    assert.equal(output.discovery, "metadata-only");
+    assert.equal(output.matches[0].redactedValuePreview, "[REDACTED]");
+  });
+
 
 
   it("persists saved-access SDK auth metadata only and uses macOS Keychain for tokens", () => {
@@ -117,9 +222,23 @@ describe("secret-source Tauri API contract", () => {
     assert.doesNotMatch(defaultDetection, /run_tool\("bw"/);
     assert.doesNotMatch(defaultDetection, /run_tool_with_timeout\(\s*"op"/);
     assert.doesNotMatch(defaultDetection, /run_tool_with_timeout\(\s*"bw"/);
+    assert.doesNotMatch(defaultDetection, /discover_onepassword_cli_metadata\(\)/);
+    assert.match(defaultDetection, /empty_onepassword_cli_metadata\(\)/);
     assert.match(bootstrapRs, /legacy_secret_sources_detection_inner/);
     assert.match(bootstrapRs, /run_tool\("op", &\["--version"\]\)/);
     assert.match(bootstrapRs, /run_tool\("bw", &\["--version"\]\)/);
+  });
+
+  it("keeps normal saved-access detection on SDK status even when legacy CLI helpers remain compiled", () => {
+    const detection = bootstrapRs.slice(
+      bootstrapRs.indexOf("fn detect_secret_sources_inner"),
+      bootstrapRs.indexOf("fn empty_onepassword_cli_metadata"),
+    );
+    assert.match(detection, /if secret_source_legacy_cli_enabled\(\)[\s\S]*legacy_secret_sources_detection_impl\(\)/);
+    assert.match(detection, /sdk_secret_sources_detection_inner\(window\)/);
+    assert.match(detection, /cli_metadata: empty_onepassword_cli_metadata\(\)/);
+    assert.doesNotMatch(detection, /discover_onepassword_cli_metadata\(\)/);
+    assert.doesNotMatch(detection, /run_tool(?:_with_timeout)?\(\s*"(?:op|bw)"/);
   });
 
   it("targets every bootstrap credential category, not only source tokens", () => {

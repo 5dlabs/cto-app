@@ -113,12 +113,53 @@ describe("Secrets saved-access auth-state contract", () => {
     assertLacks(savedAccessConnectSheet, /master password|browser unlock is enough|desktop unlock is enough/i, "Bitwarden sheet must not imply Password Manager/browser unlock is enough");
   });
 
-  it("blocks Continue for CLI-only or no-account 1Password states until auth is ready or the user chooses manual/skip", () => {
+  it("blocks Continue for SDK auth-needed or no-account 1Password states until auth is ready or the user chooses manual/skip", () => {
     assertHas(reactSource, /canContinueFromSavedAccessAuthState|savedAccessCanContinue/i, "UI should compute an explicit saved-access Continue gate");
-    assertHas(reactSource, /cli-only|cliOnly|no-account|app-sign-in-needed/, "UI should model CLI-only/no-account as blocked states");
-    assertLacks(reactSource, /providerStatus\.available\s*\|\|\s*providerStatus\.cliAccessReady/, "CLI access alone must not mark a provider ready");
+    assertHas(reactSource, /sdk-auth-needed|no-account|app-sign-in-needed/, "UI should model SDK auth-needed/no-account as blocked states");
+    assertLacks(reactSource, /providerStatus\.available\s*\|\|\s*providerStatus\.cliAccessReady/, "metadata access alone must not mark a provider ready");
     assertHas(savedAccessModal, /disabled=\{[^}]*!(?:savedAccessCanContinue|canContinueFromSavedAccessAuthState)/s, "Continue should be disabled until auth is ready or manual/skip is explicit");
-    assertHas(savedAccessModal, /CLI[^\n"]*(?:diagnostic|prefill|metadata)[^\n"]*(?:only|not ready)|no automatic advance/i, "modal should state CLI is diagnostic/prefill only and does not auto-advance");
+    assertHas(savedAccessModal, /Only ready SDK auth, review, connected, or explicit manual\/skip can continue automatically|SDK access gate/i, "modal should state SDK auth gates default advance");
+  });
+
+  it("maps every SDK auth state to an explicit cue and never lets undefined become a Morgan media key", () => {
+    const cueMapper = sliceBetween(
+      reactSource,
+      "function savedAccessCueFromDetection(",
+      "function canContinueFromSavedAccessAuthState(",
+      "saved access cue mapper",
+    );
+    const mediaMapper = sliceBetween(
+      reactSource,
+      "function savedAccessConditionalMediaKey(",
+      "function cloudflareConditionalMediaKey(",
+      "saved access conditional media mapper",
+    );
+
+    for (const state of [
+      ["ready-service-account", "ready"],
+      ["ready-desktop-account", "ready"],
+      ["ready-secrets-manager", "ready"],
+      ["approval-needed", "approval-pending"],
+      ["choose-account", "no-account"],
+      ["app-sign-in-needed", "no-account"],
+      ["service-token-needed", "sdk-auth-needed"],
+      ["token-needed", "sdk-auth-needed"],
+      ["org-needed", "sdk-auth-needed"],
+      ["probe-failed", "needs-access"],
+    ]) {
+      assertHas(cueMapper, new RegExp(`case \"${state[0]}\"[\\s\\S]*return \"${state[1]}\"`), `${state[0]} should map to ${state[1]}`);
+    }
+
+    assertHas(cueMapper, /case "unavailable":[\s\S]*"missing-desktop"[\s\S]*"needs-access"/, "unavailable should map to a concrete onepassword cue instead of undefined");
+    assertHas(cueMapper, /default:[\s\S]*return "sdk-auth-needed"/, "unknown/missing authState should fall back to sdk-auth-needed, not undefined");
+    assertLacks(mediaMapper, /`onepassword-\$\{cue\}`/, "Morgan media key must not be built from an unchecked cue template");
+    assertHas(mediaMapper, /case "ready":[\s\S]*return "onepassword-ready"/, "ready cue should map explicitly");
+    assertHas(mediaMapper, /case "sdk-auth-needed":[\s\S]*return "onepassword-sdk-auth-needed"/, "SDK auth-needed cue should map explicitly");
+    assertHas(mediaMapper, /case "missing-desktop":[\s\S]*return "onepassword-missing-desktop"/, "missing desktop cue should map explicitly");
+    assertHas(mediaMapper, /case "needs-access":[\s\S]*return "onepassword-needs-access"/, "needs-access cue should map explicitly");
+    assertHas(mediaMapper, /case "no-account":[\s\S]*return "onepassword-no-account"/, "no-account cue should map explicitly");
+    assertHas(mediaMapper, /default:[\s\S]*return "onepassword-sdk-auth-needed"/, "unknown onepassword cue should fall back to a real media asset");
+    assertLacks(reactSource, /onepassword-undefined/, "source must never reference or tolerate onepassword-undefined media");
   });
 
   it("probes Bitwarden Secrets Manager before saving so missing or failed token/org checks keep the connect sheet open", () => {

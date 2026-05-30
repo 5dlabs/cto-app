@@ -5,14 +5,13 @@
     {
       "id": "saved-access",
       "checkpoint": "02-saved-access",
-      "heading": "Saved access",
+      "heading": "Secrets",
       "docs": "docs/intent/morgan-setup/saved-access.md",
       "requiredText": [],
       "requiredControls": [
         "Use 1Password for secrets",
         "Use Bitwarden for secrets",
-        "Continue without saved access",
-        "Continue to Cloudflare"
+        "Continue without a secret manager"
       ],
       "inputs": [
         "savedAccessPrepMode",
@@ -53,7 +52,7 @@
             "approvedRead": "client.items.get(itemId)"
           },
           "safetyNotes": [
-            "Do not require the op CLI by default; use SDK auth or official 1Password SDK guidance.",
+            "Use SDK auth or official 1Password SDK guidance by default.",
             "Do not read secret values before approval; preview metadata and redacted target matches only.",
             "Do not display, log, or persist item fields; values may exist only in memory during approved apply."
           ]
@@ -68,7 +67,7 @@
           "rawSecretAccess": false,
           "safetyNotes": [
             "Do not ask for a Bitwarden master password; use Secrets Manager SDK auth only.",
-            "Do not require the bw CLI for default setup.",
+            "Use Secrets Manager SDK auth only.",
             "Do not read secret values before approval; preview metadata and redacted target matches only.",
             "Do not display, log, or persist secret fields; values may exist only in memory during approved apply."
           ],
@@ -169,7 +168,7 @@
       "conditionalMedia": [
         "onepassword-ready",
         "onepassword-missing-desktop",
-        "onepassword-missing-cli",
+        "onepassword-sdk-auth-needed",
         "onepassword-desktop-integration",
         "onepassword-needs-access",
         "onepassword-no-account",
@@ -328,7 +327,7 @@
       ],
       "requiredControls": [
         "Hermes",
-        "Continue to ACP CLIs"
+        "Continue to dynamic workflows"
       ],
       "inputs": [
         "harness"
@@ -342,25 +341,40 @@
       "mediaFolder": "05_harness"
     },
     {
-      "id": "acp-clis",
-      "checkpoint": "20-acp-clis",
-      "heading": "ACP CLIs",
-      "docs": "docs/intent/morgan-setup/acp-clis.md",
+      "id": "dynamic-workflows",
+      "checkpoint": "20-dynamic-workflows",
+      "heading": "Dynamic workflows",
+      "docs": "docs/intent/morgan-setup/dynamic-workflows.md",
       "requiredText": [
-        "Copilot"
+        "Dynamic workflows",
+        "Harness",
+        "Agent surfaces",
+        "Providers",
+        "Models",
+        "Routing",
+        "Auth"
       ],
       "requiredControls": [
         "Copilot",
         "Continue to providers"
       ],
       "inputs": [
-        "cli"
+        "agentSurfaces"
       ],
       "payloadPaths": [
         "clis"
       ],
       "rules": [
-        "selected-cli-visible"
+        "selected-agent-surface-visible",
+        "order-of-operation-visible"
+      ],
+      "orderOfOperation": [
+        "Harness",
+        "Agent surfaces",
+        "Providers",
+        "Models",
+        "Routing",
+        "Auth"
       ],
       "mediaFolder": "06_clis"
     },
@@ -370,10 +384,10 @@
       "heading": "Providers",
       "docs": "docs/intent/morgan-setup/providers.md",
       "requiredText": [
-        "GitHub Copilot"
+        "Anthropic"
       ],
       "requiredControls": [
-        "GitHub Copilot",
+        "Anthropic",
         "Configure provider authentication"
       ],
       "inputs": [

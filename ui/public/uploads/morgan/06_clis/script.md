@@ -1,10 +1,10 @@
-# Morgan setup narration: ACP CLIs
+# Morgan setup narration: Dynamic workflows
 
 Status: generated. Edit this Markdown before regenerating `morgan.mp3` and `morgan.mp4`.
 
 ## Script
 
-Next, choose the ACP CLIs you want CTO to manage. CTO supports Claude, OpenCode, Cursor, Codex, Factory, Gemini, Copilot, and Kimi, and coordinates provider access across them so your teams can use the right model path without being locked into one provider.
+Next, choose the dynamic workflow surfaces you want CTO to prepare. CTO supports Claude, OpenCode, Cursor, Codex, Factory, Gemini, Copilot, and Kimi, then coordinates provider access across them so your teams can use the right model path without being locked into one provider.
 
 ## Generation notes
 

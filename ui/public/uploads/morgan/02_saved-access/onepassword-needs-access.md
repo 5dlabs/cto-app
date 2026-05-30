@@ -1,1 +1,1 @@
-The op command is present, but access is not ready. Unlock 1Password and enable command line integration in the desktop app settings.
+1Password access is not ready. Open and unlock 1Password, approve the app prompt, or use a service account token.

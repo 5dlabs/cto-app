@@ -3706,7 +3706,7 @@ fn sdk_secret_sources_detection_inner(window: Option<&Window>) -> SecretSourceDe
             ready: onepassword_ready,
             saved_candidate: onepassword_saved_candidate,
             configured_label: onepassword_label,
-            cli_metadata: discover_onepassword_cli_metadata(),
+            cli_metadata: empty_onepassword_cli_metadata(),
         });
     SecretSourceDetectionResult {
         providers: vec![
@@ -3757,7 +3757,7 @@ fn sdk_secret_sources_detection_inner(window: Option<&Window>) -> SecretSourceDe
             },
         ],
         manual_fallback_available: true,
-        message: "Saved access uses in-app SDK connections by default. 1Password CLI metadata may prefill local account choices but never makes auth ready by itself.".to_string(),
+        message: "Secrets uses in-app SDK connections by default. 1Password app approval, service accounts, and Bitwarden Secrets Manager stay provider-authorized before any import.".to_string(),
     }
 }
 
@@ -3859,7 +3859,7 @@ fn onepassword_sdk_provider_status_from_inputs(
             None
         } else {
             Some(
-                "Use 1Password app approval, choose an account, or paste a service account token. CLI metadata is prefill only; paste credentials manually remains available."
+                "Use 1Password app approval, choose an account, or paste a service account token. Paste credentials manually remains available."
                     .to_string(),
             )
         },
@@ -3909,6 +3909,14 @@ fn onepassword_candidate_identity_matches(
     (!left.account_name.is_empty() && left.account_name.eq_ignore_ascii_case(&right.account_name))
         || (left.id.is_some() && left.id == right.id)
         || (left.sign_in_address.is_some() && left.sign_in_address == right.sign_in_address)
+}
+
+fn empty_onepassword_cli_metadata() -> OnePasswordCliMetadataDiscovery {
+    OnePasswordCliMetadataDiscovery {
+        cli_installed: false,
+        account_candidates: Vec::new(),
+        warnings: Vec::new(),
+    }
 }
 
 fn discover_onepassword_cli_metadata() -> OnePasswordCliMetadataDiscovery {
@@ -6045,7 +6053,7 @@ fn validate_bootstrap_setup(setup: &BootstrapSetupProfile) -> BootstrapResult<()
     validate_bootstrap_base_url(&setup.source.base_url)?;
 
     if setup.harness.clis.is_empty() {
-        return Err("bootstrap setup requires at least one selected CLI agent".to_string());
+        return Err("bootstrap setup requires at least one selected dynamic workflow".to_string());
     }
     if setup.harness.providers.is_empty() {
         return Err("bootstrap setup requires at least one provider/model selection".to_string());
@@ -10927,8 +10935,8 @@ stringData:
             saved_access: Vec::new(),
         };
 
-        let error = validate_bootstrap_setup(&setup).expect_err("missing CLI rejected");
-        assert!(error.contains("at least one selected CLI"));
+        let error = validate_bootstrap_setup(&setup).expect_err("missing workflow rejected");
+        assert!(error.contains("at least one selected dynamic workflow"));
     }
 
     #[test]

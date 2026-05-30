@@ -144,11 +144,11 @@ export function createFullSetupFlowDocument() {
         <button data-testid="prepare-cluster-dependencies" title="Prepare Client Cluster baseline">Prepare</button>
         <button title="Continue to saved access">Continue</button>
       </section>
-      <h1>Saved access</h1>
-      <section title="Saved access">
-        <button data-testid="saved-access-onepassword" title="Use 1Password saved access"><strong>1Password</strong></button>
-        <button data-testid="saved-access-skip" title="Continue without saved access"><strong>Continue</strong></button>
-        <button title="Continue to Cloudflare">Continue</button>
+      <h1>Secrets</h1>
+      <section title="Secrets">
+        <button data-testid="saved-access-onepassword" title="Use 1Password for secrets"><strong>1Password</strong></button>
+        <button data-testid="saved-access-bitwarden" title="Use Bitwarden for secrets"><strong>Bitwarden</strong></button>
+        <button data-testid="saved-access-skip" title="Continue without a secret manager"><strong>Continue</strong></button>
       </section>
       <h1>Cloudflare</h1>
       <section title="Morgan public endpoint">
@@ -168,10 +168,10 @@ export function createFullSetupFlowDocument() {
       </section>
       <section title="Harnesses">
         <button title="Hermes harness"><strong>Hermes</strong></button>
-        <button title="Continue to ACP CLIs">Continue</button>
+        <button title="Continue to dynamic workflows">Continue</button>
       </section>
-      <section title="ACP CLIs">
-        <button title="Copilot CLI"><strong>Copilot</strong></button>
+      <section title="Dynamic workflows">
+        <button title="Copilot agent surface"><strong>Copilot</strong></button>
         <button title="Continue to providers">Continue</button>
       </section>
       <section title="Providers">

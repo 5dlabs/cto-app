@@ -6,7 +6,7 @@ Source contracts for conditional P-Video/P-Avatar clips under `ui/public/uploads
 
 - `onepassword-ready.mp3/.mp4`
 - `onepassword-missing-desktop.mp3/.mp4`
-- `onepassword-missing-cli.mp3/.mp4`
+- `onepassword-sdk-auth-needed.mp3/.mp4`
 - `onepassword-desktop-integration.mp3/.mp4`
 - `onepassword-needs-access.mp3/.mp4`
 - `onepassword-no-account.mp3/.mp4`
@@ -15,11 +15,11 @@ Scenario job details are written to `saved-access-condition-videos-ledger.json`.
 
 ## Bitwarden conditionals
 
-Bitwarden remains a secondary provider: reveal behind **More saved access options** or local `bw` CLI detection. Detection may run `bw --version` and `bw status`; preview/apply must not run `bw list items` or `bw get item` until explicit approval-gated contracts are implemented.
+Bitwarden Secrets Manager is an equal Saved Access peer. Detection and preview use SDK/REST metadata paths first; approved reads require explicit user approval and never ask for a master password.
 
-- `bitwarden-detected.mp3/.mp4` — local `bw` exists, secondary option is available.
-- `bitwarden-locked.mp3/.mp4` — `bw status` is locked; user unlocks externally, Morgan never asks for a master password.
-- `bitwarden-unlocked.mp3/.mp4` — `bw status` is unlocked; still secondary until preview/apply support is reviewed.
+- `bitwarden-detected.mp3/.mp4` — Bitwarden Secrets Manager can be offered as a Saved Access peer.
+- `bitwarden-locked.mp3/.mp4` — SDK auth is not ready; user can provide Secrets Manager access or continue with manual paste.
+- `bitwarden-unlocked.mp3/.mp4` — SDK auth is ready; preview/apply remain approval-gated.
 
 ## Scripts
 

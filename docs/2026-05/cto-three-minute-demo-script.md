@@ -17,23 +17,23 @@
 
 **Action:** Click **Continue**.
 
-### 0:15–0:35 — Saved access + endpoint
+### 0:15–0:35 — Secrets + endpoint
 
-**On screen:** Saved Access, then Cloudflare endpoint.
-
-**Say:**
-> If I already have saved access in 1Password, CTO can use it. For this demo I’ll continue without it. Next, CTO checks the external endpoint, so remote agents and browser-based services can reach the local desktop stack safely.
-
-**Action:** Click **Continue without saved access** if needed, then **Continue**. On endpoint, click **Continue**.
-
-### 0:35–1:10 — Source, harness, CLIs, providers
-
-**On screen:** Source provider, harness, CLIs, providers/model screens.
+**On screen:** Secrets, then Cloudflare endpoint.
 
 **Say:**
-> Source comes first because the agent needs somewhere durable to work. The happy path is a GitHub or GitLab app install — not a personal token flow. Then I pick the execution harness, choose which AI CLIs are available, and connect model providers. These choices become the default routing policy for the desktop agent platform.
+> If I already have secrets in 1Password or Bitwarden Secrets Manager, CTO can use them through SDK approval. For this demo I’ll continue without a secret manager. Next, CTO checks the external endpoint, so remote agents and browser-based services can reach the local desktop stack safely.
 
-**Action:** Advance through Source, Harness, CLIs, Providers, Provider Models, Provider Auth. Do not dwell; one sentence per screen.
+**Action:** Click **Continue without a secret manager** if needed. On endpoint, click **Continue**.
+
+### 0:35–1:10 — Source, harness, dynamic workflows, providers
+
+**On screen:** Source provider, harness, Dynamic workflows, providers/model screens.
+
+**Say:**
+> Source comes first because the agent needs somewhere durable to work. The happy path is a GitHub or GitLab app install — not a personal token flow. Then I pick the execution harness, choose the Dynamic workflows agent surfaces, and connect model providers. These choices become the default routing policy for the desktop agent platform.
+
+**Action:** Advance through Source, Harness, Dynamic workflows, Providers, Provider Models, Provider Auth. Do not dwell; one sentence per screen.
 
 ### 1:10–1:35 — Tools and agent tokens
 

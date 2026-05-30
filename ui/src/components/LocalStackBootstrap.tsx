@@ -94,6 +94,27 @@ type SetupScreen =
   | "provider-auth"
   | "tools"
   | "agent-tokens";
+
+declare global {
+  interface Window {
+    __ctoE2eSetSetupScreen?: (screen: SetupScreen) => boolean;
+  }
+}
+
+const SETUP_SCREENS: readonly SetupScreen[] = [
+  "intro",
+  "cloudflare",
+  "saved-access",
+  "source",
+  "harness",
+  "clis",
+  "profiles",
+  "provider-models",
+  "harness-routing",
+  "provider-auth",
+  "tools",
+  "agent-tokens",
+];
 const MORGAN_VIDEO_SCREENS: ReadonlySet<SetupScreen> = new Set([
   "intro",
   "cloudflare",
@@ -389,7 +410,7 @@ type MetricsState = {
 type SavedAccessState = "idle" | "detecting" | "connecting" | "unavailable" | "review" | "applying" | "connected" | "failed";
 type CloudflareEndpointMode = "idle" | "quick" | "login" | "saved" | "local";
 type SavedAccessPrepMode = "idle" | "onepassword" | "bitwarden" | "skipped";
-type SavedAccessCue = "idle" | "ready" | "missing-desktop" | "missing-cli" | "desktop-integration" | "approval-pending" | "needs-access" | "no-account";
+type SavedAccessCue = "idle" | "ready" | "missing-desktop" | "sdk-auth-needed" | "desktop-integration" | "approval-pending" | "needs-access" | "no-account";
 type SavedAccessAuthForm = {
   onepasswordMode: "desktop-app" | "service-account";
   onepasswordAccount: string;
@@ -440,13 +461,15 @@ function savedAccessCueFromDetection(
     case "service-token-needed":
     case "token-needed":
     case "org-needed":
-      return "needs-access";
+      return "sdk-auth-needed";
     case "probe-failed":
       return "needs-access";
     case "unavailable":
       return provider === "onepassword" && providerStatus.desktopInstalled === false
         ? "missing-desktop"
         : "needs-access";
+    default:
+      return "sdk-auth-needed";
   }
 }
 
@@ -469,7 +492,7 @@ function savedAccessCanContinue(
   savedAccessState: SavedAccessState,
   manualOrSkipSelected = false,
 ): boolean {
-  // CLI-only and no-account/app-sign-in-needed states are diagnostic/prefill only; no automatic advance.
+  // Only ready SDK auth, review, connected, or explicit manual/skip can continue automatically.
   return canContinueFromSavedAccessAuthState(providerStatus?.authState, savedAccessState, manualOrSkipSelected);
 }
 
@@ -496,7 +519,7 @@ function savedAccessReadinessPercent(cue: SavedAccessCue): number {
       return 64;
     case "no-account":
       return 58;
-    case "missing-cli":
+    case "sdk-auth-needed":
       return 46;
     case "missing-desktop":
       return 18;
@@ -513,7 +536,7 @@ function savedAccessCueLabel(cue: SavedAccessCue, state: SavedAccessState): stri
       return "Ready";
     case "missing-desktop":
       return "Desktop";
-    case "missing-cli":
+    case "sdk-auth-needed":
       return "Connect";
     case "approval-pending":
       return "Approve";
@@ -544,7 +567,25 @@ function savedAccessConditionalMediaKey(
     return "bitwarden-detected";
   }
   if (mode !== "onepassword") return null;
-  return cue === "idle" || cue === "approval-pending" ? null : `onepassword-${cue}`;
+  switch (cue) {
+    case "idle":
+    case "approval-pending":
+      return null;
+    case "ready":
+      return "onepassword-ready";
+    case "sdk-auth-needed":
+      return "onepassword-sdk-auth-needed";
+    case "missing-desktop":
+      return "onepassword-missing-desktop";
+    case "desktop-integration":
+      return "onepassword-desktop-integration";
+    case "needs-access":
+      return "onepassword-needs-access";
+    case "no-account":
+      return "onepassword-no-account";
+    default:
+      return "onepassword-sdk-auth-needed";
+  }
 }
 
 function cloudflareConditionalMediaKey(mode: CloudflareEndpointMode): string | null {
@@ -578,7 +619,7 @@ function savedAccessCueAction(
     case "approval-pending":
       return { label: "Retry after approval" };
     case "missing-desktop":
-    case "missing-cli":
+    case "sdk-auth-needed":
     case "desktop-integration":
     case "needs-access":
     case "no-account":
@@ -678,6 +719,10 @@ function sourceAdvancedFallbackLabel(provider: ScmProvider): string {
 
 function isManualSourceTokenMode(mode: SourceAuthMode): boolean {
   return mode === "github-pat" || mode === "gitlab-token";
+}
+
+function isSourceOAuthMode(mode: SourceAuthMode): boolean {
+  return mode === "github-oauth" || mode === "gitlab-instance-oauth-app";
 }
 
 function isGitHubManifestMode(mode: SourceAuthMode): boolean {
@@ -976,13 +1021,13 @@ const AI_CLIS: AiCliOption[] = [
     id: "claude",
     name: "Claude",
     icon: IconClaude,
-    summary: "Claude CLI surface for Anthropic and cloud-provider routes.",
+    summary: "Claude Code agent surface for Anthropic and cloud-provider routes.",
   },
   {
     id: "code",
     name: "OpenCode",
     icon: IconTerminal,
-    summary: "OpenCode CLI profile.",
+    summary: "OpenCode agent surface.",
   },
   {
     id: "cursor",
@@ -1000,7 +1045,7 @@ const AI_CLIS: AiCliOption[] = [
     id: "factory",
     name: "Factory",
     icon: IconPackage,
-    summary: "Factory agent CLI profile.",
+    summary: "Factory agent surface.",
   },
   {
     id: "gemini",
@@ -2436,7 +2481,9 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
       sourceAuthMode === "gitlab-token") &&
     (sourceHostMode === "hosted" || sourceHostUrl.trim().length > 0);
   const sourceAuthReady =
-    !isManualSourceTokenMode(sourceAuthMode) ||
+    (isSourceOAuthMode(sourceAuthMode)
+      ? githubForm.token.trim().length > 0 || sourceCredentialForm.token.trim().length > 0
+      : !isManualSourceTokenMode(sourceAuthMode)) ||
     githubForm.token.trim().length > 0 ||
     sourceCredentialForm.token.trim().length > 0;
   const savedAccessConnected = savedAccessState === "connected" && Boolean(savedAccessApplyResult);
@@ -2514,7 +2561,7 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
       : setupScreen === "harness"
         ? "Which harness should run your agents?"
         : setupScreen === "clis"
-          ? "Which coding CLIs should CTO prepare?"
+          ? "Choose how CTO turns your harness into provider and model decisions."
           : setupScreen === "profiles"
             ? "Which providers should Morgan wire in?"
             : setupScreen === "provider-models"
@@ -2566,8 +2613,8 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
     setSourceOwner(defaults.github.owner);
     if (defaults.github.token) {
       setScmProvisioningMessage(
-        defaults.github.tokenSource === "GitHub CLI"
-          ? "GitHub token provided by GitHub CLI environment. CTO will use it during install."
+        defaults.github.token
+          ? "GitHub credentials are already available locally. CTO will use that token during install."
           : "GitHub credentials are already configured. CTO will use that token during install.",
       );
     }
@@ -2823,6 +2870,19 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
     }, 600);
     return () => window.clearTimeout(timer);
   }, [setupScreen, dependencyPrepState, prepareClusterDependencies]);
+
+  useEffect(() => {
+    if (!import.meta.env.DEV) return undefined;
+    window.__ctoE2eSetSetupScreen = (screen: SetupScreen) => {
+      if (!SETUP_SCREENS.includes(screen)) return false;
+      setState("credentials");
+      setSetupScreen(screen);
+      return true;
+    };
+    return () => {
+      delete window.__ctoE2eSetSetupScreen;
+    };
+  }, []);
 
   const scheduleIntroAdvance = useCallback(
     (durationSeconds?: number) => {
@@ -3663,7 +3723,7 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
             : setupScreen === "harness"
               ? "Harnesses"
               : setupScreen === "clis"
-                ? "ACP CLIs"
+                ? "Dynamic workflows"
                 : setupScreen === "profiles"
                   ? "Providers"
                   : setupScreen === "provider-models"
@@ -4091,7 +4151,7 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
                     <div className="local-bootstrap__hint-row local-bootstrap__hint-row--compact" data-testid="saved-access-connected">Connected.</div>
                   ) : null}
                   <span className="field__help">
-                    CLI metadata is diagnostic only; CLI-only, no-account, and app-sign-in-needed states do not auto-advance.
+                    SDK access gate: metadata preview and provider app approval are required before CTO applies redacted matches.
                   </span>
                   <button
                     className="ghost-btn"
@@ -4205,7 +4265,7 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
                         placeholder="Automation"
                       />
                     </label>
-                    <span className="field__help">CTO uses 1Password app approval/biometrics; no CLI sign-in required.</span>
+                    <span className="field__help">CTO uses 1Password app approval/biometrics through the SDK path.</span>
                   </>
                 ) : (
                   <label className="field">
@@ -5188,14 +5248,21 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
                 <div className="local-bootstrap__wizard local-bootstrap__wizard--clis">
                   <section
                     className="local-bootstrap__panel local-bootstrap__panel--focus"
-                    title="ACP CLI selection"
+                    title="Dynamic workflows"
                   >
-                    <div className="local-bootstrap__panel-title">ACP CLIs</div>
+                    <div className="local-bootstrap__panel-title">Dynamic workflows</div>
                     <p className="local-bootstrap__panel-copy">
-                      Pick the coding surfaces CTO should prepare. Morgan will use these to filter
-                      provider and model choices next.
+                      Choose how CTO turns your harness into provider and model decisions.
                     </p>
-                    <div className="local-bootstrap__decision-prompt">Which coding CLIs should CTO prepare?</div>
+                    <ol className="local-bootstrap__dynamic-workflow-tree" aria-label="Dynamic workflows order of operation">
+                      <li><strong>Harness</strong><span>OpenClaw or Hermes runtime.</span></li>
+                      <li><strong>Agent surfaces</strong><span>Claude, Codex, Copilot, and peers.</span></li>
+                      <li><strong>Providers</strong><span>Equal auth providers, filtered by selected surfaces.</span></li>
+                      <li><strong>Models</strong><span>Default models per provider.</span></li>
+                      <li><strong>Routing</strong><span>Primary and fallback model order.</span></li>
+                      <li><strong>Auth</strong><span>Provider credentials after decisions are clear.</span></li>
+                    </ol>
+                    <div className="local-bootstrap__decision-prompt">Choose agent surfaces for this workflow.</div>
                     <div className="local-bootstrap__choice-grid local-bootstrap__choice-grid--clis">
                       {AI_CLIS.map((item) => {
                         const CliIcon = item.icon;
@@ -5261,7 +5328,7 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
                     <div className="local-bootstrap__panel-title">Providers</div>
                     {selectedProviderFilterCliIds.length > 0 ? (
                       <p className="local-bootstrap__panel-hint">
-                        Showing recommended providers for your selected coding CLIs first.
+                        Showing recommended providers for your selected agent surfaces first.
                       </p>
                     ) : null}
                     <label className="local-bootstrap__provider-search">
@@ -5349,7 +5416,7 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
                     <button
                         className="ghost-btn"
                         type="button"
-                      title="Back to ACP CLIs"
+                      title="Back to dynamic workflows"
                       onClick={() => setSetupScreen("clis")}
                     >
                       Back
@@ -5875,8 +5942,8 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
                   >
                     <div className="local-bootstrap__panel-title">Harnesses</div>
                     <p className="local-bootstrap__panel-copy">
-                      Choose the agent harness CTO should run before selecting ACP CLIs. Provider
-                      and model choices are stored after the CLI step.
+                      Choose the agent harness CTO should run before the dynamic workflow tree.
+                      Provider and model choices are stored after the agent-surface step.
                     </p>
                     <div className="local-bootstrap__choice-grid local-bootstrap__choice-grid--two">
                       {HARNESSES.map((item) => {
@@ -5914,7 +5981,7 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
                       <button
                         className="primary-btn"
                         type="button"
-                        title="Continue to ACP CLIs"
+                        title="Continue to dynamic workflows"
                         disabled={!harnessReady}
                         onClick={() => setSetupScreen("clis")}
                       >

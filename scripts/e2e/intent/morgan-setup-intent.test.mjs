@@ -11,7 +11,7 @@ const expectedScreenOrder = [
   "endpoint",
   "source",
   "harnesses",
-  "acp-clis",
+  "dynamic-workflows",
   "providers",
   "models",
   "harness-routing",

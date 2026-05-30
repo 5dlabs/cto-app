@@ -64,7 +64,7 @@ export function AgentsView({ onNewAgent }: { onNewAgent?: () => void }) {
             {AGENTS.length} agents · {onlineCount} live · {totalActive} tasks running · {totalShipped} shipped
           </div>
           <div className="section__sub">
-            Each agent carries its own harness, ACP CLI, and model pairing. Manifests (AGENTS.md,
+            Each agent carries its own harness, agent surface, and model pairing. Manifests (AGENTS.md,
             SOUL.md, SKILL.md) travel with the agent; published manifests are verified on-chain.
           </div>
         </div>

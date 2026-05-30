@@ -50,8 +50,9 @@ describe("Morgan conditional media contract", () => {
   it("declares the Saved access and endpoint media folders used by the UI", () => {
     assert.equal(screenFolders.get("saved-access"), "02_saved-access");
     assert.equal(screenFolders.get("endpoint"), "03_endpoint");
-    assert.match(source, /const morganMediaBasename = morganConditionalMediaKey \?\? "morgan";/);
-    assert.match(source, /const morganCaptionBasename = morganConditionalMediaKey \?\? "captions";/);
+    assert.match(source, /const effectiveMorganConditionalKey =/);
+    assert.match(source, /const morganMediaBasename = effectiveMorganConditionalKey \?\? "morgan";/);
+    assert.match(source, /const morganCaptionBasename = effectiveMorganConditionalKey \?\? "captions";/);
     assert.match(source, /const morganVideoSrc = morganMediaSlug \? `\/uploads\/morgan\/\$\{morganMediaSlug\}\/\$\{morganMediaBasename\}\.mp4` : "";/);
     assert.doesNotMatch(source, /const morganAudioSrc =/);
     assert.match(source, /const morganCaptionsSrc = morganMediaSlug \? `\/uploads\/morgan\/\$\{morganMediaSlug\}\/\$\{morganCaptionBasename\}\.vtt` : "";/);
@@ -69,6 +70,16 @@ describe("Morgan conditional media contract", () => {
       const captions = fileText(folder, key, "vtt");
       assert.match(captions, /^WEBVTT/);
       assert.ok(captions.includes(transcript), `${folder}/${key}.vtt should contain transcript text`);
+    }
+  });
+
+  it("keeps Saved access Morgan conditional narration SDK-first, not CLI-era", () => {
+    const staleSavedAccessLanguage = /\bCLI\b|command line|op CLI|bw flow|bw unlock|bw login/i;
+    for (const { folder, key } of conditionals.filter((entry) => entry.folder === "02_saved-access")) {
+      const transcript = fileText(folder, key, "md");
+      const captions = fileText(folder, key, "vtt");
+      assert.doesNotMatch(transcript, staleSavedAccessLanguage, `${folder}/${key}.md should use SDK-first wording`);
+      assert.doesNotMatch(captions, staleSavedAccessLanguage, `${folder}/${key}.vtt should use SDK-first wording`);
     }
   });
 

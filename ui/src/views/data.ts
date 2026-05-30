@@ -39,7 +39,7 @@ export const PROJECTS: Project[] = [
   {
     id: "openclaw",
     name: "openclaw",
-    summary: "Orchestration + CLI routing layer for heterogeneous agent harnesses.",
+    summary: "Orchestration + routing layer for heterogeneous agent harnesses.",
     status: "in_progress",
     repo: "5dlabs/openclaw",
   },

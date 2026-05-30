@@ -4,7 +4,7 @@ Status: draft. Generate `morgan.mp3` and `morgan.mp4` from this Markdown after r
 
 ## Script
 
-For each selected provider, choose the models CTO should make available. These model choices can be used by your harness agents and your selected CLIs.
+For each selected provider, choose the models CTO should make available. These model choices can be used by your harness agents and selected agent surfaces.
 
 ## Generation notes
 

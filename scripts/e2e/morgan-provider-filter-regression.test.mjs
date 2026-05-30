@@ -5,7 +5,7 @@ import { describe, it } from "node:test";
 const source = readFileSync(new URL("../../ui/src/components/LocalStackBootstrap.tsx", import.meta.url), "utf8");
 
 describe("Morgan setup provider filtering", () => {
-  it("filters provider choices by the selected ACP CLI before rendering the Providers screen", () => {
+  it("filters provider choices by the selected dynamic workflow before rendering the Providers screen", () => {
     assert.match(source, /selectedProviderFilterCliIds/);
     assert.match(source, /provider\.cliIds\.some\(\(cliId\) => selectedProviderFilterCliIds\.includes\(cliId\)\)/);
     assert.match(source, /slice\(0, PROVIDER_VISIBLE_LIMIT\)/);

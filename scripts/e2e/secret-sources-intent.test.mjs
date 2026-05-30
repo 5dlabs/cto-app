@@ -25,7 +25,7 @@ const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 describe("Morgan secret-source intent", () => {
   it("adds a secret-source screen that is optional and low-cognition", () => {
     assert.ok(secretSourceScreen, "secret-source screen contract exists");
-    assert.equal(secretSourceScreen.heading, "Saved access");
+    assert.equal(secretSourceScreen.heading, "Secrets");
     assert.deepEqual(secretSourceScreen.requiredText, []);
     assert.ok(secretSourceScreen.rules.includes("optional-secret-source"));
     assert.ok(secretSourceScreen.rules.includes("manual-fallback-visible"));
@@ -36,8 +36,7 @@ describe("Morgan secret-source intent", () => {
     assert.deepEqual(secretSourceScreen.requiredControls, [
       "Use 1Password for secrets",
       "Use Bitwarden for secrets",
-      "Continue without saved access",
-      "Continue to Cloudflare",
+      "Continue without a secret manager",
     ]);
     assert.ok(secretSourceScreen.secretSources.some((source) => source.id === "onepassword"));
     const onePassword = secretSourceScreen.secretSources.find((source) => source.id === "onepassword");
@@ -64,7 +63,7 @@ describe("Morgan secret-source intent", () => {
     assert.equal(bitwarden.sdk.metadataPreview, "client.secrets().list(organizationId)");
     assert.equal(bitwarden.sdk.approvedRead, "client.secrets().get(secretId)");
     assert.match(bitwarden.safetyNotes.join("\n"), /Do not ask for.*master password/i);
-    assert.match(bitwarden.safetyNotes.join("\n"), /Do not require.*bw.*CLI/i);
+    assert.match(bitwarden.safetyNotes.join("\n"), /Use Secrets Manager SDK auth only/i);
     assert.match(bitwarden.safetyNotes.join("\n"), /Do not read secret values before approval/i);
     assert.deepEqual(secretSourceScreen.quickConnect.providers, ["onepassword", "bitwarden"]);
   });
@@ -73,7 +72,7 @@ describe("Morgan secret-source intent", () => {
     assert.deepEqual(secretSourceScreen.conditionalMedia, [
       "onepassword-ready",
       "onepassword-missing-desktop",
-      "onepassword-missing-cli",
+      "onepassword-sdk-auth-needed",
       "onepassword-desktop-integration",
       "onepassword-needs-access",
       "onepassword-no-account",
@@ -207,10 +206,42 @@ describe("Morgan secret-source intent", () => {
     assert.doesNotMatch(secretsScreen, /1Password[\s\S]{0,240}(username|user name)\s*\/\s*password/i);
   });
 
+  it("keeps Saved Access user-facing copy SDK-first without CLI plug language", () => {
+    const screenStart = localStackBootstrap.indexOf("const savedAccessPrepPanel = (");
+    const screenEnd = localStackBootstrap.indexOf("const savedAccessPanel =", screenStart);
+    assert.notEqual(screenStart, -1, "Secrets screen panel should exist");
+    assert.notEqual(screenEnd, -1, "Secrets screen panel should be bounded");
+    const secretsScreen = localStackBootstrap.slice(screenStart, screenEnd);
+
+    assert.match(secretsScreen, /SDK access gate/i);
+    assert.match(secretsScreen, /provider app approval/i);
+    assert.doesNotMatch(secretsScreen, /CLI metadata is diagnostic only/i);
+    assert.doesNotMatch(secretsScreen, /CLI-only/i);
+    assert.doesNotMatch(secretsScreen, /no CLI sign-in required/i);
+  });
+
+  it("documents dynamic workflows as the order-of-operation tree", () => {
+    const workflowScreen = contract.screens.find((screen) => screen.id === "dynamic-workflows");
+    assert.ok(workflowScreen, "dynamic workflows screen contract exists");
+    assert.equal(workflowScreen.heading, "Dynamic workflows");
+    assert.deepEqual(workflowScreen.orderOfOperation, [
+      "Harness",
+      "Agent surfaces",
+      "Providers",
+      "Models",
+      "Routing",
+      "Auth",
+    ]);
+    assert.match(localStackBootstrap, /Dynamic workflows/);
+    assert.match(localStackBootstrap, /local-bootstrap__dynamic-workflow-tree/);
+    assert.doesNotMatch(localStackBootstrap, /ACP CLIs|coding CLIs|CLI metadata is diagnostic only|no CLI sign-in required|CLI surface|CLI profile/);
+    assert.match(localStackBootstrap, /Harness[\s\S]{0,240}Agent surfaces[\s\S]{0,240}Providers[\s\S]{0,240}Models[\s\S]{0,240}Routing[\s\S]{0,240}Auth/);
+  });
+
   it("documents compliance guardrails and redaction requirements", () => {
     for (const phrase of [
       "official SDK/REST auth flows",
-      "CLI paths are legacy diagnostic/prefill only",
+      "SDK-first metadata preview and approved reads",
       "Do not scrape password-manager UI",
       "Do not copy browser cookies or sessions",
       "Do not ask for vault master passwords",

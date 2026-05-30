@@ -16,7 +16,7 @@ const PROVIDER_CONDITIONS = {
   onepassword: [
     "ready",
     "missing-desktop",
-    "missing-cli",
+    "sdk-auth-needed",
     "desktop-integration",
     "needs-access",
     "no-account",

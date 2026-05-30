@@ -16,35 +16,35 @@ const CUES = {
   },
   "onepassword-missing-desktop": {
     dir: SAVED_ACCESS_DIR,
-    text: "I do not see the 1Password desktop app yet. Install and sign in to 1Password first, then I will check the command line again.",
+    text: "I do not see the 1Password desktop app yet. Install and sign in to 1Password first, then I will check SDK access again.",
   },
-  "onepassword-missing-cli": {
+  "onepassword-sdk-auth-needed": {
     dir: SAVED_ACCESS_DIR,
-    text: "The 1Password desktop app is installed, but the op command line tool is missing. I can open the official CLI setup directions.",
+    text: "1Password SDK access is not ready yet. Use app approval, choose an account, or paste a service account token, then I will check access again.",
   },
   "onepassword-desktop-integration": {
     dir: SAVED_ACCESS_DIR,
-    text: "It looks like you have the 1Password desktop app and the op CLI installed, but desktop app integration is not enabled yet. I opened the official 1Password CLI app-integration guide so you can turn it on, then I will check again.",
+    text: "It looks like 1Password desktop app integration is not enabled yet. I opened the official 1Password SDK and app-integration guidance so you can turn it on, then I will check again.",
   },
   "onepassword-needs-access": {
     dir: SAVED_ACCESS_DIR,
-    text: "The op command is present, but access is not ready. Open and unlock 1Password, then turn on Integrate with 1Password CLI in Settings, Developer.",
+    text: "1Password access is not ready. Open and unlock 1Password, approve the app prompt, or use a service account token.",
   },
   "onepassword-no-account": {
     dir: SAVED_ACCESS_DIR,
-    text: "The app and CLI are installed, but I do not see a 1Password account connected to the CLI yet. Add or unlock an account, then I will check again.",
+    text: "I do not see a 1Password account available for app approval yet. Add or unlock an account, then I will check again.",
   },
   "bitwarden-detected": {
     dir: SAVED_ACCESS_DIR,
-    text: "I found the Bitwarden command line on this machine. I will keep Bitwarden in More options for now, and only use official CLI status checks unless you approve a deeper import flow later.",
+    text: "Bitwarden Secrets Manager support is available. I will not ask for your master password or read secret values during setup.",
   },
   "bitwarden-locked": {
     dir: SAVED_ACCESS_DIR,
-    text: "Bitwarden is installed, but the local CLI session is locked. Unlock Bitwarden outside CTO when you are ready; I will not ask for your master password here.",
+    text: "Bitwarden Secrets Manager SDK auth is not ready yet. Add a Secrets Manager access token when you are ready, or continue with manual paste.",
   },
   "bitwarden-unlocked": {
     dir: SAVED_ACCESS_DIR,
-    text: "Bitwarden reports an unlocked local CLI session. I can treat it as a secondary saved-access option, but I will still wait for explicit approval before reading or mapping any vault items.",
+    text: "Bitwarden Secrets Manager SDK auth is ready. I can preview metadata, but I will still wait for explicit approval before reading or mapping any secret values.",
   },
   "cloudflare-login": {
     dir: CLOUDFLARE_DIR,

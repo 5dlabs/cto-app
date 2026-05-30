@@ -104,7 +104,7 @@ async function driveSetupFlow() {
   await configureSourceIfVisible();
   await continueFrom(/Continue to harness selection/i);
   await clickByText(/^OpenClaw$/i).catch(() => undefined);
-  await continueFrom(/Continue to ACP CLIs/i);
+  await continueFrom(/Continue to dynamic workflows/i);
   await clickByText(/^Claude$/i).catch(() => undefined);
   await continueFrom(/Continue to providers/i);
   await clickProvider("OpenAI");

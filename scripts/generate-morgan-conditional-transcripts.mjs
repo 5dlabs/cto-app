@@ -4,14 +4,14 @@ import path from "node:path";
 
 const SAVED_ACCESS = {
   "onepassword-ready": "1Password is ready. I can look up saved access without showing secrets, then you can approve anything before CTO uses it.",
-  "onepassword-missing-desktop": "I do not see the 1Password desktop app yet. Install and sign in to 1Password first, then I will check the command line again.",
-  "onepassword-missing-cli": "The 1Password app is installed, but the op command line tool is missing. I’ll install the official CLI, then check access again.",
-  "onepassword-desktop-integration": "It looks like you have the 1Password desktop app and the op CLI installed, but desktop app integration is not enabled yet. I opened the official 1Password CLI app-integration guide so you can turn it on, then I will check again.",
-  "onepassword-needs-access": "The op command is present, but access is not ready. Unlock 1Password and enable command line integration in the desktop app settings.",
-  "onepassword-no-account": "The app and CLI are installed, but I do not see a 1Password account connected to the CLI yet. Add or unlock an account, then I will check again.",
-  "bitwarden-detected": "I found Bitwarden support locally. I’ll keep it secondary, and I will not ask for your master password or read vault items during setup.",
-  "bitwarden-locked": "Bitwarden is installed, but the CLI session is locked or not signed in. Unlock it yourself with the official bw flow, or continue with manual paste.",
-  "bitwarden-unlocked": "Bitwarden looks unlocked. I can treat it as available metadata, but I’ll still keep raw secret access behind explicit approval.",
+  "onepassword-missing-desktop": "I do not see the 1Password desktop app yet. Install and sign in to 1Password first, then I will check SDK access again.",
+  "onepassword-sdk-auth-needed": "1Password SDK access is not ready yet. Use app approval, choose an account, or paste a service account token, then I will check access again.",
+  "onepassword-desktop-integration": "It looks like 1Password desktop app integration is not enabled yet. I opened the official 1Password SDK and app-integration guidance so you can turn it on, then I will check again.",
+  "onepassword-needs-access": "1Password access is not ready. Open and unlock 1Password, approve the app prompt, or use a service account token.",
+  "onepassword-no-account": "I do not see a 1Password account available for app approval yet. Add or unlock an account, then I will check again.",
+  "bitwarden-detected": "Bitwarden Secrets Manager support is available. I will not ask for your master password or read secret values during setup.",
+  "bitwarden-locked": "Bitwarden Secrets Manager SDK auth is not ready yet. Add a Secrets Manager access token when you are ready, or continue with manual paste.",
+  "bitwarden-unlocked": "Bitwarden Secrets Manager SDK auth is ready. I can preview metadata, but I will still wait for explicit approval before reading or mapping any secret values.",
 };
 
 const CLOUDFLARE = {

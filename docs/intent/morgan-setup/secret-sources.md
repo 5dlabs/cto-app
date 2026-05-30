@@ -15,22 +15,21 @@ Saved-access and manual-paste controls should be icon-first with accessible labe
 
 - Secret source provider is optional.
 - Manual paste remains available for every required credential.
-- 1Password/OnePass and Bitwarden Secrets Manager are equal first-view Saved Access peers.
+- 1Password/OnePass and Bitwarden Secrets Manager are equal first-view Secrets peers.
 - Bitwarden uses Secrets Manager SDK/REST auth, not Password Manager browser unlock.
 - Additional non-v1 provider choices should appear only after the user asks for more options.
 
-## Legacy CLI diagnostic notes
+## SDK-first notes
 
-- Default Saved Access uses the Tauri/backend SDK bridge, not `op` or `bw` CLI flows.
-- `op` and `bw` CLI probes are legacy diagnostic/prefill paths only and must never be required for default setup.
-- Morgan must not ask for or collect vault master passwords.
+- Default Secrets uses the Tauri/backend SDK bridge for metadata preview and approved reads.
+- Provider app approval gates preview/apply; never ask for password-manager master passwords.
 - Metadata preview stays approval-gated and narrow; approved field reads keep raw values in memory only long enough to apply CTO-managed Kubernetes Secret material.
 
 ## Required actions
 
 - Detect available providers without requiring setup.
 - Prefer a one-click icon-first **Find my access** branch when a provider is already available.
-- Ask the provider for approved access through official SDK/REST flows by default; CLI paths are legacy diagnostic/prefill only.
+- Ask the provider for approved access through official SDK/REST flows by default.
 - Show matched access before enabling it.
 - Require explicit approval before writing or syncing secrets.
 - Continue to support manual paste.

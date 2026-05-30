@@ -36,19 +36,21 @@ async function main() {
 
       // If the app is already on a setup screen, skip the setup-gate checks.
       const heading = await headingText().catch(() => "");
-      const alreadyOnSetup = /Secrets|Saved access|Cloudflare|Source|Harnesses|ACP CLIs|Providers|Models|Harness routing|Provider auth|Tool keys|Agent tokens/i.test(heading);
+      const alreadyOnSetup = /Secrets|Saved access|Cloudflare|Source|Harnesses|Dynamic workflows|Providers|Models|Harness routing|Provider auth|Tool keys|Agent tokens/i.test(heading);
       if (alreadyOnSetup) {
         console.log("[e2e] App is already on setup screen:", heading);
-        const checkpoint = /Secrets|Saved access/i.test(heading)
-          ? "02-saved-access"
-          : /Cloudflare/i.test(heading)
-            ? "03-endpoint"
-            : /Source/i.test(heading)
-              ? "04-source-configured"
-              : "00-current-setup-screen";
-        await captureDomSnapshot(checkpoint);
-        await navigateToSource();
-        await failOnBrowserConsoleErrors("source navigation");
+        if (!useDevNav) {
+          const checkpoint = /Secrets|Saved access/i.test(heading)
+            ? "02-saved-access"
+            : /Cloudflare/i.test(heading)
+              ? "03-endpoint"
+              : /Source/i.test(heading)
+                ? "04-source-configured"
+                : "00-current-setup-screen";
+          await captureDomSnapshot(checkpoint);
+          await navigateToSource();
+          await failOnBrowserConsoleErrors("source navigation");
+        }
       } else {
         await captureDomSnapshot("00-setup-gate-before");
         await ensureSetupGateVisible();
@@ -98,6 +100,20 @@ async function main() {
   }
 }
 
+const DEV_NAV_TARGETS = {
+  "02-saved-access": { screen: "saved-access", heading: /Secrets|Saved access/i, fromStart: null },
+  "03-endpoint": { screen: "cloudflare", heading: /Cloudflare/i, fromStart: /Continue without a secret manager|Continue without saved access|Continue to Cloudflare/i },
+  "04-source-configured": { screen: "source", heading: /Source/i, fromStart: /Continue to Source/i },
+  "10-harnesses": { screen: "harness", heading: /Harnesses/i, fromStart: /Continue to harness selection/i },
+  "20-dynamic-workflows": { screen: "clis", heading: /Dynamic workflows/i, fromStart: /Continue to dynamic workflows/i },
+  "30-providers": { screen: "profiles", heading: /Providers/i, fromStart: /Continue to providers/i },
+  "40-models": { screen: "provider-models", heading: /Models/i, fromStart: /Configure provider authentication/i },
+  "50-harness-routing": { screen: "harness-routing", heading: /Harness routing/i, fromStart: /Choose harness routing/i },
+  "60-provider-auth": { screen: "provider-auth", heading: /Provider auth/i, fromStart: /Configure provider authentication/i },
+  "70-tool-keys": { screen: "tools", heading: /Tool keys/i, fromStart: /Configure tool API keys/i },
+  "80-agent-tokens": { screen: "agent-tokens", heading: /Agent tokens/i, fromStart: /Configure agent Discord tokens/i },
+};
+
 async function driveSetupFlow() {
   await leaveIntroIfNeeded();
 
@@ -106,7 +122,7 @@ async function driveSetupFlow() {
     await captureDevNavCheckpoint("03-endpoint");
     await captureDevNavCheckpoint("04-source-configured");
     await captureDevNavCheckpoint("10-harnesses");
-    await captureDevNavCheckpoint("20-acp-clis");
+    await captureDevNavCheckpoint("20-dynamic-workflows");
     await captureDevNavCheckpoint("30-providers");
     await captureDevNavCheckpoint("40-models");
     await captureDevNavCheckpoint("50-harness-routing");
@@ -126,8 +142,8 @@ async function driveSetupFlow() {
   if (useLegacyOpenClawPath) {
     await clickByText(/OpenClaw/i).catch(() => undefined);
     await captureDomSnapshot("11-harness-selected");
-    await continueToHeading(/Continue to ACP CLIs/i, /ACP CLIs/i);
-    await captureDomSnapshot("20-acp-clis");
+    await continueToHeading(/Continue to dynamic workflows/i, /Dynamic workflows/i);
+    await captureDomSnapshot("20-dynamic-workflows");
     await selectChoice("Claude");
     await captureDomSnapshot("21-acp-cli-selected");
     await continueToHeading(/Continue to providers/i, /Providers/i);
@@ -137,8 +153,8 @@ async function driveSetupFlow() {
   } else {
     await clickByText(/Hermes/i).catch(() => undefined);
     await captureDomSnapshot("11-harness-selected");
-    await continueToHeading(/Continue to ACP CLIs/i, /ACP CLIs/i);
-    await captureDomSnapshot("20-acp-clis");
+    await continueToHeading(/Continue to dynamic workflows/i, /Dynamic workflows/i);
+    await captureDomSnapshot("20-dynamic-workflows");
     await selectChoice("Copilot");
     await captureDomSnapshot("21-acp-cli-selected");
     await continueToHeading(/Continue to providers/i, /Providers/i);
@@ -278,7 +294,8 @@ async function captureMediaState(label) {
       capturedAt: new Date().toISOString(),
       href: location.href,
       heading: document.querySelector('h1')?.textContent?.trim() ?? null,
-      hasFallbackImage: Boolean(document.querySelector('.local-bootstrap__avatar img')),
+      hasFallbackImage: Boolean(document.querySelector('.local-bootstrap__avatar img:not(.local-bootstrap__avatar-portrait)')),
+      hasRestPortrait: Boolean(document.querySelector('.local-bootstrap__avatar .local-bootstrap__avatar-portrait')),
       mediaState: {
         video: video ? {
           src: video.currentSrc || video.src || '',
@@ -515,20 +532,135 @@ async function advanceDevNavScreen() {
 
 async function captureDevNavCheckpoint(label) {
   if (!useDevNav) return;
-  const screen = label.split("-").slice(1).join("-");
-  const changed = await executeFunction((targetScreen) => {
-    const search = new URLSearchParams(window.location.search);
-    search.set("setup", "1");
-    search.set("setupScreen", targetScreen);
-    window.history.replaceState({}, "", `${window.location.pathname}?${search.toString()}`);
-    window.dispatchEvent(new PopStateEvent("popstate"));
-    return true;
-  }, [screen]).catch(() => false);
-  if (!changed) {
-    await advanceDevNavScreen();
+  const target = DEV_NAV_TARGETS[label];
+  if (!target) throw new Error(`No dev-nav target mapped for checkpoint ${label}`);
+  if (label === "10-harnesses") {
+    await fillDevNavSourceCredentialsIfNeeded();
   }
-  await delay(500);
+  await navigateDevNavForwardTo(target);
+  await prepareDevNavCheckpoint(label);
   await captureDomSnapshot(label);
+}
+
+async function prepareDevNavCheckpoint(label) {
+  if (label === "20-dynamic-workflows") {
+    await clickDevNavForward(/Copilot/i);
+    await waitForVisibleSelection(/Copilot/i);
+    return;
+  }
+  if (label === "30-providers") {
+    await clickDevNavForward(/GitHub Copilot|Anthropic/i);
+    await waitForVisibleSelection(/GitHub Copilot|Anthropic/i);
+  }
+}
+
+async function waitForVisibleSelection(pattern, timeoutMs = 3_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const selected = await executeFunction((patternSource, patternFlags) => {
+      const pattern = new RegExp(patternSource, patternFlags);
+      return Array.from(document.querySelectorAll("button")).some((button) => {
+        const label = `${button.textContent ?? ""} ${button.getAttribute("title") ?? ""} ${button.getAttribute("aria-label") ?? ""}`;
+        const marked = button.classList.contains("is-selected") || button.getAttribute("aria-pressed") === "true";
+        return button.getClientRects().length > 0 && marked && pattern.test(label);
+      });
+    }, [pattern.source, pattern.flags]).catch(() => false);
+    if (selected) return true;
+    await delay(100);
+  }
+  return false;
+}
+
+async function fillDevNavSourceCredentialsIfNeeded() {
+  await executeFunction(() => {
+    const visible = (candidate) => candidate.getClientRects().length > 0;
+    const button = Array.from(document.querySelectorAll("button")).find((candidate) => {
+      const label = `${candidate.textContent ?? ""} ${candidate.getAttribute("title") ?? ""} ${candidate.getAttribute("aria-label") ?? ""}`;
+      return visible(candidate) && !candidate.disabled && /Paste token/i.test(label);
+    });
+    if (!button) return false;
+    button.click();
+    return true;
+  }, []);
+  await delay(250);
+  await executeFunction(() => {
+    const setValue = (selector, value) => {
+      const input = document.querySelector(selector);
+      if (!input) return false;
+      const descriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value");
+      descriptor?.set?.call(input, value);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+      return true;
+    };
+    return {
+      owner: setValue('input[placeholder="5DLabsInc"]', "5DLabsInc"),
+      token: setValue('input[placeholder="github_pat_..."]', "github...0000"),
+    };
+  }, []);
+  await delay(250);
+}
+
+async function navigateDevNavForwardTo(target) {
+  for (let attempt = 0; attempt < 24; attempt += 1) {
+    const heading = await headingText().catch(() => "");
+    if (target.heading.test(heading)) return;
+    const clicked = target.fromStart ? await clickDevNavForward(target.fromStart) : false;
+    if (!clicked) {
+      const selected = await selectVisibleDevNavDefault(heading);
+      if (!selected) throw new Error(`cannot navigate toward ${target.heading} from ${heading || "<empty>"}`);
+    }
+    await delay(300);
+  }
+  throw new Error(`heading not found: ${target.heading}`);
+}
+
+async function clickDevNavForward(pattern) {
+  return executeFunction((patternSource, patternFlags) => {
+    const pattern = new RegExp(patternSource, patternFlags);
+    const buttons = Array.from(document.querySelectorAll("button"));
+    const visible = (candidate) => candidate.getClientRects().length > 0;
+    const button = buttons.find((candidate) => {
+      const label = `${candidate.getAttribute("title") ?? ""} ${candidate.getAttribute("aria-label") ?? ""} ${candidate.textContent ?? ""}`;
+      return visible(candidate) && !candidate.disabled && pattern.test(label);
+    });
+    if (!button) return false;
+    button.click();
+    return true;
+  }, [pattern.source, pattern.flags]).catch(() => false);
+}
+
+async function selectVisibleDevNavDefault(heading) {
+  return executeFunction((currentHeading) => {
+    const buttons = Array.from(document.querySelectorAll("button"));
+    const visible = (candidate) => candidate.getClientRects().length > 0;
+    const clickByTestId = (testId) => {
+      const button = buttons.find((candidate) => candidate.getAttribute("data-testid") === testId && visible(candidate) && !candidate.disabled);
+      if (!button) return false;
+      button.click();
+      return true;
+    };
+    const clickByLabel = (pattern) => {
+      const button = buttons.find((candidate) => {
+        const label = `${candidate.getAttribute("title") ?? ""} ${candidate.getAttribute("aria-label") ?? ""} ${candidate.textContent ?? ""}`;
+        return visible(candidate) && !candidate.disabled && pattern.test(label);
+      });
+      if (!button) return false;
+      button.click();
+      return true;
+    };
+    if (/Secrets|Saved access/i.test(currentHeading)) return clickByTestId("saved-access-skip") || clickByLabel(/Continue without a secret manager|Continue without saved access/i);
+    if (/Cloudflare/i.test(currentHeading)) return clickByTestId("cloudflare-endpoint-local") || clickByTestId("cloudflare-endpoint-cloudflare") || clickByLabel(/Use a temporary Cloudflare tunnel|Sign in with Cloudflare/i);
+    if (/Source/i.test(currentHeading)) return clickByLabel(/GitHub|GitLab|5D Origin|Continue/i);
+    if (/Harnesses/i.test(currentHeading)) return clickByLabel(/Hermes|OpenClaw|Continue/i);
+    if (/Dynamic workflows/i.test(currentHeading)) return clickByLabel(/Copilot|Claude|Continue/i);
+    if (/Providers/i.test(currentHeading)) return clickByLabel(/GitHub Copilot|OpenAI|Anthropic|Continue/i);
+    if (/Models/i.test(currentHeading)) return clickByLabel(/Continue|Choose harness routing/i);
+    if (/Harness routing/i.test(currentHeading)) return clickByLabel(/Continue|Configure provider authentication/i);
+    if (/Provider auth/i.test(currentHeading)) return clickByLabel(/Continue|Configure tool API keys/i);
+    if (/Tool keys/i.test(currentHeading)) return clickByLabel(/Continue|Configure agent Discord tokens/i);
+    return false;
+  }, [heading]).catch(() => false);
 }
 
 async function prepareClusterDependenciesIfVisible() {
@@ -678,12 +810,12 @@ async function navigateToSource() {
           return { done: false, clicked: "models-back", heading };
         }
         if (/Providers/i.test(heading)) {
-          clickMatching(/Back to ACP CLIs/i);
+          clickMatching(/Back to dynamic workflows/i);
           return { done: false, clicked: "providers-back", heading };
         }
-        if (/ACP CLIs/i.test(heading)) {
+        if (/Dynamic workflows/i.test(heading)) {
           clickMatching(/Back to harness selection/i);
-          return { done: false, clicked: "clis-back", heading };
+          return { done: false, clicked: "dynamic-workflows-back", heading };
         }
         if (/Harnesses/i.test(heading)) {
           clickMatching(/Back to source/i);

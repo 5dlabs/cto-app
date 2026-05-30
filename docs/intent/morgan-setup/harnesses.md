@@ -16,7 +16,7 @@ Choose the agent harness that will run CTO Desktop automation.
 ## Required actions
 
 - Select Hermes for the current local CTO lane
-- Continue to ACP CLIs after a compatible harness is selected
+- Continue to dynamic workflows after a compatible harness is selected
 
 ## Blocking behavior
 

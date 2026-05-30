@@ -42,8 +42,8 @@ describe("1Password saved access readiness contract", () => {
   });
 
   it("maps deterministic readiness branches to the compact bar and Morgan cues", () => {
-    for (const branch of ["missing-desktop", "missing-cli", "desktop-integration", "needs-access", "no-account", "ready"]) {
-      assert.match(reactSource, new RegExp(`case "${branch}"|onepassword-${branch}\\.mp3|is-${branch}`));
+    for (const branch of ["missing-desktop", "sdk-auth-needed", "desktop-integration", "needs-access", "no-account", "ready"]) {
+      assert.match(reactSource, new RegExp(`case "${branch}"|onepassword-${branch}\\.mp3|is-${branch}|onepassword-${branch}`));
     }
     assert.match(reactSource, /data-testid="saved-access-readiness"/);
     assert.match(reactSource, /data-state=\{savedAccessCue\}/);
