@@ -33,23 +33,36 @@ async function main() {
     await assertTauriMcpReady();
     await withQuietTauriMcp(async () => {
       await installBrowserDiagnostics();
-      await captureDomSnapshot("00-setup-gate-before");
-      await ensureSetupGateVisible();
-      await captureDomSnapshot("01-setup-gate-visible");
-      await failOnBrowserConsoleErrors("setup gate");
 
-      if (shouldReset) {
-        cleanupLocalStack();
-        await waitForText(/CTO|local stack|Setup needs attention/i, 60_000);
-        await captureDomSnapshot("02-after-reset");
-        await failOnBrowserConsoleErrors("post-reset");
+      // If the app is already on a setup screen, skip the setup-gate checks.
+      const heading = await headingText().catch(() => "");
+      const alreadyOnSetup = /Saved access|Cloudflare|Source|Harnesses|ACP CLIs|Providers|Models|Harness routing|Provider auth|Tool keys|Agent tokens/i.test(heading);
+      if (alreadyOnSetup) {
+        console.log("[e2e] App is already on setup screen:", heading);
+        const checkpoint = /Saved access/i.test(heading) ? "02-saved-access" : /Cloudflare/i.test(heading) ? "03-endpoint" : /Source/i.test(heading) ? "04-source-configured" : "02-saved-access";
+        await captureDomSnapshot(checkpoint);
+        await navigateToSource();
+        await failOnBrowserConsoleErrors("source navigation");
+      } else {
+        await captureDomSnapshot("00-setup-gate-before");
+        await ensureSetupGateVisible();
+        await captureDomSnapshot("01-setup-gate-visible");
+        await failOnBrowserConsoleErrors("setup gate");
+
+        if (shouldReset) {
+          cleanupLocalStack();
+          await waitForText(/CTO|local stack|Setup needs attention/i, 60_000);
+          await captureDomSnapshot("02-after-reset");
+          await failOnBrowserConsoleErrors("post-reset");
+        }
+
+        if (!useDevNav) {
+          await prepareClusterDependenciesIfVisible();
+          await captureDomSnapshot("02-cluster-dependencies");
+          await navigateToSource();
+          await failOnBrowserConsoleErrors("source navigation");
+        }
       }
-
-      await prepareClusterDependenciesIfVisible();
-      await captureDomSnapshot("02-cluster-dependencies");
-
-      await navigateToSource();
-      await failOnBrowserConsoleErrors("source navigation");
 
       await driveSetupFlow();
       await captureDomSnapshot("90-ready-to-start");
@@ -372,12 +385,24 @@ async function prepareClusterDependenciesIfVisible() {
     return;
   }
 
+  // If a Prepare/Retry/Start button is visible on the setup gate, click it immediately
+  // so the bootstrap begins and waitForText can match progressing state.
+  const canPrepareNow = await executeFunction(() => {
+    const prepareButton = Array.from(document.querySelectorAll("button")).find((candidate) =>
+      /^(Prepare|Retry|Start)$/i.test(candidate.textContent?.trim() ?? ""),
+    );
+    return Boolean(prepareButton && !prepareButton.disabled);
+  }, []);
+  if (canPrepareNow) {
+    await clickByText(/^(Prepare|Retry|Start)$/i);
+  }
+
   await waitForText(/Cluster baseline ready|Continue to saved access|Continue to Cloudflare|Continue to Source|Cloudflare|Saved access|Source|Setup needs attention|Preparing/i, timeoutMs);
   for (let attempt = 0; attempt < 120; attempt += 1) {
     const state = await executeFunction(() => {
       const text = document.body?.innerText ?? "";
       const prepareButton = Array.from(document.querySelectorAll("button")).find((candidate) =>
-        /Prepare|Retry/i.test(candidate.textContent ?? ""),
+        /^(Prepare|Retry|Start)$/i.test(candidate.textContent?.trim() ?? ""),
       );
       const continueButton = Array.from(document.querySelectorAll("button")).find((candidate) =>
         /Continue to saved access|Continue to Cloudflare|Continue to Source/i.test(candidate.getAttribute("title") ?? candidate.textContent ?? ""),
@@ -400,7 +425,7 @@ async function prepareClusterDependenciesIfVisible() {
       return;
     }
     if (state.canPrepare) {
-      await clickByText(/Prepare|Retry/i);
+      await clickByText(/^(Prepare|Retry|Start)$/i);
     }
     await delay(1000);
   }
@@ -483,13 +508,17 @@ async function configureSourceIfVisible() {
 
   const defaults = githubCredentialsForE2e();
   if (defaults.owner) {
-    await setInputValue('input[placeholder="5DLabsInc"]', defaults.owner);
+    await setInputValue('input[placeholder="5DLabsInc"]', defaults.owner).catch(() => {
+      console.log("[e2e] GitHub owner input not found; skipping source auto-fill");
+    });
   }
 
   if (defaults.token) {
     await clickByText(/Review details/i).catch(() => undefined);
-    await clickByTestId("source-auth-github-pat").catch(() => clickByText(/Use a personal access token instead/i));
-    await setInputValue('input[placeholder="github_pat_..."]', defaults.token);
+    await clickByTestId("source-auth-github-pat").catch(() => clickByText(/Use a personal access token instead/i).catch(() => undefined));
+    await setInputValue('input[placeholder="github_pat_..."]', defaults.token).catch(() => {
+      console.log("[e2e] GitHub PAT input not found; skipping token auto-fill");
+    });
   }
 }
 

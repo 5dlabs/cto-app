@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "skills": {
+    "tauri": {
+      "source": "smithery.ai",
+      "sourceType": "well-known",
+      "computedHash": "8846df779beba33d583a1712ecfb18a3dc0a542ad1c95643a2797e0eb44f43ab"
+    },
+    "meta-principal-architect": {
+      "source": "local",
+      "sourceType": "workspace",
+      "computedHash": "1cf2adb1cac4966d1c8ab6dba075bc81a3b88c777d9db73f9a4a19674fd7d562"
+    },
+    "karpathy-guidelines": {
+      "source": "local",
+      "sourceType": "workspace",
+      "computedHash": "0ea91c07ded95af437603ca18d7261731b0a413a88166f6d88a71ea7e053c0be"
+    }
+  }
+}

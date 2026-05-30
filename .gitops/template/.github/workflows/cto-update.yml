@@ -67,7 +67,7 @@ jobs:
           if (source.owner && source.repo) {
             console.log(`${source.owner}/${source.repo}`);
           } else {
-            console.log(source.repository || metadata.source?.repository || '5dlabs/cto-app');
+            console.log(source.repository || metadata.source?.repository || '5DLabsInc/cto');
           }
           NODE
           )"

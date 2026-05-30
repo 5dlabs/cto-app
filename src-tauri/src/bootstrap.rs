@@ -38,6 +38,51 @@ const KIND_CONTEXT: &str = "kind-cto-app";
 const KIND_CLUSTER_LABEL_KEY: &str = "io.x-k8s.kind.cluster";
 const INGRESS_NGINX_KIND_URL: &str =
     "https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.14.3/deploy/static/provider/kind/deploy.yaml";
+const INGRESS_NGINX_MANIFEST_RETRY_POLICY: RetryPolicy = RetryPolicy {
+    max_attempts: 3,
+    initial_backoff: Duration::from_secs(4),
+    max_backoff: Duration::from_secs(16),
+};
+const INGRESS_NGINX_ROLLOUT_RETRY_POLICY: RetryPolicy = RetryPolicy {
+    max_attempts: 3,
+    initial_backoff: Duration::from_secs(6),
+    max_backoff: Duration::from_secs(24),
+};
+const RUNTIME_SOCKET_RETRY_POLICY: RetryPolicy = RetryPolicy {
+    max_attempts: 15,
+    initial_backoff: Duration::from_secs(2),
+    max_backoff: Duration::from_secs(12),
+};
+const METRICS_SERVER_MANIFEST_RETRY_POLICY: RetryPolicy = RetryPolicy {
+    max_attempts: 3,
+    initial_backoff: Duration::from_secs(4),
+    max_backoff: Duration::from_secs(16),
+};
+const METRICS_SERVER_ROLLOUT_RETRY_POLICY: RetryPolicy = RetryPolicy {
+    max_attempts: 2,
+    initial_backoff: Duration::from_secs(5),
+    max_backoff: Duration::from_secs(15),
+};
+const HELM_INSTALL_RETRY_POLICY: RetryPolicy = RetryPolicy {
+    max_attempts: 3,
+    initial_backoff: Duration::from_secs(5),
+    max_backoff: Duration::from_secs(20),
+};
+const TOOL_DOWNLOAD_RETRY_POLICY: RetryPolicy = RetryPolicy {
+    max_attempts: 3,
+    initial_backoff: Duration::from_secs(3),
+    max_backoff: Duration::from_secs(12),
+};
+const GITHUB_API_RETRY_POLICY: RetryPolicy = RetryPolicy {
+    max_attempts: 3,
+    initial_backoff: Duration::from_secs(2),
+    max_backoff: Duration::from_secs(10),
+};
+const KUBECTL_APPLY_RETRY_POLICY: RetryPolicy = RetryPolicy {
+    max_attempts: 3,
+    initial_backoff: Duration::from_secs(3),
+    max_backoff: Duration::from_secs(12),
+};
 const METRICS_SERVER_MANIFEST_URL: &str =
     "https://github.com/kubernetes-sigs/metrics-server/releases/download/v0.7.2/components.yaml";
 const METRICS_SERVER_NAMESPACE: &str = "kube-system";
@@ -990,6 +1035,127 @@ impl KindNodeContainerState {
 
 type BootstrapResult<T> = Result<T, String>;
 
+// ---------------------------------------------------------------------------
+// Structured error envelope for future upstream error reporting.
+// Collects every transient (recovered) and fatal error that occurs during a
+// bootstrap run so a future telemetry path can ship them in one payload.
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BootstrapErrorReport {
+    timestamp: String,
+    stage: String,
+    category: BootstrapErrorCategory,
+    message: String,
+    attempt: u32,
+    max_attempts: u32,
+    recovered: bool,
+}
+
+#[derive(Clone, Copy, Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BootstrapErrorCategory {
+    Network,
+    Timeout,
+    KubernetesApi,
+    HelmChart,
+    GitHubApi,
+    ToolInstall,
+    ManifestDownload,
+    RuntimeSocket,
+    Unknown,
+}
+
+impl BootstrapErrorCategory {
+    fn from_stage(stage: &str) -> Self {
+        let s = stage.to_ascii_lowercase();
+        if s.contains("helm") {
+            Self::HelmChart
+        } else if s.contains("github") || s.contains("gitops") {
+            Self::GitHubApi
+        } else if s.contains("manifest") || s.contains("download") {
+            Self::ManifestDownload
+        } else if s.contains("kubectl") || s.contains("namespace") || s.contains("apply") {
+            Self::KubernetesApi
+        } else if s.contains("install") || s.contains("tool") || s.contains("binary") {
+            Self::ToolInstall
+        } else if s.contains("runtime") || s.contains("socket") {
+            Self::RuntimeSocket
+        } else if s.contains("timeout") || s.contains("rollout") || s.contains("wait") {
+            Self::Timeout
+        } else {
+            Self::Unknown
+        }
+    }
+}
+
+struct BootstrapErrorCollector {
+    reports: Mutex<Vec<BootstrapErrorReport>>,
+}
+
+impl BootstrapErrorCollector {
+    fn new() -> Self {
+        Self {
+            reports: Mutex::new(Vec::new()),
+        }
+    }
+
+    fn record(
+        &self,
+        stage: &str,
+        message: &str,
+        attempt: u32,
+        max_attempts: u32,
+        recovered: bool,
+    ) {
+        let report = BootstrapErrorReport {
+            timestamp: bootstrap_log_timestamp(),
+            stage: stage.to_string(),
+            category: BootstrapErrorCategory::from_stage(stage),
+            message: message.to_string(),
+            attempt,
+            max_attempts,
+            recovered,
+        };
+        if let Ok(mut reports) = self.reports.lock() {
+            reports.push(report);
+        }
+    }
+
+    fn drain(&self) -> Vec<BootstrapErrorReport> {
+        self.reports
+            .lock()
+            .map(|mut reports| std::mem::take(&mut *reports))
+            .unwrap_or_default()
+    }
+}
+
+static BOOTSTRAP_ERROR_COLLECTOR: OnceLock<BootstrapErrorCollector> = OnceLock::new();
+
+fn bootstrap_errors() -> &'static BootstrapErrorCollector {
+    BOOTSTRAP_ERROR_COLLECTOR.get_or_init(BootstrapErrorCollector::new)
+}
+
+fn record_bootstrap_error(
+    stage: &str,
+    message: &str,
+    attempt: u32,
+    max_attempts: u32,
+    recovered: bool,
+) {
+    let level = if recovered { "debug" } else { "error" };
+    tracing::debug!(
+        level,
+        stage,
+        attempt,
+        max_attempts,
+        recovered,
+        "bootstrap error: {message}"
+    );
+    bootstrap_errors().record(stage, message, attempt, max_attempts, recovered);
+}
+
 #[tauri::command]
 pub fn local_stack_bootstrap_defaults() -> BootstrapLocalStackDefaults {
     ensure_runtime_tool_paths_on_process();
@@ -1017,6 +1183,18 @@ pub async fn bootstrap_local_stack(
 ) -> BootstrapResult<BootstrapReport> {
     let log_guard = BootstrapRunLogGuard::start(&window);
     let result = bootstrap_local_stack_impl(window.clone(), request).await;
+    let error_reports = bootstrap_errors().drain();
+    if !error_reports.is_empty() {
+        let recovered = error_reports.iter().filter(|r| r.recovered).count();
+        let fatal = error_reports.len() - recovered;
+        append_bootstrap_log(&format!(
+            "bootstrap error report: {recovered} recovered, {fatal} fatal, {} total",
+            error_reports.len()
+        ));
+        if let Ok(json) = serde_json::to_string_pretty(&error_reports) {
+            append_bootstrap_log(&format!("bootstrap error envelope:\n{json}"));
+        }
+    }
     match &result {
         Ok(_) => append_bootstrap_log("bootstrap completed successfully"),
         Err(error) => append_bootstrap_log(&format!("bootstrap failed: {error}")),
@@ -1031,6 +1209,18 @@ pub async fn bootstrap_local_stack(
 pub async fn prepare_local_stack_dependencies(window: Window) -> BootstrapResult<BootstrapReport> {
     let log_guard = BootstrapRunLogGuard::start(&window);
     let result = prepare_local_stack_dependencies_impl(window.clone()).await;
+    let error_reports = bootstrap_errors().drain();
+    if !error_reports.is_empty() {
+        let recovered = error_reports.iter().filter(|r| r.recovered).count();
+        let fatal = error_reports.len() - recovered;
+        append_bootstrap_log(&format!(
+            "dependency prep error report: {recovered} recovered, {fatal} fatal, {} total",
+            error_reports.len()
+        ));
+        if let Ok(json) = serde_json::to_string_pretty(&error_reports) {
+            append_bootstrap_log(&format!("dependency prep error envelope:\n{json}"));
+        }
+    }
     match &result {
         Ok(_) => append_bootstrap_log("local stack dependencies prepared successfully"),
         Err(error) => append_bootstrap_log(&format!(
@@ -1107,7 +1297,7 @@ async fn bootstrap_local_stack_impl(
     patch_bootstrap_github_owner(app_mode, github_credentials)?;
 
     emit(&window, "gitops", "Waiting for platform apps...", 92);
-    wait_for_bootstrap_apps(app_mode, Duration::from_secs(600))?;
+    wait_for_bootstrap_apps(app_mode, Duration::from_secs(900))?;
 
     emit(&window, "ready", "Launching Codex App...", 100);
 
@@ -1154,10 +1344,10 @@ async fn ensure_local_stack_cluster_dependencies(window: &Window) -> BootstrapRe
     ensure_kind_cluster(runtime_kind)?;
 
     emit(window, "ingress", "Configuring ingress...", 52);
-    ensure_ingress_nginx_for_kind().await?;
+    ensure_ingress_nginx_for_kind(window).await?;
 
     emit(window, "metrics", "Installing Lens metrics support...", 60);
-    ensure_metrics_server_for_kind().await?;
+    ensure_metrics_server_for_kind(window).await?;
 
     emit(window, "gitops", "Starting Argo CD...", 68);
     ensure_namespace(ARGOCD_NAMESPACE)?;
@@ -1166,26 +1356,56 @@ async fn ensure_local_stack_cluster_dependencies(window: &Window) -> BootstrapRe
     } else {
         install_argocd()?;
     }
-    wait_for_crd("applications.argoproj.io", "120s")?;
-    wait_for_crd("appprojects.argoproj.io", "120s")?;
-    wait_for_rollout(ARGOCD_NAMESPACE, "deployment/argocd-server", "300s")?;
-    wait_for_rollout(ARGOCD_NAMESPACE, "deployment/argocd-repo-server", "300s")?;
-    wait_for_rollout(
-        ARGOCD_NAMESPACE,
-        "deployment/argocd-applicationset-controller",
-        "300s",
+    retry_transient_sync(
+        KUBECTL_APPLY_RETRY_POLICY,
+        "Argo CD CRD wait (applications)",
+        "Check Argo CD installation status, then retry setup.",
+        || wait_for_crd("applications.argoproj.io", "120s"),
     )?;
-    wait_for_rollout(
-        ARGOCD_NAMESPACE,
-        "statefulset/argocd-application-controller",
-        "300s",
+    retry_transient_sync(
+        KUBECTL_APPLY_RETRY_POLICY,
+        "Argo CD CRD wait (appprojects)",
+        "Check Argo CD installation status, then retry setup.",
+        || wait_for_crd("appprojects.argoproj.io", "120s"),
+    )?;
+    retry_transient_sync(
+        KUBECTL_APPLY_RETRY_POLICY,
+        "Argo CD server rollout",
+        "Check argocd-server deployment status, then retry setup.",
+        || wait_for_rollout(ARGOCD_NAMESPACE, "deployment/argocd-server", "300s"),
+    )?;
+    retry_transient_sync(
+        KUBECTL_APPLY_RETRY_POLICY,
+        "Argo CD repo-server rollout",
+        "Check argocd-repo-server deployment status, then retry setup.",
+        || wait_for_rollout(ARGOCD_NAMESPACE, "deployment/argocd-repo-server", "300s"),
+    )?;
+    retry_transient_sync(
+        KUBECTL_APPLY_RETRY_POLICY,
+        "Argo CD applicationset-controller rollout",
+        "Check argocd-applicationset-controller deployment status, then retry setup.",
+        || wait_for_rollout(
+            ARGOCD_NAMESPACE,
+            "deployment/argocd-applicationset-controller",
+            "300s",
+        ),
+    )?;
+    retry_transient_sync(
+        KUBECTL_APPLY_RETRY_POLICY,
+        "Argo CD application-controller rollout",
+        "Check argocd-application-controller statefulset status, then retry setup.",
+        || wait_for_rollout(
+            ARGOCD_NAMESPACE,
+            "statefulset/argocd-application-controller",
+            "300s",
+        ),
     )?;
     ensure_namespace(CTO_NAMESPACE)?;
 
     emit(window, "charts", "Installing CTO Helm charts...", 76);
     apply_client_cluster_baseline_apps()?;
     emit(window, "charts", "Waiting for CTO Helm charts...", 82);
-    wait_for_client_cluster_baseline_apps(Duration::from_secs(600))?;
+    wait_for_client_cluster_baseline_apps(Duration::from_secs(900))?;
 
     Ok(runtime)
 }
@@ -3242,7 +3462,7 @@ fn bitwarden_detection_from_probes(
         available,
         status: Some(status_value),
         docs_url: Some(BITWARDEN_CLI_DOCS_URL.to_string()),
-        secondary: true,
+        secondary: false,
         version,
         reason,
         primary_action: if available {
@@ -4703,11 +4923,8 @@ fn ensure_macos_colima(window: &Window) -> BootstrapResult<RuntimeKind> {
     command.args(["start", "--cpu", "4", "--memory", "8"]);
     run_command(command, "colima start").map(|_| ())?;
 
-    if wait_for_runtime_ready(RuntimeKind::Colima, Duration::from_secs(180)) {
-        Ok(RuntimeKind::Colima)
-    } else {
-        Err("Colima started but Docker did not become available in time.".to_string())
-    }
+    wait_for_runtime_socket(window, RuntimeKind::Colima)?;
+    Ok(RuntimeKind::Colima)
 }
 
 fn ensure_linux_podman(window: &Window) -> BootstrapResult<RuntimeKind> {
@@ -4754,14 +4971,8 @@ fn ensure_windows_podman(window: &Window) -> BootstrapResult<RuntimeKind> {
         run_command(init, "podman machine init").map(|_| ())?;
     }
 
-    if wait_for_runtime_ready(RuntimeKind::Podman, Duration::from_secs(180)) {
-        Ok(RuntimeKind::Podman)
-    } else {
-        Err(
-            "Podman machine started but `podman info` did not become available in time."
-                .to_string(),
-        )
-    }
+    wait_for_runtime_socket(window, RuntimeKind::Podman)?;
+    Ok(RuntimeKind::Podman)
 }
 
 fn podman_machine_exists() -> BootstrapResult<bool> {
@@ -4837,23 +5048,34 @@ fn supports_direct_install(tool: &str) -> bool {
 
 async fn install_direct_binary(tool: &str) -> BootstrapResult<()> {
     let url = direct_binary_url(tool).await?;
-    let response = reqwest::get(&url)
-        .await
-        .map_err(|error| format!("Failed to download {tool}: {error}"))?;
+    let bytes = retry_transient_async_value(
+        TOOL_DOWNLOAD_RETRY_POLICY,
+        &format!("{tool} binary download"),
+        &format!("Check internet connectivity, then retry setup. Download URL: {url}"),
+        || {
+            let url = url.clone();
+            async move {
+                let response = reqwest::get(&url)
+                    .await
+                    .map_err(|error| format!("Failed to download {tool}: {error}"))?;
 
-    if !response.status().is_success() {
-        return Err(format!(
-            "Failed to download {} from {}: HTTP {}",
-            tool,
-            url,
-            response.status()
-        ));
-    }
+                if !response.status().is_success() {
+                    return Err(format!(
+                        "Failed to download {} from {}: HTTP {}",
+                        tool,
+                        url,
+                        response.status()
+                    ));
+                }
 
-    let bytes = response
-        .bytes()
-        .await
-        .map_err(|error| format!("Failed reading {tool} download: {error}"))?;
+                response
+                    .bytes()
+                    .await
+                    .map_err(|error| format!("Failed reading {tool} download: {error}"))
+            }
+        },
+    )
+    .await?;
 
     let local_bin = local_bin_dir().ok_or("Cannot resolve ~/.local/bin".to_string())?;
     std::fs::create_dir_all(&local_bin)
@@ -4902,12 +5124,20 @@ async fn direct_binary_url(tool: &str) -> BootstrapResult<String> {
             "https://kind.sigs.k8s.io/dl/v0.31.0/kind-{os}-{arch}"
         )),
         "kubectl" => {
-            let version = reqwest::get("https://dl.k8s.io/release/stable.txt")
-                .await
-                .map_err(|error| format!("Failed to resolve kubectl version: {error}"))?
-                .text()
-                .await
-                .map_err(|error| format!("Failed reading kubectl version: {error}"))?;
+            let version = retry_transient_async_value(
+                TOOL_DOWNLOAD_RETRY_POLICY,
+                "kubectl version lookup",
+                "Check internet connectivity to dl.k8s.io, then retry setup.",
+                || async {
+                    let resp = reqwest::get("https://dl.k8s.io/release/stable.txt")
+                        .await
+                        .map_err(|error| format!("Failed to resolve kubectl version: {error}"))?;
+                    resp.text()
+                        .await
+                        .map_err(|error| format!("Failed reading kubectl version: {error}"))
+                },
+            )
+            .await?;
             Ok(format!(
                 "https://dl.k8s.io/release/{}/bin/{}/{}/kubectl{}",
                 version.trim(),
@@ -5284,33 +5514,58 @@ async fn apply_remote_manifest_server_side(url: &str) -> BootstrapResult<()> {
 }
 
 async fn download_manifest(url: &str) -> BootstrapResult<String> {
-    let response = reqwest::get(url)
-        .await
-        .map_err(|error| format!("Failed to download manifest {url}: {error}"))?;
+    let url = url.to_string();
+    retry_transient_async_value(
+        TOOL_DOWNLOAD_RETRY_POLICY,
+        "manifest download",
+        "Check internet connectivity (VPN/proxy/firewall), then retry setup.",
+        || {
+            let url = url.clone();
+            async move {
+                let response = reqwest::get(&url)
+                    .await
+                    .map_err(|error| format!("Failed to download manifest {url}: {error}"))?;
 
-    if !response.status().is_success() {
-        return Err(format!(
-            "Failed to download manifest {}: HTTP {}",
-            url,
-            response.status()
-        ));
-    }
+                if !response.status().is_success() {
+                    return Err(format!(
+                        "Failed to download manifest {}: HTTP {}",
+                        url,
+                        response.status()
+                    ));
+                }
 
-    response
-        .text()
-        .await
-        .map_err(|error| format!("Failed reading manifest {url}: {error}"))
+                response
+                    .text()
+                    .await
+                    .map_err(|error| format!("Failed reading manifest {url}: {error}"))
+            }
+        },
+    )
+    .await
 }
 
 fn apply_manifest(manifest: &str) -> BootstrapResult<()> {
     apply_manifest_with_args(manifest, &["apply", "-f", "-"])
 }
 
+fn apply_manifest_with_retry(manifest: &str, stage: &str) -> BootstrapResult<()> {
+    let manifest = manifest.to_string();
+    retry_transient_sync(
+        KUBECTL_APPLY_RETRY_POLICY,
+        stage,
+        "Check cluster connectivity with `kubectl --context kind-cto-app cluster-info`, then retry setup.",
+        || apply_manifest(&manifest),
+    )
+}
+
 fn apply_bootstrap_apps(mode: BootstrapAppMode) -> BootstrapResult<()> {
     for app in mode.manifests() {
         tracing::info!("Applying {} Argo Application", app.name);
-        apply_manifest(app.manifest)
-            .map_err(|error| format!("Failed to apply {} Argo Application: {error}", app.name))?;
+        apply_manifest_with_retry(
+            app.manifest,
+            &format!("{} Argo Application apply", app.name),
+        )
+        .map_err(|error| format!("Failed to apply {} Argo Application: {error}", app.name))?;
     }
 
     Ok(())
@@ -5322,7 +5577,11 @@ fn apply_client_cluster_baseline_apps() -> BootstrapResult<()> {
             "Applying {} Client Cluster baseline Argo Application",
             app.name
         );
-        apply_manifest(app.manifest).map_err(|error| {
+        apply_manifest_with_retry(
+            app.manifest,
+            &format!("{} baseline Argo Application apply", app.name),
+        )
+        .map_err(|error| {
             format!(
                 "Failed to apply {} Client Cluster baseline Argo Application: {error}",
                 app.name
@@ -5509,7 +5768,7 @@ fn apply_bootstrap_scm_secret(manifest: Option<&str>) -> BootstrapResult<()> {
     };
 
     tracing::info!("Applying GitHub App source-control Secret to {CTO_NAMESPACE}");
-    apply_manifest(manifest)
+    apply_manifest_with_retry(manifest, "SCM source-control Secret apply")
         .map_err(|error| format!("Failed to apply GitHub App source-control Secret: {error}"))
 }
 
@@ -5535,8 +5794,11 @@ fn apply_bootstrap_agent_keys(agent_keys: &[BootstrapAgentKey]) -> BootstrapResu
         gitlab_token_present,
         "Applying local API key Secret (secret values not logged)"
     );
-    apply_manifest(&agent_keys_secret_manifest(agent_keys)?)
-        .map_err(|error| format!("Failed to apply local API key Secret: {error}"))?;
+    apply_manifest_with_retry(
+        &agent_keys_secret_manifest(agent_keys)?,
+        "local API key Secret apply",
+    )
+    .map_err(|error| format!("Failed to apply local API key Secret: {error}"))?;
     if github_token_present {
         tracing::info!(
             secret = CTO_AGENT_KEYS_SECRET,
@@ -5581,8 +5843,11 @@ fn apply_bootstrap_argocd_oci_repository(
         username,
         "Applying Argo CD GHCR OCI repository credentials (token value not logged)"
     );
-    apply_manifest(&argocd_oci_repository_secret_manifest(username, token)?)
-        .map_err(|error| format!("Failed to apply Argo CD GHCR repository credentials: {error}"))?;
+    apply_manifest_with_retry(
+        &argocd_oci_repository_secret_manifest(username, token)?,
+        "Argo CD GHCR OCI repository credentials apply",
+    )
+    .map_err(|error| format!("Failed to apply Argo CD GHCR repository credentials: {error}"))?;
     tracing::info!(
         secret = "ghcr-helm-charts-repository",
         namespace = ARGOCD_NAMESPACE,
@@ -5610,8 +5875,11 @@ fn apply_bootstrap_ghcr_pull_secret(
         username,
         "Applying GHCR image pull Secret (token value not logged)"
     );
-    apply_manifest(&ghcr_pull_secret_manifest(username, token)?)
-        .map_err(|error| format!("Failed to apply GHCR image pull Secret: {error}"))?;
+    apply_manifest_with_retry(
+        &ghcr_pull_secret_manifest(username, token)?,
+        "GHCR image pull Secret apply",
+    )
+    .map_err(|error| format!("Failed to apply GHCR image pull Secret: {error}"))?;
     tracing::info!(
         secret = GHCR_PULL_SECRET,
         namespace = CTO_NAMESPACE,
@@ -5633,8 +5901,11 @@ fn apply_bootstrap_discord_tokens(discord_tokens: &[BootstrapAgentKey]) -> Boots
         discord_tokens.len(),
         OPENCLAW_DISCORD_TOKENS_SECRET
     );
-    apply_manifest(&discord_tokens_secret_manifest(discord_tokens)?)
-        .map_err(|error| format!("Failed to apply Discord bot token Secret: {error}"))
+    apply_manifest_with_retry(
+        &discord_tokens_secret_manifest(discord_tokens)?,
+        "Discord bot token Secret apply",
+    )
+    .map_err(|error| format!("Failed to apply Discord bot token Secret: {error}"))
 }
 
 fn patch_bootstrap_cto_agent_keys(agent_keys: &[BootstrapAgentKey]) -> BootstrapResult<()> {
@@ -5945,8 +6216,9 @@ async fn ensure_github_repository(
         "private": true,
         "auto_init": false
     });
-    let repo = github_api_send::<GitHubRepoResponse>(
-        client.post(&create_url).json(&body),
+    let repo = github_api_send::<GitHubRepoResponse, _>(
+        client,
+        |client| client.post(&create_url).json(&body),
         token,
         &format!("create GitHub repository {owner}/{CTO_GITOPS_REPO_NAME}"),
     )
@@ -5991,15 +6263,17 @@ async fn commit_gitops_files(
 
     let mut tree_entries = Vec::with_capacity(files_to_commit.len());
     for file in files_to_commit {
-        let blob = github_api_send::<GitHubBlobResponse>(
-            client
-                .post(format!("{repo_api_url}/git/blobs"))
-                .json(&json!({
-                    "content": file.content,
-                    "encoding": "utf-8"
-                })),
+        let blob_url = format!("{repo_api_url}/git/blobs");
+        let blob_body = json!({
+            "content": file.content,
+            "encoding": "utf-8"
+        });
+        let blob_path = file.path.clone();
+        let blob = github_api_send::<GitHubBlobResponse, _>(
+            client,
+            move |client| client.post(&blob_url).json(&blob_body),
             token,
-            &format!("create GitHub blob {}", file.path),
+            &format!("create GitHub blob {blob_path}"),
         )
         .await?;
         tree_entries.push(json!({
@@ -6014,10 +6288,10 @@ async fn commit_gitops_files(
         "base_tree": base_tree_sha,
         "tree": tree_entries
     });
-    let tree = github_api_send::<GitHubTreeResponse>(
-        client
-            .post(format!("{repo_api_url}/git/trees"))
-            .json(&tree_body),
+    let tree_url = format!("{repo_api_url}/git/trees");
+    let tree = github_api_send::<GitHubTreeResponse, _>(
+        client,
+        move |client| client.post(&tree_url).json(&tree_body),
         token,
         "create GitHub GitOps tree",
     )
@@ -6028,20 +6302,24 @@ async fn commit_gitops_files(
         "tree": tree.sha
     });
     commit_body["parents"] = json!([base_commit_sha]);
-    let commit = github_api_send::<GitHubCommitResponse>(
-        client
-            .post(format!("{repo_api_url}/git/commits"))
-            .json(&commit_body),
+    let commit_url = format!("{repo_api_url}/git/commits");
+    let commit = github_api_send::<GitHubCommitResponse, _>(
+        client,
+        move |client| client.post(&commit_url).json(&commit_body),
         token,
         "create GitHub GitOps commit",
     )
     .await?;
 
-    github_api_send::<Value>(
-        client.patch(&update_ref_url).json(&json!({
-            "sha": commit.sha,
-            "force": false
-        })),
+    let commit_sha = commit.sha.clone();
+    github_api_send::<Value, _>(
+        client,
+        move |client| {
+            client.patch(&update_ref_url).json(&json!({
+                "sha": commit_sha,
+                "force": false
+            }))
+        },
         token,
         "update GitHub GitOps main branch",
     )
@@ -6057,16 +6335,18 @@ async fn create_initial_gitops_file(
     file: &GitOpsFile,
 ) -> BootstrapResult<()> {
     let repo_api_url = github_repo_api_url(owner);
-    github_api_send::<Value>(
-        client
-            .put(format!("{repo_api_url}/contents/{}", file.path))
-            .json(&json!({
-                "message": "Initialize CTO GitOps",
-                "content": base64_encode(file.content.as_bytes()),
-                "branch": "main"
-            })),
+    let contents_url = format!("{repo_api_url}/contents/{}", file.path);
+    let contents_body = json!({
+        "message": "Initialize CTO GitOps",
+        "content": base64_encode(file.content.as_bytes()),
+        "branch": "main"
+    });
+    let file_path = file.path.clone();
+    github_api_send::<Value, _>(
+        client,
+        move |client| client.put(&contents_url).json(&contents_body),
         token,
-        &format!("create initial GitHub GitOps file {}", file.path),
+        &format!("create initial GitHub GitOps file {file_path}"),
     )
     .await
     .map(|_| ())
@@ -6085,10 +6365,17 @@ async fn github_api_get<T: for<'de> Deserialize<'de>>(
     token: &str,
     url: &str,
 ) -> BootstrapResult<T> {
-    github_api_send(client.get(url), token, &format!("GET {url}")).await
+    let url = url.to_string();
+    github_api_send(
+        client,
+        |client| client.get(&url),
+        token,
+        &format!("GET {url}"),
+    )
+    .await
 }
 
-async fn github_api_send<T: for<'de> Deserialize<'de>>(
+async fn github_api_send_once<T: for<'de> Deserialize<'de>>(
     request: reqwest::RequestBuilder,
     token: &str,
     action: &str,
@@ -6107,9 +6394,70 @@ async fn github_api_send<T: for<'de> Deserialize<'de>>(
         .await
         .map_err(|error| format!("{action} failed to read response: {error}"))?;
     if !status.is_success() {
-        return Err(format!("{action} failed with status {status}: {text}"));
+        let qualifier = if is_transient_http_status(status.as_u16()) {
+            "service unavailable"
+        } else {
+            "error"
+        };
+        return Err(format!("{action} failed with {qualifier} status {status}: {text}"));
     }
     serde_json::from_str(&text).map_err(|error| format!("{action} returned invalid JSON: {error}"))
+}
+
+fn is_transient_http_status(status: u16) -> bool {
+    matches!(status, 408 | 429 | 500 | 502 | 503 | 504)
+}
+
+async fn github_api_send<T, F>(
+    client: &Client,
+    mut build_request: F,
+    token: &str,
+    action: &str,
+) -> BootstrapResult<T>
+where
+    T: for<'de> Deserialize<'de>,
+    F: FnMut(&Client) -> reqwest::RequestBuilder,
+{
+    let policy = GITHUB_API_RETRY_POLICY;
+    let attempts = policy.attempts();
+    let mut last_error = String::new();
+
+    for attempt in 1..=attempts {
+        match github_api_send_once(build_request(client), token, action).await {
+            Ok(value) => return Ok(value),
+            Err(error) => {
+                last_error = error;
+                let transient = is_transient_bootstrap_error(&last_error);
+                record_bootstrap_error(
+                    action,
+                    &last_error,
+                    attempt,
+                    attempts,
+                    transient && attempt < attempts,
+                );
+                if transient && attempt < attempts {
+                    let delay = retry_backoff_delay(
+                        policy.initial_backoff,
+                        policy.max_backoff,
+                        attempt - 1,
+                    );
+                    tracing::debug!(
+                        "{action} attempt {attempt}/{attempts} transient error; retrying after {}s",
+                        delay.as_secs()
+                    );
+                    append_bootstrap_log(&format!(
+                        "{action} attempt {attempt}/{attempts} transient failure; retrying after {}s",
+                        delay.as_secs()
+                    ));
+                    tokio::time::sleep(delay).await;
+                    continue;
+                }
+                return Err(last_error);
+            }
+        }
+    }
+
+    Err(last_error)
 }
 
 fn collect_gitops_repository_files() -> BootstrapResult<Vec<GitOpsFile>> {
@@ -6204,7 +6552,7 @@ type: Opaque
 stringData:
   type: helm
   name: ghcr-helm-charts
-  url: {GHCR_REGISTRY}/5dlabs/helm-charts
+  url: {GHCR_REGISTRY}/5dlabsinc/helm-charts
   enableOCI: "true"
   username: {quoted_username}
   password: {quoted_token}
@@ -6300,22 +6648,369 @@ fn base64_encode(bytes: &[u8]) -> String {
     encoded
 }
 
-async fn ensure_ingress_nginx_for_kind() -> BootstrapResult<()> {
+#[derive(Copy, Clone, Debug)]
+struct RetryPolicy {
+    max_attempts: u32,
+    initial_backoff: Duration,
+    max_backoff: Duration,
+}
+
+impl RetryPolicy {
+    fn attempts(self) -> u32 {
+        self.max_attempts.max(1)
+    }
+}
+
+fn retry_backoff_delay(initial: Duration, max: Duration, retry_index: u32) -> Duration {
+    let multiplier = 1_u128 << retry_index.min(20);
+    let bounded_ms = initial
+        .as_millis()
+        .saturating_mul(multiplier)
+        .min(max.as_millis())
+        .min(u128::from(u64::MAX));
+    Duration::from_millis(bounded_ms as u64)
+}
+
+fn is_transient_bootstrap_error(message: &str) -> bool {
+    let normalized = message.to_ascii_lowercase();
+    [
+        "timed out waiting for the condition",
+        "timed out",
+        "timeout",
+        "context deadline exceeded",
+        "i/o timeout",
+        "tls handshake timeout",
+        "temporary failure in name resolution",
+        "connection reset by peer",
+        "connection refused",
+        "was refused",
+        "service unavailable",
+        "server unavailable",
+        "no route to host",
+        "eof",
+        "broken pipe",
+        "network is unreachable",
+        "dns error",
+        "operation timed out",
+        "error sending request",
+        "connection closed before message completed",
+        "502 bad gateway",
+        "503 service unavailable",
+        "504 gateway timeout",
+        "429 too many requests",
+        "couldn't connect to server",
+    ]
+    .iter()
+    .any(|needle| normalized.contains(needle))
+}
+
+fn retry_exhausted_error(stage: &str, attempts: u32, remediation: &str, last_error: &str) -> String {
+    format!(
+        "{stage} failed after {attempts} attempt(s). {remediation} Last error: {last_error}"
+    )
+}
+
+/// Generic synchronous retry wrapper for transient bootstrap errors.
+fn retry_transient_sync<F>(
+    policy: RetryPolicy,
+    stage: &str,
+    remediation: &str,
+    mut operation: F,
+) -> BootstrapResult<()>
+where
+    F: FnMut() -> BootstrapResult<()>,
+{
+    let attempts = policy.attempts();
+    let mut last_error = String::new();
+
+    for attempt in 1..=attempts {
+        match operation() {
+            Ok(()) => return Ok(()),
+            Err(error) => {
+                last_error = error;
+                let transient = is_transient_bootstrap_error(&last_error);
+                record_bootstrap_error(stage, &last_error, attempt, attempts, transient && attempt < attempts);
+                if transient && attempt < attempts {
+                    let delay = retry_backoff_delay(
+                        policy.initial_backoff,
+                        policy.max_backoff,
+                        attempt - 1,
+                    );
+                    tracing::debug!(
+                        "{stage} attempt {attempt}/{attempts} failed with transient error; retrying after {}s: {last_error}",
+                        delay.as_secs()
+                    );
+                    append_bootstrap_log(&format!(
+                        "{stage} attempt {attempt}/{attempts} transient failure; retrying after {}s",
+                        delay.as_secs()
+                    ));
+                    thread::sleep(delay);
+                    continue;
+                }
+                if !transient {
+                    record_bootstrap_error(stage, &last_error, attempt, attempts, false);
+                }
+                return Err(retry_exhausted_error(
+                    stage,
+                    attempt,
+                    remediation,
+                    &last_error,
+                ));
+            }
+        }
+    }
+
+    Err(retry_exhausted_error(
+        stage,
+        attempts,
+        remediation,
+        &last_error,
+    ))
+}
+
+/// Generic async retry wrapper for transient bootstrap errors.
+async fn retry_transient_async<F, Fut>(
+    policy: RetryPolicy,
+    stage: &str,
+    remediation: &str,
+    mut operation: F,
+) -> BootstrapResult<()>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = BootstrapResult<()>>,
+{
+    let attempts = policy.attempts();
+    let mut last_error = String::new();
+
+    for attempt in 1..=attempts {
+        match operation().await {
+            Ok(()) => return Ok(()),
+            Err(error) => {
+                last_error = error;
+                let transient = is_transient_bootstrap_error(&last_error);
+                record_bootstrap_error(stage, &last_error, attempt, attempts, transient && attempt < attempts);
+                if transient && attempt < attempts {
+                    let delay = retry_backoff_delay(
+                        policy.initial_backoff,
+                        policy.max_backoff,
+                        attempt - 1,
+                    );
+                    tracing::debug!(
+                        "{stage} attempt {attempt}/{attempts} failed with transient error; retrying after {}s: {last_error}",
+                        delay.as_secs()
+                    );
+                    append_bootstrap_log(&format!(
+                        "{stage} attempt {attempt}/{attempts} transient failure; retrying after {}s",
+                        delay.as_secs()
+                    ));
+                    tokio::time::sleep(delay).await;
+                    continue;
+                }
+                if !transient {
+                    record_bootstrap_error(stage, &last_error, attempt, attempts, false);
+                }
+                return Err(retry_exhausted_error(
+                    stage,
+                    attempt,
+                    remediation,
+                    &last_error,
+                ));
+            }
+        }
+    }
+
+    Err(retry_exhausted_error(
+        stage,
+        attempts,
+        remediation,
+        &last_error,
+    ))
+}
+
+/// Async retry wrapper that returns a value on success.
+async fn retry_transient_async_value<F, Fut, T>(
+    policy: RetryPolicy,
+    stage: &str,
+    remediation: &str,
+    mut operation: F,
+) -> BootstrapResult<T>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = BootstrapResult<T>>,
+{
+    let attempts = policy.attempts();
+    let mut last_error = String::new();
+
+    for attempt in 1..=attempts {
+        match operation().await {
+            Ok(value) => return Ok(value),
+            Err(error) => {
+                last_error = error;
+                let transient = is_transient_bootstrap_error(&last_error);
+                record_bootstrap_error(stage, &last_error, attempt, attempts, transient && attempt < attempts);
+                if transient && attempt < attempts {
+                    let delay = retry_backoff_delay(
+                        policy.initial_backoff,
+                        policy.max_backoff,
+                        attempt - 1,
+                    );
+                    tracing::debug!(
+                        "{stage} attempt {attempt}/{attempts} failed with transient error; retrying after {}s: {last_error}",
+                        delay.as_secs()
+                    );
+                    append_bootstrap_log(&format!(
+                        "{stage} attempt {attempt}/{attempts} transient failure; retrying after {}s",
+                        delay.as_secs()
+                    ));
+                    tokio::time::sleep(delay).await;
+                    continue;
+                }
+                if !transient {
+                    record_bootstrap_error(stage, &last_error, attempt, attempts, false);
+                }
+                return Err(retry_exhausted_error(
+                    stage,
+                    attempt,
+                    remediation,
+                    &last_error,
+                ));
+            }
+        }
+    }
+
+    Err(retry_exhausted_error(
+        stage,
+        attempts,
+        remediation,
+        &last_error,
+    ))
+}
+
+fn wait_for_ingress_nginx_rollout_with_retry(window: &Window) -> BootstrapResult<()> {
+    let stage = "ingress-nginx rollout did not complete";
+    let remediation = "Inspect ingress status with `kubectl --context kind-cto-app -n ingress-nginx get pods` and `kubectl --context kind-cto-app -n ingress-nginx describe deployment ingress-nginx-controller`, then retry setup.";
+    let attempts = INGRESS_NGINX_ROLLOUT_RETRY_POLICY.attempts();
+    let mut last_error = String::new();
+
+    for attempt in 1..=attempts {
+        match wait_for_rollout(
+            "ingress-nginx",
+            "deployment/ingress-nginx-controller",
+            "240s",
+        ) {
+            Ok(()) => return Ok(()),
+            Err(error) => {
+                last_error = error;
+                let transient = is_transient_bootstrap_error(&last_error);
+                record_bootstrap_error(
+                    "ingress-nginx rollout",
+                    &last_error,
+                    attempt,
+                    attempts,
+                    transient && attempt < attempts,
+                );
+                if transient && attempt < attempts {
+                    let delay = retry_backoff_delay(
+                        INGRESS_NGINX_ROLLOUT_RETRY_POLICY.initial_backoff,
+                        INGRESS_NGINX_ROLLOUT_RETRY_POLICY.max_backoff,
+                        attempt - 1,
+                    );
+                    let notice = format!(
+                        "ingress-nginx rollout attempt {attempt}/{attempts} failed with transient error; retrying after {}s",
+                        delay.as_secs()
+                    );
+                    tracing::warn!("{notice}: {last_error}");
+                    append_bootstrap_log(&notice);
+                    emit(
+                        window,
+                        "ingress",
+                        &format!("Still working on ingress rollout ({attempt}/{attempts})..."),
+                        54,
+                    );
+                    thread::sleep(delay);
+                    continue;
+                }
+                return Err(retry_exhausted_error(
+                    stage,
+                    attempt,
+                    remediation,
+                    &last_error,
+                ));
+            }
+        }
+    }
+
+    Err(retry_exhausted_error(
+        stage,
+        attempts,
+        remediation,
+        &last_error,
+    ))
+}
+
+async fn ensure_ingress_nginx_for_kind(window: &Window) -> BootstrapResult<()> {
     if kubernetes_resource_exists("ingress-nginx", "deployment", "ingress-nginx-controller")? {
         tracing::info!(
             "ingress-nginx controller already exists; skipping remote manifest download"
         );
     } else {
-        apply_remote_manifest_server_side(INGRESS_NGINX_KIND_URL).await?;
+        let stage = "Failed to install ingress-nginx manifest";
+        let remediation = "Check internet connectivity (VPN/proxy/firewall) and verify GitHub raw URLs are reachable, then retry setup.";
+        let attempts = INGRESS_NGINX_MANIFEST_RETRY_POLICY.attempts();
+        let mut last_error = String::new();
+        for attempt in 1..=attempts {
+            match apply_remote_manifest_server_side(INGRESS_NGINX_KIND_URL).await {
+                Ok(()) => {
+                    last_error.clear();
+                    break;
+                }
+                Err(error) => {
+                    last_error = error;
+                    let transient = is_transient_bootstrap_error(&last_error);
+                    record_bootstrap_error(
+                        "ingress-nginx manifest apply",
+                        &last_error,
+                        attempt,
+                        attempts,
+                        transient && attempt < attempts,
+                    );
+                    if transient && attempt < attempts {
+                        let delay = retry_backoff_delay(
+                            INGRESS_NGINX_MANIFEST_RETRY_POLICY.initial_backoff,
+                            INGRESS_NGINX_MANIFEST_RETRY_POLICY.max_backoff,
+                            attempt - 1,
+                        );
+                        let notice = format!(
+                            "ingress-nginx manifest apply attempt {attempt}/{attempts} failed with transient error; retrying after {}s",
+                            delay.as_secs()
+                        );
+                        tracing::warn!("{notice}: {last_error}");
+                        append_bootstrap_log(&notice);
+                        emit(
+                            window,
+                            "ingress",
+                            &format!(
+                                "Still working on ingress setup ({attempt}/{attempts})..."
+                            ),
+                            52,
+                        );
+                        thread::sleep(delay);
+                        continue;
+                    }
+                    return Err(retry_exhausted_error(
+                        stage,
+                        attempt,
+                        remediation,
+                        &last_error,
+                    ));
+                }
+            }
+        }
     }
-    wait_for_rollout(
-        "ingress-nginx",
-        "deployment/ingress-nginx-controller",
-        "240s",
-    )
+    wait_for_ingress_nginx_rollout_with_retry(window)
 }
 
-async fn ensure_metrics_server_for_kind() -> BootstrapResult<()> {
+async fn ensure_metrics_server_for_kind(window: &Window) -> BootstrapResult<()> {
     if kubernetes_resource_exists(
         METRICS_SERVER_NAMESPACE,
         "deployment",
@@ -6323,16 +7018,68 @@ async fn ensure_metrics_server_for_kind() -> BootstrapResult<()> {
     )? {
         tracing::info!("metrics-server already exists; skipping remote manifest download");
     } else {
-        apply_remote_manifest_server_side(METRICS_SERVER_MANIFEST_URL)
-            .await
-            .map_err(|error| {
-                format!("Failed to apply metrics-server manifest for Lens: {error}")
-            })?;
+        let policy = METRICS_SERVER_MANIFEST_RETRY_POLICY;
+        let attempts = policy.attempts();
+        let mut last_error = String::new();
+        for attempt in 1..=attempts {
+            match apply_remote_manifest_server_side(METRICS_SERVER_MANIFEST_URL).await {
+                Ok(()) => {
+                    last_error.clear();
+                    break;
+                }
+                Err(error) => {
+                    last_error = format!("Failed to apply metrics-server manifest for Lens: {error}");
+                    let transient = is_transient_bootstrap_error(&last_error);
+                    record_bootstrap_error(
+                        "metrics-server manifest download",
+                        &last_error,
+                        attempt,
+                        attempts,
+                        transient && attempt < attempts,
+                    );
+                    if transient && attempt < attempts {
+                        let delay = retry_backoff_delay(
+                            policy.initial_backoff,
+                            policy.max_backoff,
+                            attempt - 1,
+                        );
+                        emit(
+                            window,
+                            "metrics",
+                            &format!(
+                                "Still working on metrics-server setup ({attempt}/{attempts})..."
+                            ),
+                            60,
+                        );
+                        tokio::time::sleep(delay).await;
+                        continue;
+                    }
+                    return Err(retry_exhausted_error(
+                        "metrics-server manifest download",
+                        attempt,
+                        "Check internet connectivity and verify GitHub release URLs are reachable, then retry setup.",
+                        &last_error,
+                    ));
+                }
+            }
+        }
     }
     patch_metrics_server_for_kind()?;
-    wait_for_rollout(METRICS_SERVER_NAMESPACE, METRICS_SERVER_DEPLOYMENT, "180s")
-        .map_err(|error| format!("metrics-server rollout failed after Kind patch: {error}"))?;
-    wait_for_api_service_available(METRICS_SERVER_API_SERVICE, "120s")
+    retry_transient_sync(
+        METRICS_SERVER_ROLLOUT_RETRY_POLICY,
+        "metrics-server rollout",
+        "Inspect metrics-server pods with `kubectl --context kind-cto-app -n kube-system get pods`, then retry setup.",
+        || {
+            wait_for_rollout(METRICS_SERVER_NAMESPACE, METRICS_SERVER_DEPLOYMENT, "180s")
+                .map_err(|error| format!("metrics-server rollout failed after Kind patch: {error}"))
+        },
+    )?;
+    retry_transient_sync(
+        METRICS_SERVER_ROLLOUT_RETRY_POLICY,
+        "metrics-server API service",
+        "Check API service status with `kubectl --context kind-cto-app get apiservice v1beta1.metrics.k8s.io`, then retry setup.",
+        || wait_for_api_service_available(METRICS_SERVER_API_SERVICE, "120s"),
+    )
 }
 
 fn kubernetes_resource_exists(namespace: &str, kind: &str, name: &str) -> BootstrapResult<bool> {
@@ -6530,7 +7277,7 @@ fn apply_manifest_with_args(manifest: &str, args: &[&str]) -> BootstrapResult<()
 
 fn ensure_namespace(name: &str) -> BootstrapResult<()> {
     let manifest = format!("apiVersion: v1\nkind: Namespace\nmetadata:\n  name: {name}\n");
-    apply_manifest(&manifest)
+    apply_manifest_with_retry(&manifest, &format!("namespace {name} apply"))
 }
 
 fn wait_for_rollout(namespace: &str, resource: &str, timeout: &str) -> BootstrapResult<()> {
@@ -6701,7 +7448,15 @@ fn helm_command() -> Command {
 }
 
 fn install_argocd() -> BootstrapResult<()> {
-    // Register the argo-helm repo (idempotent) and refresh its index.
+    retry_transient_sync(
+        HELM_INSTALL_RETRY_POLICY,
+        "Argo CD Helm install",
+        "Check internet connectivity and Helm repo access, then retry setup.",
+        install_argocd_once,
+    )
+}
+
+fn install_argocd_once() -> BootstrapResult<()> {
     {
         let mut cmd = helm_command();
         cmd.args([
@@ -6719,8 +7474,6 @@ fn install_argocd() -> BootstrapResult<()> {
         run_expecting_success(cmd, "helm repo update argo")?;
     }
 
-    // Stream our overlay in via stdin rather than writing a temp file — keeps
-    // install reproducible and avoids leaking files on failure paths.
     let mut cmd = helm_command();
     cmd.args([
         "upgrade",
@@ -6802,15 +7555,68 @@ fn runtime_ready(kind: RuntimeKind) -> bool {
     }
 }
 
-fn wait_for_runtime_ready(kind: RuntimeKind, timeout: Duration) -> bool {
-    let deadline = Instant::now() + timeout;
-    while Instant::now() < deadline {
-        if runtime_ready(kind) {
-            return true;
-        }
-        thread::sleep(Duration::from_secs(2));
+fn wait_for_runtime_socket(window: &Window, kind: RuntimeKind) -> BootstrapResult<()> {
+    if runtime_ready(kind) {
+        return Ok(());
     }
-    false
+
+    let label = kind.label();
+    let policy = RUNTIME_SOCKET_RETRY_POLICY;
+    let attempts = policy.attempts();
+
+    emit(
+        window,
+        "runtime",
+        &format!("Waiting for {label} socket to become available..."),
+        12,
+    );
+
+    for attempt in 1..=attempts {
+        let delay = retry_backoff_delay(policy.initial_backoff, policy.max_backoff, attempt - 1);
+        thread::sleep(delay);
+
+        if runtime_ready(kind) {
+            tracing::info!(
+                "{label} socket became available on attempt {attempt}/{attempts}"
+            );
+            emit(
+                window,
+                "runtime",
+                &format!("{label} is ready."),
+                14,
+            );
+            return Ok(());
+        }
+
+        let notice = format!(
+            "{label} socket not ready (attempt {attempt}/{attempts}), retrying after {}s...",
+            delay.as_secs()
+        );
+        tracing::warn!("{notice}");
+        append_bootstrap_log(&notice);
+
+        let progress = 12 + (attempt * 2).min(16) as u8;
+        emit(
+            window,
+            "runtime",
+            &format!("Waiting for {label} socket ({attempt}/{attempts})..."),
+            progress,
+        );
+    }
+
+    let remediation = format!(
+        "Verify {label} is running (`{cmd} status`) and the socket is accessible \
+         (`{socket_cmd} info`). If the VM started but the socket is stale, try \
+         `{cmd} stop && {cmd} start`, then retry.",
+        cmd = if kind == RuntimeKind::Colima { "colima" } else { "podman machine" },
+        socket_cmd = if kind == RuntimeKind::Colima { "docker" } else { "podman" },
+    );
+    Err(retry_exhausted_error(
+        &format!("{label} socket did not become available"),
+        attempts,
+        &remediation,
+        &format!("`{} info` returned a non-zero exit code", if kind == RuntimeKind::Colima { "docker" } else { "podman" }),
+    ))
 }
 
 fn tool_command(name: &str) -> Command {
@@ -6939,27 +7745,30 @@ mod tests {
         ensure_bootstrap_gitops_repository, extract_github_user_code,
         extract_github_verification_uri, format_argo_application_status, ghcr_pull_secret_manifest,
         gitops_repository_initialization_required, gitops_repository_owner,
-        metrics_server_kind_patch, morgan_cto_config_values_patch,
+        is_transient_bootstrap_error, metrics_server_kind_patch, morgan_cto_config_values_patch,
         normalize_bootstrap_github_credentials, normalize_bootstrap_provider_credentials,
         normalize_bootstrap_scm_secret_manifest, normalize_bootstrap_tool_api_keys,
         parse_cpu_quantity_to_milli, parse_kind_node_container_states, parse_kubelet_summary_usage,
         parse_kubernetes_nodes, parse_kubernetes_pods, parse_memory_quantity_to_bytes,
         parse_runtime_stats_lines, prepare_origin_transfer_inner, remote_manifest_skip_reason,
-        terminal_argo_application_error, validate_bootstrap_setup, BootstrapAgentKey,
-        BootstrapAiCli, BootstrapAppMode, BootstrapGithubCredentials, BootstrapGithubRequest,
-        BootstrapHarnessMode, BootstrapHarnessRouting, BootstrapLocalStackRequest,
-        BootstrapModelRoute, BootstrapProviderAuth, BootstrapProviderCredentialConfig,
-        BootstrapProviderCredentialRequest, BootstrapProviderSelection, BootstrapProvidersRequest,
-        BootstrapScmRequest, BootstrapSetupAgent, BootstrapSetupHarness, BootstrapSetupProfile,
-        BootstrapSetupSource, BootstrapSourceCredentials, BootstrapSourceProvider,
-        BootstrapToolApiKeyRequest, BootstrapToolsRequest, KindNodeContainerState, OriginEngine,
-        OriginTransferMode, OriginTransferRequest, BOOTSTRAP_TEST_MODE_ENV, CTO_GITOPS_REPO_NAME,
+        retry_backoff_delay, terminal_argo_application_error, validate_bootstrap_setup,
+        BootstrapAgentKey, BootstrapAiCli, BootstrapAppMode, BootstrapGithubCredentials,
+        BootstrapGithubRequest, BootstrapHarnessMode, BootstrapHarnessRouting,
+        BootstrapLocalStackRequest, BootstrapModelRoute, BootstrapProviderAuth,
+        BootstrapProviderCredentialConfig, BootstrapProviderCredentialRequest,
+        BootstrapProviderSelection, BootstrapProvidersRequest, BootstrapScmRequest,
+        BootstrapSetupAgent, BootstrapSetupHarness, BootstrapSetupProfile, BootstrapSetupSource,
+        BootstrapSourceCredentials, BootstrapSourceProvider, BootstrapToolApiKeyRequest,
+        BootstrapToolsRequest, KindNodeContainerState, OriginEngine, OriginTransferMode,
+        OriginTransferRequest, BOOTSTRAP_TEST_MODE_ENV, CTO_GITOPS_REPO_NAME,
         GITHUB_TOKEN_SECRET_KEY, GITLAB_TOKEN_SECRET_KEY, METRICS_SERVER_KUBELET_INSECURE_TLS_ARG,
-        METRICS_SERVER_KUBELET_PREFERRED_ADDRESS_TYPES_ARG,
+        METRICS_SERVER_KUBELET_PREFERRED_ADDRESS_TYPES_ARG, RUNTIME_SOCKET_RETRY_POLICY,
+        retry_exhausted_error,
     };
     use serde_json::json;
     use std::collections::BTreeMap;
     use std::path::Path;
+    use std::time::Duration;
 
     #[test]
     fn bootstrap_test_mode_defaults_to_full_for_empty_or_false_values() {
@@ -7166,6 +7975,82 @@ mod tests {
         assert!(!remote_manifest_skip_reason(
             b"The connection to the server localhost:8080 was refused"
         ));
+    }
+
+    #[test]
+    fn retry_backoff_delay_grows_exponentially_and_caps() {
+        assert_eq!(
+            retry_backoff_delay(Duration::from_secs(4), Duration::from_secs(16), 0),
+            Duration::from_secs(4)
+        );
+        assert_eq!(
+            retry_backoff_delay(Duration::from_secs(4), Duration::from_secs(16), 1),
+            Duration::from_secs(8)
+        );
+        assert_eq!(
+            retry_backoff_delay(Duration::from_secs(4), Duration::from_secs(16), 2),
+            Duration::from_secs(16)
+        );
+        assert_eq!(
+            retry_backoff_delay(Duration::from_secs(4), Duration::from_secs(16), 4),
+            Duration::from_secs(16)
+        );
+    }
+
+    #[test]
+    fn transient_bootstrap_error_detects_timeout_and_connection_flakes() {
+        assert!(is_transient_bootstrap_error(
+            "Timed out waiting for deployment/ingress-nginx-controller in ingress-nginx: error: timed out waiting for the condition"
+        ));
+        assert!(is_transient_bootstrap_error(
+            "Failed to download manifest: error sending request for url: operation timed out"
+        ));
+        assert!(is_transient_bootstrap_error(
+            "kubectl apply failed: The connection to the server 127.0.0.1:6443 was refused"
+        ));
+    }
+
+    #[test]
+    fn transient_bootstrap_error_ignores_non_network_failures() {
+        assert!(!is_transient_bootstrap_error(
+            "kubectl apply failed: error validating data: [apiVersion not set]"
+        ));
+        assert!(!is_transient_bootstrap_error(
+            "Failed to parse metrics-server deployment before Kind patch: expected value at line 1 column 1"
+        ));
+    }
+
+    #[test]
+    fn runtime_socket_retry_policy_has_bounded_backoff() {
+        let policy = RUNTIME_SOCKET_RETRY_POLICY;
+        assert!(policy.max_attempts >= 10, "need enough attempts to cover slow VM start");
+        assert!(
+            policy.initial_backoff <= Duration::from_secs(3),
+            "first poll should be quick so fast starts aren't delayed"
+        );
+        assert!(
+            policy.max_backoff <= Duration::from_secs(15),
+            "max backoff should stay bounded to give responsive progress"
+        );
+
+        let first = retry_backoff_delay(policy.initial_backoff, policy.max_backoff, 0);
+        let second = retry_backoff_delay(policy.initial_backoff, policy.max_backoff, 1);
+        let capped = retry_backoff_delay(policy.initial_backoff, policy.max_backoff, 10);
+        assert!(second > first, "backoff should grow");
+        assert_eq!(capped, policy.max_backoff, "should cap at max_backoff");
+    }
+
+    #[test]
+    fn runtime_socket_retry_exhausted_error_includes_remediation() {
+        let error = retry_exhausted_error(
+            "Colima socket did not become available",
+            15,
+            "Verify Colima is running (`colima status`).",
+            "`docker info` returned a non-zero exit code",
+        );
+        assert!(error.contains("15 attempt(s)"));
+        assert!(error.contains("colima status"));
+        assert!(error.contains("docker info"));
     }
 
     #[test]
@@ -8113,7 +8998,7 @@ stringData:
         assert!(manifest.contains("namespace: argocd"));
         assert!(manifest.contains("argocd.argoproj.io/secret-type: repository"));
         assert!(manifest.contains("type: helm"));
-        assert!(manifest.contains("url: ghcr.io/5dlabs/helm-charts"));
+        assert!(manifest.contains("url: ghcr.io/5dlabsinc/helm-charts"));
         assert!(manifest.contains("enableOCI: \"true\""));
         assert!(manifest.contains("username: \"kaseonedge\""));
         assert!(manifest.contains("password: \"github_pat_example\""));

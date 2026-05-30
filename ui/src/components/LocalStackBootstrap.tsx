@@ -27,6 +27,7 @@ import {
   type SecretSourcePreviewResult,
 } from "../api/sourceControlProvisioning";
 import { invokeTauri, isTauriCommandAvailable, listenTauri, openExternalUrl } from "../api/tauri";
+import { formatBootstrapFailureMessage } from "../bootstrapResilience";
 import { isLocalStackBootstrapPreview, shouldEnableSelfHostedSource, shouldSkipLocalStackBootstrap } from "../runtime";
 import { VoiceClient } from "./VoiceClient";
 import {
@@ -42,6 +43,7 @@ import {
   IconGitLab,
   IconGlobe,
   IconKey,
+  IconKeyboard,
   IconOpenClaw,
   IconOpenAI,
   IconPackage,
@@ -117,6 +119,7 @@ const MORGAN_MEDIA_SCREEN_SLUG: Record<SetupScreen, string> = {
   "agent-tokens": "12_agent-tokens",
 };
 const MORGAN_INSTALL_MEDIA_SLUG = "13_install-start";
+const MORGAN_REST_PORTRAIT_SRC = "/uploads/morgan-portrait.jpg";
 const MORGAN_PORTRAIT_ONLY_SCREENS: ReadonlySet<SetupScreen> = new Set();
 const INTRO_ADVANCE_FALLBACK_MS = 18_000;
 const GITHUB_OAUTH_UI_TIMEOUT_MS = 120_000;
@@ -402,16 +405,22 @@ function withSavedAccessTimeout<T>(promise: Promise<T>, timeoutMs: number, label
 function savedAccessCueFromDetection(
   detection: SecretSourceDetectionResult | null,
   state: SavedAccessState,
+  provider: "onepassword" | "bitwarden" = "onepassword",
 ): SavedAccessCue {
   if (state === "idle" || state === "detecting" || state === "installing-cli") return "idle";
-  const onePassword = detection?.providers.find((provider) => provider.provider === "onepassword");
-  if (!onePassword) return "needs-access";
-  if (!onePassword.desktopInstalled) return "missing-desktop";
-  if (!onePassword.cliInstalled) return "missing-cli";
-  if (onePassword.available || onePassword.cliAccessReady) return "ready";
-  if (onePassword.pendingUserPermission) return "approval-pending";
-  if (onePassword.accountConfigured === false) return "no-account";
-  if (onePassword.cliInstalled && onePassword.desktopAppIntegrationEnabled === false) return "desktop-integration";
+  const providerStatus = detection?.providers.find((p) => p.provider === provider);
+  if (!providerStatus) return "needs-access";
+  if (provider === "onepassword" && !providerStatus.desktopInstalled) return "missing-desktop";
+  if (!providerStatus.cliInstalled) return "missing-cli";
+  if (providerStatus.available || providerStatus.cliAccessReady) return "ready";
+  if (providerStatus.pendingUserPermission) return "approval-pending";
+  if (providerStatus.accountConfigured === false) return "no-account";
+  if (
+    provider === "onepassword" &&
+    providerStatus.cliInstalled &&
+    providerStatus.desktopAppIntegrationEnabled === false
+  )
+    return "desktop-integration";
   return "needs-access";
 }
 
@@ -493,7 +502,23 @@ function cloudflareConditionalMediaKey(mode: CloudflareEndpointMode): string | n
   }
 }
 
-function savedAccessCueAction(cue: SavedAccessCue): { label: string; url?: string; action?: "install-cli" | "open-url" } | null {
+function savedAccessCueAction(
+  cue: SavedAccessCue,
+  provider: "onepassword" | "bitwarden" = "onepassword",
+): { label: string; url?: string; action?: "install-cli" | "open-url" } | null {
+  if (provider === "bitwarden") {
+    switch (cue) {
+      case "missing-cli":
+        return { label: "Install Bitwarden CLI", url: BITWARDEN_CLI_DOCS_URL, action: "open-url" };
+      case "needs-access":
+      case "no-account":
+        return { label: "Unlock Bitwarden", url: BITWARDEN_CLI_DOCS_URL, action: "open-url" };
+      case "ready":
+        return null;
+      default:
+        return { label: "Open guide", url: BITWARDEN_CLI_DOCS_URL, action: "open-url" };
+    }
+  }
   switch (cue) {
     case "missing-desktop":
       return { label: "Install 1Password", url: ONEPASSWORD_DESKTOP_INSTALL_URL, action: "open-url" };
@@ -2024,6 +2049,7 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
   const [state, setState] = useState<BootstrapState>("credentials");
   const [setupScreen, setSetupScreen] = useState<SetupScreen>("intro");
   const [dependencyPrepState, setDependencyPrepState] = useState<DependencyPrepState>("idle");
+  const [bootstrapWasRetry, setBootstrapWasRetry] = useState(false);
   const [cloudflareEndpointMode, setCloudflareEndpointMode] = useState<CloudflareEndpointMode>("idle");
   const [cloudflareEndpointUrl, setCloudflareEndpointUrl] = useState("");
   const [savedAccessPrepMode, setSavedAccessPrepMode] = useState<SavedAccessPrepMode>("idle");
@@ -2061,7 +2087,6 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
   const [githubAccountOptions, setGithubAccountOptions] = useState<GitHubCliAccount[]>([]);
   const [savedAccessState, setSavedAccessState] = useState<SavedAccessState>("idle");
   const [savedAccessDetection, setSavedAccessDetection] = useState<SecretSourceDetectionResult | null>(null);
-  const [showSavedAccessMoreOptions, setShowSavedAccessMoreOptions] = useState(false);
   const [savedAccessPreview, setSavedAccessPreview] = useState<SecretSourcePreviewResult | null>(null);
   const [savedAccessApplyResult, setSavedAccessApplyResult] = useState<SecretSourceApplyResult | null>(null);
   const [showSavedAccessReview, setShowSavedAccessReview] = useState(false);
@@ -2079,10 +2104,13 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
     progress: 4,
   });
   const [error, setError] = useState<string | null>(null);
+  const showBootstrapError =
+    Boolean(error) && dependencyPrepState !== "running" && state !== "checking";
   const [previewBanner, setPreviewBanner] = useState<string | null>(null);
   const [resettingFlow, setResettingFlow] = useState(false);
   const [captionsEnabled, setCaptionsEnabled] = useState(false);
   const [morganAudioUnlocked, setMorganAudioUnlocked] = useState(false);
+  const [morganVideoAtRest, setMorganVideoAtRest] = useState(false);
   const [captionCues, setCaptionCues] = useState<CaptionCue[]>([]);
   const [activeCaptionText, setActiveCaptionText] = useState("");
   const [morganConversationTurn, setMorganConversationTurn] = useState(0);
@@ -2114,6 +2142,8 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
   const startedMorganMediaKeys = useRef<Set<string>>(new Set());
   const playedMorganVideoKeys = useRef<Set<string>>(new Set());
   const playedMorganMediaKeys = useRef<Set<string>>(new Set());
+  const morganAutoplayBlockedKeys = useRef<Set<string>>(new Set());
+  const loggedMorganPlaybackFailures = useRef<Set<string>>(new Set());
   const selectedAiCliIds = useMemo(
     () => AI_CLIS.filter((cli) => selectedCliIds[cli.id]).map((cli) => cli.id),
     [selectedCliIds],
@@ -2269,7 +2299,11 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
         ? MORGAN_MEDIA_SCREEN_SLUG[setupScreen]
         : null;
   const bitwardenDetection = savedAccessDetection?.providers.find((provider) => provider.provider === "bitwarden");
-  const savedAccessCue = savedAccessCueFromDetection(savedAccessDetection, savedAccessState);
+  const savedAccessCue = savedAccessCueFromDetection(
+    savedAccessDetection,
+    savedAccessState,
+    savedAccessPrepMode === "bitwarden" ? "bitwarden" : "onepassword",
+  );
   const savedAccessConditionalKey = savedAccessConditionalMediaKey(
     savedAccessPrepMode,
     savedAccessCue,
@@ -2277,14 +2311,22 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
   );
   const cloudflareConditionalKey = cloudflareConditionalMediaKey(cloudflareEndpointMode);
   const morganConditionalMediaKey =
-    setupScreen === "saved-access"
-      ? savedAccessConditionalKey
-      : setupScreen === "cloudflare"
-        ? cloudflareConditionalKey
-        : null;
-  const activeMorganMediaKey = state === "checking" ? "install-start" : morganConditionalMediaKey ?? setupScreen;
-  const morganMediaBasename = morganConditionalMediaKey ?? "morgan";
-  const morganCaptionBasename = morganConditionalMediaKey ?? "captions";
+    setupScreen === "intro" && bootstrapWasRetry
+      ? "already-set"
+      : setupScreen === "saved-access"
+        ? savedAccessConditionalKey
+        : setupScreen === "cloudflare"
+          ? cloudflareConditionalKey
+          : null;
+  // Lock the intro video key once it starts so bootstrapWasRetry doesn't remount mid-play.
+  const introVideoKeyLocked = useRef(false);
+  const effectiveMorganConditionalKey =
+    setupScreen === "intro" && introVideoKeyLocked.current
+      ? null // lock to the base setupScreen key ("intro")
+      : morganConditionalMediaKey;
+  const activeMorganMediaKey = state === "checking" ? "install-start" : effectiveMorganConditionalKey ?? setupScreen;
+  const morganMediaBasename = effectiveMorganConditionalKey ?? "morgan";
+  const morganCaptionBasename = effectiveMorganConditionalKey ?? "captions";
   const activeMorganPrompt =
     setupScreen === "cloudflare" || setupScreen === "saved-access" || setupScreen === "source"
       ? ""
@@ -2369,10 +2411,28 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
       if (!options.force && startedMorganMediaKeys.current.has(startedKey) && !video.paused && !video.ended) return;
       if (video.ended && !shouldRestartEndedMedia) return;
 
+      const shouldAttemptAudible =
+        Boolean(options.audible) && (Boolean(options.force) || !morganAutoplayBlockedKeys.current.has(mediaKey));
+      if (!shouldAttemptAudible && morganAutoplayBlockedKeys.current.has(mediaKey)) {
+        // Autoplay is blocked for this media variant until explicit user gesture unlocks audio.
+        return;
+      }
+      const logKeyPrefix = `${mediaKey}:video-play`;
+      const logOnce = (level: "warn" | "error", suffix: string, context: Record<string, unknown>) => {
+        const logKey = `${logKeyPrefix}:${suffix}`;
+        if (loggedMorganPlaybackFailures.current.has(logKey)) return;
+        loggedMorganPlaybackFailures.current.add(logKey);
+        if (level === "warn") {
+          console.warn("Morgan MP4 playback warning", context);
+        } else {
+          console.error("Morgan MP4 playback failed", context);
+        }
+      };
+
       try {
-        video.muted = !options.audible;
-        video.defaultMuted = !options.audible;
-        if (options.audible) {
+        video.muted = !shouldAttemptAudible;
+        video.defaultMuted = !shouldAttemptAudible;
+        if (shouldAttemptAudible) {
           video.volume = 1;
         }
         if (video.ended && shouldRestartEndedMedia) {
@@ -2380,12 +2440,58 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
         }
         startedMorganMediaKeys.current.add(startedKey);
         await video.play();
+        morganAutoplayBlockedKeys.current.delete(mediaKey);
       } catch (err) {
         startedMorganMediaKeys.current.delete(startedKey);
-        if (err instanceof DOMException && err.name === "AbortError") {
+        const isAbortError = err instanceof DOMException && err.name === "AbortError";
+        const isNotAllowedError = err instanceof DOMException && err.name === "NotAllowedError";
+        if (isAbortError) {
           return;
         }
-        console.error("Morgan MP4 playback failed", {
+        if (isNotAllowedError && shouldAttemptAudible) {
+          morganAutoplayBlockedKeys.current.add(mediaKey);
+          try {
+            video.muted = true;
+            video.defaultMuted = true;
+            startedMorganMediaKeys.current.add(startedKey);
+            await video.play();
+            logOnce("warn", "not-allowed-muted-fallback", {
+              mediaKey,
+              src: video.currentSrc || video.src,
+              reason: "audible autoplay blocked; continued muted",
+            });
+            return;
+          } catch (fallbackErr) {
+            startedMorganMediaKeys.current.delete(startedKey);
+            const fallbackNotAllowed =
+              fallbackErr instanceof DOMException && fallbackErr.name === "NotAllowedError";
+            if (fallbackNotAllowed) {
+              morganAutoplayBlockedKeys.current.add(mediaKey);
+              logOnce("warn", "autoplay-blocked-awaiting-gesture", {
+                mediaKey,
+                src: video.currentSrc || video.src,
+                reason: "autoplay blocked until user gesture",
+              });
+              return;
+            }
+            logOnce("error", "not-allowed-muted-fallback-failed", {
+              mediaKey,
+              src: video.currentSrc || video.src,
+              error: fallbackErr,
+            });
+            return;
+          }
+        }
+        if (isNotAllowedError) {
+          morganAutoplayBlockedKeys.current.add(mediaKey);
+          logOnce("warn", "autoplay-blocked-awaiting-gesture", {
+            mediaKey,
+            src: video.currentSrc || video.src,
+            reason: "autoplay blocked until user gesture",
+          });
+          return;
+        }
+        logOnce("error", "general", {
           mediaKey,
           src: video.currentSrc || video.src,
           error: err,
@@ -2423,6 +2529,13 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
     return () => setupSelectionVoiceClient.current?.close();
   }, []);
 
+  // Unlock the intro video key when leaving the intro screen so future revisits can pick up conditional media.
+  useEffect(() => {
+    if (setupScreen !== "intro") {
+      introVideoKeyLocked.current = false;
+    }
+  }, [setupScreen]);
+
   const updateActiveCaption = useCallback(() => {
     if (!captionsEnabled) {
       setActiveCaptionText("");
@@ -2456,6 +2569,7 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
       progress: 5,
     });
     void refreshMetrics();
+    console.log("[CTO] prepareClusterDependencies started");
 
     if (isLocalStackBootstrapPreview()) {
       try {
@@ -2477,17 +2591,27 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
           progress: 100,
         });
         setDependencyPrepState("ready");
-        setPreviewBanner("Client Cluster baseline is ready. Next I’ll check saved access.");
-        setSetupScreen("saved-access");
+        setPreviewBanner("Client Cluster baseline is ready. Next I'll check your secrets setup.");
+        // In preview mode Morgan is always still playing; wait for video end.
+        setBootstrapWasRetry(true);
+        console.log("[CTO] Preview mode: bootstrapWasRetry=true, waiting for video end");
       } catch (err) {
         setDependencyPrepState("failed");
-        setError(String(err));
+        setError(formatBootstrapFailureMessage(err));
       }
       return;
     }
 
     try {
+      const startTime = performance.now();
       await invokeTauri("prepare_local_stack_dependencies");
+      const elapsedMs = performance.now() - startTime;
+      // Reliable retry detection: if Morgan's intro video is still playing when bootstrap
+      // finishes, the cluster was already up. Don't cut him off — wait for video end.
+      const video = morganVideoRef.current;
+      const morganStillPlaying = video !== null && !video.paused && !video.ended && video.currentTime > 0;
+      const wasRetry = elapsedMs < 3000 || morganStillPlaying;
+      setBootstrapWasRetry(wasRetry);
       void refreshMetrics();
       setProgress({
         stage: "baseline",
@@ -2495,17 +2619,33 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
         progress: 100,
       });
       setDependencyPrepState("ready");
-      setPreviewBanner("Client Cluster baseline is ready. Next I’ll check saved access.");
-      setSetupScreen("saved-access");
+      setPreviewBanner("Client Cluster baseline is ready. Next I'll check your secrets setup.");
+      console.log("[CTO] Bootstrap complete", { elapsedMs, morganStillPlaying, wasRetry, bootstrapWasRetry: wasRetry });
+      if (!wasRetry) {
+        console.log("[CTO] Auto-transitioning to saved-access (fresh install path)");
+        setSetupScreen("saved-access");
+      } else {
+        console.log("[CTO] Holding intro screen; Morgan still playing or quick bootstrap — wait for video end");
+      }
     } catch (err) {
+      setBootstrapWasRetry(false);
       setDependencyPrepState("failed");
-      setError(String(err));
+      setError(formatBootstrapFailureMessage(err, progress.stage));
     }
-  }, [clearIntroAdvanceTimer, refreshMetrics]);
+  }, [clearIntroAdvanceTimer, progress.stage, refreshMetrics]);
+
+  useEffect(() => {
+    if (!isLocalStackBootstrapPreview()) return;
+    if (setupScreen !== "intro" || dependencyPrepState !== "idle") return;
+    const timer = window.setTimeout(() => {
+      void prepareClusterDependencies();
+    }, 600);
+    return () => window.clearTimeout(timer);
+  }, [setupScreen, dependencyPrepState, prepareClusterDependencies]);
 
   const scheduleIntroAdvance = useCallback(
     (durationSeconds?: number) => {
-      if (setupScreen !== "intro" || dependencyPrepState !== "idle") return;
+      if (setupScreen !== "intro" || dependencyPrepState !== "idle" || !morganAudioUnlocked) return;
       clearIntroAdvanceTimer();
       const durationMs =
         typeof durationSeconds === "number" && Number.isFinite(durationSeconds) && durationSeconds > 0
@@ -2515,7 +2655,7 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
         void prepareClusterDependencies();
       }, durationMs);
     },
-    [clearIntroAdvanceTimer, dependencyPrepState, prepareClusterDependencies, setupScreen],
+    [clearIntroAdvanceTimer, dependencyPrepState, morganAudioUnlocked, prepareClusterDependencies, setupScreen],
   );
 
   const persistSourceConnection = useCallback(async () => {
@@ -2620,7 +2760,10 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
     );
   }, []);
 
-  const previewSavedAccess = useCallback(async (knownDetection?: SecretSourceDetectionResult) => {
+  const previewSavedAccess = useCallback(async (
+    knownDetection?: SecretSourceDetectionResult,
+    provider: "onepassword" | "bitwarden" = "onepassword",
+  ) => {
     setSavedAccessState("detecting");
     setShowSavedAccessReview(false);
     setSavedAccessPreview(null);
@@ -2631,17 +2774,35 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
       const detection = knownDetection ?? await withSavedAccessTimeout(
         detectSecretSources(),
         SAVED_ACCESS_DETECTION_TIMEOUT_MS,
-        "1Password readiness check",
+        "Secrets readiness check",
       );
       setSavedAccessDetection(detection);
-      const onePassword = detection.providers.find((provider) => provider.provider === "onepassword");
-      if (!onePassword?.available) {
+      const providerStatus = detection.providers.find((p) => p.provider === provider);
+      if (!providerStatus?.available) {
         setSavedAccessState("unavailable");
         setScmProvisioningMessage(detection.message || "Approved access is not ready yet.");
-        if (onePassword?.cliInstalled && onePassword?.desktopAppIntegrationEnabled === false) {
+        if (
+          provider === "onepassword" &&
+          providerStatus?.cliInstalled &&
+          providerStatus?.desktopAppIntegrationEnabled === false
+        ) {
           void openExternalUrl(ONEPASSWORD_DESKTOP_CLI_SETTINGS_URL).catch(() => undefined);
         }
         setShowSourceAdvanced(true);
+        return;
+      }
+
+      if (provider === "bitwarden") {
+        // Bitwarden preview is not yet supported by the backend; show detection success only.
+        setSavedAccessState("review");
+        setSavedAccessPreview({
+          provider: "bitwarden",
+          discovery: "metadata-only",
+          matches: [],
+          warnings: ["Bitwarden secrets preview is coming soon. Paste token remains available."],
+        });
+        setShowSavedAccessReview(true);
+        setScmProvisioningMessage("Bitwarden CLI is unlocked. Secrets apply is coming soon.");
         return;
       }
 
@@ -2669,10 +2830,14 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
     }
   }, [sourceProvider]);
 
-  const installSavedAccessCliAndRetry = useCallback(async () => {
+  const installSavedAccessCliAndRetry = useCallback(async (provider: "onepassword" | "bitwarden" = "onepassword") => {
+    if (provider === "bitwarden") {
+      void openExternalUrl(BITWARDEN_CLI_DOCS_URL).catch(() => undefined);
+      return;
+    }
     setSavedAccessState("installing-cli");
     setError(null);
-    setScmProvisioningMessage("Installing the official 1Password CLI, then I’ll check saved access again.");
+    setScmProvisioningMessage("Installing the official 1Password CLI, then I'll check your secrets setup again.");
     try {
       const detection = await withSavedAccessTimeout(
         installOnePasswordCli(),
@@ -2680,7 +2845,7 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
         "1Password CLI install check",
       );
       setSavedAccessDetection(detection);
-      await previewSavedAccess(detection);
+      await previewSavedAccess(detection, "onepassword");
     } catch (err) {
       setSavedAccessState("failed");
       setError(String(err));
@@ -2690,7 +2855,12 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
   }, [previewSavedAccess]);
 
 
-  const applySavedAccess = useCallback(async () => {
+  const applySavedAccess = useCallback(async (provider: "onepassword" | "bitwarden" = "onepassword") => {
+    if (provider === "bitwarden") {
+      setScmProvisioningMessage("Bitwarden secrets apply is coming soon. Paste token is available.");
+      setShowSourceAdvanced(true);
+      return;
+    }
     const matches = savedAccessPreview?.matches ?? [];
     if (matches.length === 0) {
       setShowSourceAdvanced(true);
@@ -2700,7 +2870,7 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
 
     setSavedAccessState("applying");
     setError(null);
-    setScmProvisioningMessage("Applying approved saved access. Raw values stay out of the UI.");
+    setScmProvisioningMessage("Applying approved secrets. Raw values stay out of the UI.");
     try {
       const result = await withSavedAccessTimeout(
         applySecretSourceMatches({
@@ -2863,7 +3033,7 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
         setState("credentials");
         setSetupScreen("agent-tokens");
       } catch (err) {
-        setError(String(err));
+        setError(formatBootstrapFailureMessage(err));
         setState("failed");
       }
       return;
@@ -2906,7 +3076,7 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
         tokenSource: null,
       }));
     } catch (err) {
-      setError(String(err));
+      setError(formatBootstrapFailureMessage(err, progress.stage));
       setState("failed");
     }
   }, [
@@ -3146,6 +3316,7 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
 
     const mediaKey = activeMorganMediaKey;
     const videoPlayTimer = window.setTimeout(() => {
+      if (setupScreen === "intro" && !morganAudioUnlocked) return;
       void playMorganVideo({
         restartEnded: !playedMorganVideoKeys.current.has(mediaKey),
         audible: morganAudioUnlocked,
@@ -3166,7 +3337,63 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
   const isCredentialSetup = state === "credentials" && setupScreen !== "intro";
   const morganVideoSrc = morganMediaSlug ? `/uploads/morgan/${morganMediaSlug}/${morganMediaBasename}.mp4` : "";
   const morganCaptionsSrc = morganMediaSlug ? `/uploads/morgan/${morganMediaSlug}/${morganCaptionBasename}.vtt` : "";
+  // When the bootstrap finishes on the retry path (or preview mode) but Morgan
+  // is not actually playing, auto-transition so the user isn't stuck on intro.
+  useEffect(() => {
+    if (
+      isIntro &&
+      setupScreen === "intro" &&
+      dependencyPrepState === "ready" &&
+      bootstrapWasRetry
+    ) {
+      const video = morganVideoRef.current;
+      if (!video || video.ended || video.paused) {
+        console.log("[CTO] Auto-transitioning intro → saved-access (no active Morgan video)");
+        setSetupScreen("saved-access");
+        return;
+      }
+      // Video is still playing: wait for it to pause or end, then transition.
+      const onDone = () => {
+        console.log("[CTO] Auto-transitioning intro → saved-access (video paused/ended)");
+        setSetupScreen("saved-access");
+      };
+      video.addEventListener("pause", onDone, { once: true });
+      video.addEventListener("ended", onDone, { once: true });
+      return () => {
+        video.removeEventListener("pause", onDone);
+        video.removeEventListener("ended", onDone);
+      };
+    }
+  }, [isIntro, setupScreen, dependencyPrepState, bootstrapWasRetry]);
+
   const morganVariantKey = activeMorganMediaKey;
+
+  useEffect(() => {
+    if (!playedMorganVideoKeys.current.has(morganVariantKey)) {
+      setMorganVideoAtRest(false);
+    }
+  }, [morganVariantKey]);
+
+  // Pause and reset video when setupScreen changes to prevent old video
+  // continuing into the next screen during transitions.
+  useEffect(() => {
+    return () => {
+      const video = morganVideoRef.current;
+      if (!video) return;
+      // Safety: never cut off Morgan intro video mid-playback.
+      const mediaKey = video.dataset.morganMediaKey ?? morganVariantKey;
+      const isIntroMedia = mediaKey === "intro" || mediaKey === "already-set";
+      if (isIntroMedia && !video.paused && !video.ended && video.currentTime > 0) {
+        console.log("[CTO] useEffect cleanup: SKIPPING pause for intro video (safety net)");
+        return;
+      }
+      console.log("[CTO] useEffect cleanup: pausing video", { mediaKey, setupScreen });
+      video.pause();
+      video.currentTime = 0;
+      startedMorganMediaKeys.current.delete(`${video.dataset.morganMediaKey ?? morganVariantKey}:video`);
+    };
+  }, [setupScreen]);
+
   const shouldShowMorganVideo = Boolean(morganConditionalMediaKey) || state === "checking" || !MORGAN_PORTRAIT_ONLY_SCREENS.has(setupScreen);
   const hasMorganVideo = Boolean(morganMediaSlug) && shouldShowMorganVideo;
   const showDevReset = import.meta.env.DEV && !isLocalStackBootstrapPreview();
@@ -3175,7 +3402,7 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
       ? setupScreen === "cloudflare"
         ? "Cloudflare"
         : setupScreen === "saved-access"
-          ? "Saved access"
+          ? "Secrets"
           : setupScreen === "source"
             ? "Source"
             : setupScreen === "harness"
@@ -3200,13 +3427,22 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
     playedMorganVideoKeys.current.add(morganVariantKey);
     startedMorganMediaKeys.current.delete(`${morganVariantKey}:video`);
     playedMorganMediaKeys.current.add(morganVariantKey);
+    setMorganVideoAtRest(true);
     setActiveCaptionText("");
     if (isIntro && dependencyPrepState === "idle") {
       void prepareClusterDependencies();
     }
+    // After the retry video ends on intro, transition to saved-access.
+    if (isIntro && setupScreen === "intro" && dependencyPrepState === "ready" && bootstrapWasRetry) {
+      console.log("[CTO] handleMorganVideoEnded: transitioning intro → saved-access");
+      setSetupScreen("saved-access");
+    } else {
+      console.log("[CTO] handleMorganVideoEnded: no transition", { isIntro, setupScreen, dependencyPrepState, bootstrapWasRetry });
+    }
   };
   const handleMorganVideoCanPlay = () => {
     if (playedMorganVideoKeys.current.has(morganVariantKey)) return;
+    if (setupScreen === "intro" && !morganAudioUnlocked) return;
     const video = morganVideoRef.current;
     if (video) {
       video.muted = !morganAudioUnlocked;
@@ -3238,6 +3474,7 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
       if (!node) return;
       node.muted = !morganAudioUnlocked;
       node.defaultMuted = !morganAudioUnlocked;
+      if (setupScreen === "intro" && !morganAudioUnlocked) return;
       if (playedMorganVideoKeys.current.has(node.dataset.morganMediaKey ?? morganVariantKey)) return;
       window.setTimeout(() => {
         void playMorganVideo({ restartEnded: true, force: true, audible: morganAudioUnlocked });
@@ -3248,37 +3485,49 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
 
   const startMorganSetup = useCallback(() => {
     setMorganAudioUnlocked(true);
+    setMorganVideoAtRest(false);
+    morganAutoplayBlockedKeys.current.clear();
+    clearIntroAdvanceTimer();
+    playedMorganVideoKeys.current.delete(morganVariantKey);
+    if (setupScreen === "intro") {
+      introVideoKeyLocked.current = true;
+    }
     const video = morganVideoRef.current;
     if (video) {
       video.currentTime = 0;
+      video.pause();
       void playMorganVideo({ restartEnded: true, force: true, audible: true });
     }
+    console.log("[CTO] startMorganSetup clicked", { setupScreen, dependencyPrepState, morganVariantKey });
     if (isIntro && dependencyPrepState === "idle") {
       void prepareClusterDependencies();
     }
-  }, [dependencyPrepState, isIntro, playMorganVideo, prepareClusterDependencies]);
+  }, [clearIntroAdvanceTimer, dependencyPrepState, isIntro, morganVariantKey, playMorganVideo, prepareClusterDependencies]);
 
   const cloudflareEndpointReady = cloudflareEndpointMode !== "idle";
-  const savedAccessPrepReady = savedAccessPrepMode !== "idle" || savedAccessState !== "idle";
 
-  const savedAccessCueActionItem = savedAccessCueAction(savedAccessCue);
+  const savedAccessCueActionItem = savedAccessCueAction(
+    savedAccessCue,
+    savedAccessPrepMode === "bitwarden" ? "bitwarden" : "onepassword",
+  );
   const savedAccessReadiness = savedAccessReadinessPercent(savedAccessCue);
-  const shouldShowBitwardenOption = showSavedAccessMoreOptions || Boolean(bitwardenDetection?.detected);
 
   const handleSavedAccessCueAction = useCallback(() => {
     if (!savedAccessCueActionItem) return;
     if (savedAccessCueActionItem.action === "install-cli") {
-      void installSavedAccessCliAndRetry();
+      void installSavedAccessCliAndRetry(
+        savedAccessPrepMode === "bitwarden" ? "bitwarden" : "onepassword",
+      );
       return;
     }
     if (savedAccessCue === "approval-pending") {
-      void previewSavedAccess();
+      void previewSavedAccess(undefined, savedAccessPrepMode === "bitwarden" ? "bitwarden" : "onepassword");
       return;
     }
     if (savedAccessCueActionItem.url) {
       void openExternalUrl(savedAccessCueActionItem.url).catch(() => undefined);
     }
-  }, [installSavedAccessCliAndRetry, previewSavedAccess, savedAccessCue, savedAccessCueActionItem]);
+  }, [installSavedAccessCliAndRetry, previewSavedAccess, savedAccessCue, savedAccessCueActionItem, savedAccessPrepMode]);
 
   const officialBrandIcon = (src: string, label: string, className?: string) => (
     <img className={className} src={src} alt="" aria-hidden="true" data-official-icon={label} />
@@ -3396,7 +3645,7 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
         ) : null}
         {error ? <div className="local-bootstrap__inline-error">{error}</div> : null}
         <div className="local-bootstrap__actions local-bootstrap__actions--onepage">
-          <button className="ghost-btn" type="button" title="Back to saved access" onClick={() => setSetupScreen("saved-access")}>Back</button>
+          <button className="ghost-btn" type="button" title="Back to Secrets" onClick={() => setSetupScreen("saved-access")}>Back</button>
           <button
             className="primary-btn"
             type="button"
@@ -3414,25 +3663,25 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
 
   const savedAccessPrepPanel = (
     <div className="local-bootstrap__wizard local-bootstrap__wizard--focus">
-      <section className="local-bootstrap__panel local-bootstrap__panel--focus" title="Saved access">
-        <div className="local-bootstrap__panel-title sr-only">Saved access</div>
+      <section className="local-bootstrap__panel local-bootstrap__panel--focus local-bootstrap__panel--center" title="Secrets">
+        <div className="local-bootstrap__panel-title sr-only">Secrets</div>
         <div
-          className="local-bootstrap__auth-grid local-bootstrap__auth-grid--icons-only local-bootstrap__auth-grid--prep local-bootstrap__auth-grid--binary"
-          aria-label="Saved access options"
+          className="local-bootstrap__auth-grid local-bootstrap__auth-grid--icons-only local-bootstrap__auth-grid--prep"
+          aria-label="Secret manager options"
           data-testid="saved-access-prep-options"
         >
           <button
             type="button"
-            aria-label="Use 1Password saved access"
-            title="Use 1Password saved access"
+            aria-label="Use 1Password for secrets"
+            title="Use 1Password for secrets"
             data-testid="saved-access-onepassword"
             className={`local-bootstrap__auth-choice local-bootstrap__auth-choice--icon-first local-bootstrap__auth-choice--onepassword${savedAccessPrepMode === "onepassword" ? " is-selected" : ""}`}
             onClick={() => {
               setSavedAccessPrepMode("onepassword");
               setPreviewBanner("");
               setSavedAccessModalOpen(true);
-              void speakMorganCue("I’m checking whether saved access is ready. The bar shows how close 1Password is, and I’ll explain the next step if something is missing.");
-              window.setTimeout(() => void previewSavedAccess(), 650);
+              void speakMorganCue("I'm checking whether your secret manager is ready. The bar shows how close 1Password is, and I'll explain the next step if something is missing.");
+              window.setTimeout(() => void previewSavedAccess(undefined, "onepassword"), 650);
             }}
             onKeyDown={(event) => {
               if (event.key !== "Enter" && event.key !== " ") return;
@@ -3446,83 +3695,56 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
                   {officialBrandIcon("/icons/1password.svg", "1Password")}
                 </span>
               </span>
-              <span className="sr-only">Use 1Password saved access</span>
+              <span className="sr-only">Use 1Password for secrets</span>
             </span>
           </button>
           <button
             type="button"
-            aria-label="More saved access options"
-            title="More saved access options"
-            data-testid="saved-access-more-options"
-            className={`local-bootstrap__auth-choice local-bootstrap__auth-choice--icon-first local-bootstrap__auth-choice--skip${showSavedAccessMoreOptions ? " is-selected" : ""}`}
+            aria-label="Use Bitwarden for secrets"
+            title="Use Bitwarden for secrets"
+            data-testid="saved-access-bitwarden"
+            className={`local-bootstrap__auth-choice local-bootstrap__auth-choice--icon-first local-bootstrap__auth-choice--bitwarden${savedAccessPrepMode === "bitwarden" ? " is-selected" : ""}`}
             onClick={() => {
-              setShowSavedAccessMoreOptions(true);
-              setPreviewBanner("Bitwarden stays in More options unless the local bw CLI is detected.");
-              void speakMorganCue("More saved access options selected. Bitwarden stays secondary unless I detect the local bw command line is already unlocked.");
-              if (!savedAccessDetection) {
-                void withSavedAccessTimeout(
-                  detectSecretSources(),
-                  SAVED_ACCESS_DETECTION_TIMEOUT_MS,
-                  "saved access provider detection",
-                )
-                  .then(setSavedAccessDetection)
-                  .catch(() => undefined);
-              }
+              setSavedAccessPrepMode("bitwarden");
+              setPreviewBanner("");
+              setSavedAccessModalOpen(true);
+              void speakMorganCue("I'm checking whether Bitwarden secrets are ready.");
+              window.setTimeout(() => void previewSavedAccess(undefined, "bitwarden"), 650);
+            }}
+            onKeyDown={(event) => {
+              if (event.key !== "Enter" && event.key !== " ") return;
+              event.preventDefault();
+              event.currentTarget.click();
             }}
           >
             <span className="local-bootstrap__install-stack">
               <span className="local-bootstrap__install-icons" aria-hidden="true">
-                <span className="local-bootstrap__brand-mark local-bootstrap__install-icon local-bootstrap__install-icon--brand local-bootstrap__install-icon--light local-bootstrap__install-icon--skip">
-                  <IconKey size={30} />
+                <span className="local-bootstrap__brand-mark local-bootstrap__install-icon local-bootstrap__install-icon--brand local-bootstrap__install-icon--dark">
+                  {officialBrandIcon("/icons/bitwarden.svg", "Bitwarden")}
                 </span>
               </span>
-              <span className="sr-only">More saved access options</span>
+              <span className="sr-only">Use Bitwarden for secrets</span>
             </span>
           </button>
-          {shouldShowBitwardenOption ? (
-            <button
-              type="button"
-              aria-label="Bitwarden saved access"
-              title="Bitwarden saved access"
-              data-testid="saved-access-bitwarden"
-              data-secondary-provider="true"
-              className={`local-bootstrap__auth-choice local-bootstrap__auth-choice--icon-first local-bootstrap__auth-choice--skip${savedAccessPrepMode === "bitwarden" ? " is-selected" : ""}`}
-              onClick={() => {
-                setSavedAccessPrepMode("bitwarden");
-                setShowSavedAccessMoreOptions(true);
-                setPreviewBanner("Bitwarden is secondary for now. Morgan can detect an existing bw CLI session, but 1Password remains the local quick-connect path.");
-                void openExternalUrl(bitwardenDetection?.docsUrl || BITWARDEN_CLI_DOCS_URL).catch(() => undefined);
-              }}
-            >
-              <span className="local-bootstrap__install-stack">
-                <span className="local-bootstrap__install-icons" aria-hidden="true">
-                  <span className="local-bootstrap__brand-mark local-bootstrap__install-icon local-bootstrap__install-icon--brand local-bootstrap__install-icon--light local-bootstrap__install-icon--skip">
-                    <IconShield size={30} />
-                  </span>
-                </span>
-                <span className="sr-only">Bitwarden saved access</span>
-              </span>
-            </button>
-          ) : null}
           <button
             type="button"
-            aria-label="Continue without saved access"
-            title="Continue without saved access"
+            aria-label="Continue without a secret manager"
+            title="Continue without a secret manager"
             data-testid="saved-access-skip"
-            className={`local-bootstrap__auth-choice local-bootstrap__auth-choice--icon-first local-bootstrap__auth-choice--skip${savedAccessPrepMode === "skipped" ? " is-selected" : ""}`}
+            className={`local-bootstrap__auth-choice local-bootstrap__auth-choice--icon-first local-bootstrap__auth-choice--manual${savedAccessPrepMode === "skipped" ? " is-selected" : ""}`}
             onClick={() => {
               setSavedAccessPrepMode("skipped");
               setSavedAccessModalOpen(false);
-              void speakMorganCue("Skipping saved access. I’ll keep manual setup available and only ask for credentials later when a provider truly needs them.");
+              void speakMorganCue("Skipping secret manager setup. I'll keep manual setup available and only ask for credentials later when a provider truly needs them.");
             }}
           >
             <span className="local-bootstrap__install-stack">
               <span className="local-bootstrap__install-icons" aria-hidden="true">
-                <span className="local-bootstrap__brand-mark local-bootstrap__install-icon local-bootstrap__install-icon--brand local-bootstrap__install-icon--light local-bootstrap__install-icon--skip">
-                  <span className="local-bootstrap__skip-wordmark">Skip</span>
+                <span className="local-bootstrap__brand-mark local-bootstrap__install-icon local-bootstrap__install-icon--brand local-bootstrap__install-icon--dark">
+                  <IconKeyboard size={40} />
                 </span>
               </span>
-              <span className="sr-only">Continue without saved access</span>
+              <span className="sr-only">Continue without a secret manager</span>
             </span>
           </button>
         </div>
@@ -3533,13 +3755,13 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
               role="dialog"
               aria-modal="true"
               aria-labelledby="saved-access-modal-title"
-              data-testid="saved-access-onepassword-modal"
+              data-testid={`saved-access-${savedAccessPrepMode === "bitwarden" ? "bitwarden" : "onepassword"}-modal`}
               onClick={(event) => event.stopPropagation()}
             >
               <button
                 className="local-bootstrap__source-modal-close"
                 type="button"
-                aria-label="Close 1Password setup"
+                aria-label={`Close ${savedAccessPrepMode === "bitwarden" ? "Bitwarden" : "1Password"} setup`}
                 title="Close"
                 onClick={() => setSavedAccessModalOpen(false)}
               >
@@ -3547,15 +3769,20 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
               </button>
               <div className="local-bootstrap__source-modal-icon" aria-hidden="true">
                 <span className="local-bootstrap__brand-mark local-bootstrap__install-icon local-bootstrap__install-icon--brand local-bootstrap__install-icon--dark">
-                  {officialBrandIcon("/icons/1password.svg", "1Password")}
+                  {officialBrandIcon(
+                    savedAccessPrepMode === "bitwarden" ? "/icons/bitwarden.svg" : "/icons/1password.svg",
+                    savedAccessPrepMode === "bitwarden" ? "Bitwarden" : "1Password",
+                  )}
                 </span>
               </div>
-              <h3 id="saved-access-modal-title" className="sr-only">1Password readiness</h3>
+              <h3 id="saved-access-modal-title" className="sr-only">
+                {savedAccessPrepMode === "bitwarden" ? "Bitwarden" : "1Password"} readiness
+              </h3>
               <div className="local-bootstrap__source-modal-body">
-                <div className="local-bootstrap__saved-access-flow" data-testid="saved-access-onepassword-flow">
+                <div className="local-bootstrap__saved-access-flow" data-testid={`saved-access-${savedAccessPrepMode === "bitwarden" ? "bitwarden" : "onepassword"}-flow`}>
                   <div
                     className={`local-bootstrap__saved-access-readiness is-${savedAccessCue}`}
-                    aria-label={`1Password readiness: ${savedAccessCueLabel(savedAccessCue, savedAccessState)}`}
+                    aria-label={`${savedAccessPrepMode === "bitwarden" ? "Bitwarden" : "1Password"} readiness: ${savedAccessCueLabel(savedAccessCue, savedAccessState)}`}
                     data-testid="saved-access-readiness"
                     data-state={savedAccessCue}
                   >
@@ -3580,9 +3807,14 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
                   ) : null}
                   {savedAccessState === "review" && savedAccessPreview ? (
                     <div className="local-bootstrap__saved-access-review" data-testid="saved-access-review">
+                      {savedAccessPreview.warnings.length > 0 ? (
+                        <div className="field__help" role="note">
+                          {savedAccessPreview.warnings.join(" ")}
+                        </div>
+                      ) : null}
                       {savedAccessPreview.matches.length > 0 ? (
                         <>
-                          <ul aria-label="1Password matches ready for approval">
+                          <ul aria-label={`${savedAccessPrepMode === "bitwarden" ? "Bitwarden" : "1Password"} matches ready for approval`}>
                             {savedAccessPreview.matches.map((match) => (
                               <li key={`${match.targetSecretKey}:${match.providerRef}`}>
                                 <span>{match.targetSecretKey}</span>
@@ -3595,7 +3827,7 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
                             className="primary-btn"
                             type="button"
                             data-testid="saved-access-approve"
-                            onClick={() => void applySavedAccess()}
+                            onClick={() => void applySavedAccess(savedAccessPrepMode === "bitwarden" ? "bitwarden" : "onepassword")}
                           >
                             Connect
                           </button>
@@ -3628,16 +3860,6 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
         {error ? <div className="local-bootstrap__inline-error">{error}</div> : null}
         <div className="local-bootstrap__actions local-bootstrap__actions--onepage">
           <button className="ghost-btn" type="button" title="Back to Client Cluster" onClick={() => setSetupScreen("intro")}>Back</button>
-          <button
-            className="primary-btn"
-            type="button"
-            title="Continue to Cloudflare"
-            data-testid="saved-access-continue"
-            disabled={!savedAccessPrepReady}
-            onClick={() => setSetupScreen("cloudflare")}
-          >
-            Continue
-          </button>
         </div>
       </section>
     </div>
@@ -3646,7 +3868,7 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
   const savedAccessPanel =
     !selected5DOrigin && (sourceProvider === "github" || sourceProvider === "gitlab") ? (
       <div className="local-bootstrap__saved-access" data-testid="source-saved-access">
-        <div className="local-bootstrap__saved-access-actions" aria-label="Saved access options">
+        <div className="local-bootstrap__saved-access-actions" aria-label="Secret manager options">
           <button
             className="ghost-btn"
             type="button"
@@ -3689,7 +3911,7 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
                 ))}
               </ul>
             ) : (
-              <span className="field__help">No matching saved access found.</span>
+              <span className="field__help">No matching secrets found.</span>
             )}
             <button
               className="primary-btn"
@@ -4072,27 +4294,38 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
             isIntro ? " local-bootstrap__machine--hero" : " local-bootstrap__machine--ambient"
           }`}
         >
-          <div className="local-bootstrap__avatar">
+          <div
+            className={`local-bootstrap__avatar${morganVideoAtRest ? " local-bootstrap__avatar--resting" : ""}`}
+          >
             {hasMorganVideo ? (
-              <video
-                ref={setMorganVideoRef}
-                key={morganVariantKey}
-                className="local-bootstrap__avatar-video"
-                data-morgan-media-key={morganVariantKey}
-                src={morganVideoSrc}
-                autoPlay={false}
-                muted={!morganAudioUnlocked}
-                playsInline
-                preload="auto"
-                loop={false}
-                onCanPlay={handleMorganVideoCanPlay}
-                onLoadedMetadata={handleMorganVideoLoadedMetadata}
-                onEnded={handleMorganVideoEnded}
-                onError={handleMorganVideoError}
-                onTimeUpdate={updateActiveCaption}
-              >
+              <>
+                <video
+                  ref={setMorganVideoRef}
+                  key={morganVariantKey}
+                  className="local-bootstrap__avatar-video"
+                  data-morgan-media-key={morganVariantKey}
+                  src={morganVideoSrc}
+                  autoPlay={false}
+                  muted={!morganAudioUnlocked}
+                  playsInline
+                  preload="auto"
+                  loop={false}
+                  onCanPlay={handleMorganVideoCanPlay}
+                  onLoadedMetadata={handleMorganVideoLoadedMetadata}
+                  onEnded={handleMorganVideoEnded}
+                  onError={handleMorganVideoError}
+                  onTimeUpdate={updateActiveCaption}
+                >
                 <track kind="captions" src={morganCaptionsSrc} srcLang="en" label="English" />
-              </video>
+                </video>
+                <img
+                  className="local-bootstrap__avatar-portrait"
+                  src={MORGAN_REST_PORTRAIT_SRC}
+                  alt=""
+                  aria-hidden="true"
+                  decoding="async"
+                />
+              </>
             ) : null}
           </div>
           <button
@@ -4128,8 +4361,8 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
           {isIntro ? (
             <div key="intro" className="local-bootstrap__stage local-bootstrap__stage--intro">
               <div className="local-bootstrap__intro-prep-card" data-testid="cluster-dependencies-first-screen">
-                <section className="local-bootstrap__panel local-bootstrap__panel--focus" title="Client Cluster baseline">
-                  <div className="local-bootstrap__panel-title">Client Cluster</div>
+                <section className="local-bootstrap__panel local-bootstrap__panel--focus local-bootstrap__panel--minimal" title="Client Cluster baseline">
+                  <div className="local-bootstrap__panel-title sr-only">Client Cluster</div>
                   <div className="local-bootstrap__cluster-prep-grid local-bootstrap__cluster-prep-grid--baseline" aria-label="Client Cluster baseline prepared first">
                     <div title="Create or reuse the local Kind Client Cluster">
                       <span className="local-bootstrap__brand-mark" aria-hidden="true">
@@ -4183,19 +4416,10 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
                     </div>
                   ) : null}
 
-                  {error ? <div className="local-bootstrap__inline-error">{error}</div> : null}
+                  {showBootstrapError ? <div className="local-bootstrap__inline-error">{error}</div> : null}
 
                   <div className="local-bootstrap__actions local-bootstrap__actions--onepage local-bootstrap__actions--intro">
-                    {dependencyPrepState === "ready" ? (
-                      <button
-                        className="primary-btn"
-                        type="button"
-                        title="Continue to saved access"
-                        onClick={() => setSetupScreen("saved-access")}
-                      >
-                        Continue
-                      </button>
-                    ) : (
+                    {dependencyPrepState === "running" || dependencyPrepState === "failed" ? (
                       <button
                         className="primary-btn"
                         type="button"
@@ -4206,7 +4430,7 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
                       >
                         {dependencyPrepState === "running" ? "Starting" : dependencyPrepState === "failed" ? "Retry" : "Start"}
                       </button>
-                    )}
+                    ) : null}
                   </div>
                 </section>
               </div>
@@ -5359,7 +5583,7 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
             </>
           )}
 
-          {state === "failed" ? (
+          {state === "failed" && showBootstrapError ? (
             <div className="local-bootstrap__error">
               <pre>{error}</pre>
               <button type="button" onClick={() => void runBootstrap()}>

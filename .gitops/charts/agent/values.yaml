@@ -22,7 +22,7 @@ harness: openclaw
 
 # -- Image configuration
 image:
-  repository: ghcr.io/5dlabs/agents
+  repository: ghcr.io/5dlabsinc/agents
   tag: latest
   pullPolicy: IfNotPresent
 
@@ -402,7 +402,7 @@ devServer:
 projectApi:
   enabled: false
   image:
-    repository: ghcr.io/5dlabs/project-api
+    repository: ghcr.io/5dlabsinc/project-api
     tag: "latest"
     pullPolicy: Always
   # HTTP port inside the pod
@@ -497,6 +497,24 @@ tools:
     wsUrl: ""
     tokenFile: ""
 
+  # =============================================================================
+  # Principal Engineer Charters (META v2.0 + Karpathy) — OpenClaw Enforcement
+  # =============================================================================
+  # These charters are the law for all agent work and all delegations to the 8 CLIs.
+  # The OpenClaw orchestrator (via mounted skills/openclaw/meta-principal-architect.md
+  # and karpathy-surgical-guidelines.md) is responsible for prefixing every exec/ACP
+  # invocation to Claude Code, Codex, Cursor, OpenCode, Factory, Gemini, Copilot, Kimi
+  # (and future) and for verifying compliance (tags, success criteria, surgical scope,
+  # Zero-Pause momentum, humanpending.md only for true gates).
+  # Workspace CLAUDE.md + .agents/skills/ + .cursor/rules/ provide native loading for
+  # CLIs that support it. The orchestrator prefix + review is the universal backstop.
+  principalEngineer:
+    enabled: true
+    # Short excerpt injected by orchestrator/ACP dispatchers when spawning children
+    # (full rules live in the mounted skill files and root CLAUDE.md).
+    prefixExcerpt: |
+      You MUST operate under the full META v2.0 Principal Architect charter (Bias, META-0, R1–R11 + Zero-Pause ZPR1–ZPR4: first-principles, execution verification, (executed/inspected/assumed) tags, one pushback, reversibility weighting, continuous momentum, ≥7 parallel threads, humanpending.md for true gates only, Ground Truth Canvas) **and** the Karpathy surgical guidelines (Think Before Coding, Simplicity First, Surgical Changes only, Goal-Driven Execution with explicit verifiable success criteria). These are loaded in the workspace (CLAUDE.md, .agents/skills/, .cursor/rules/). Prefix all reasoning and changes with the required tags and criteria. Make only surgical, minimal, request-traceable edits. Ship continuously unless truly blocked.
+
 # =============================================================================
 # Kaniko Sidecar (daemonless container builds)
 # =============================================================================
@@ -509,9 +527,9 @@ kaniko:
   # compatible environment).
   image: gcr.io/kaniko-project/executor:v1.23.2-debug
   # Registry to push built images
-  registry: "ghcr.io/5dlabs"
+  registry: "ghcr.io/5dlabsinc"
   # Cache repo for layer caching
-  cacheRepo: "ghcr.io/5dlabs/kaniko-cache"
+  cacheRepo: "ghcr.io/5dlabsinc/kaniko-cache"
   cache: true
   resources:
     requests:
@@ -842,7 +860,7 @@ mem0Plugin:
 narrator:
   enabled: false
   image:
-    repository: ghcr.io/5dlabs/narrator-sidecar-base
+    repository: ghcr.io/5dlabsinc/narrator-sidecar-base
     tag: latest
     pullPolicy: Always
   # Path the agent writes ACP NDJSON to (shared PV). Both sidecars tail this.

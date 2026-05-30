@@ -1,6 +1,6 @@
 ---
 # CTO — the core platform chart (controller + tools).  Published by this
-# repo's GitHub Action to ghcr.io/5dlabs/helm-charts as a public OCI chart.
+# repo's GitHub Action to ghcr.io/5dlabsinc/helm-charts as a public OCI chart.
 #
 # Morgan and Qdrant are layered as separate local Applications; GitLab/runners
 # will follow once we step through what each pre-release user actually needs.

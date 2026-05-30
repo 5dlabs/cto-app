@@ -5,8 +5,9 @@ use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::fs;
 use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Manager};
+use tokio::time::sleep;
 
 type ScmResult<T> = Result<T, String>;
 
@@ -17,6 +18,9 @@ const GITHUB_API_VERSION: &str = "2022-11-28";
 const GITLAB_CODERUN_AGENTS: &[&str] = &["rex", "blaze", "pass", "cipher"];
 const GITLAB_CODERUN_REQUIRED_SCOPES: &[&str] =
     &["api", "read_api", "read_repository", "write_repository"];
+const SCM_HTTP_RETRY_MAX_ATTEMPTS: u32 = 3;
+const SCM_HTTP_RETRY_INITIAL_BACKOFF: Duration = Duration::from_secs(2);
+const SCM_HTTP_RETRY_MAX_BACKOFF: Duration = Duration::from_secs(10);
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum ScmProvider {
@@ -624,14 +628,23 @@ async fn probe_gitlab_coderun_auth_http(
     }
     let selected_agents = normalize_coderun_agents(&request.agents)?;
     let api_endpoint = format!("{base_url}/api/v4/user");
-    let response = Client::new()
-        .get(&api_endpoint)
-        .bearer_auth(&token)
-        .header("Accept", "application/json")
-        .header("User-Agent", "cto-app")
-        .send()
-        .await
-        .map_err(|error| format!("GitLab CodeRun auth probe failed before response: {error}"))?;
+    let response = retry_scm_operation("GitLab CodeRun auth probe", || {
+        let api_endpoint = api_endpoint.clone();
+        let token = token.clone();
+        async move {
+            Client::new()
+                .get(&api_endpoint)
+                .bearer_auth(&token)
+                .header("Accept", "application/json")
+                .header("User-Agent", "cto-app")
+                .send()
+                .await
+                .map_err(|error| {
+                    format!("GitLab CodeRun auth probe failed before response: {error}")
+                })
+        }
+    })
+    .await?;
     let status = response.status();
     let body = response
         .bytes()
@@ -763,26 +776,31 @@ async fn exchange_github_manifest_code_http(
     code: &str,
 ) -> ScmResult<GitHubManifestConversion> {
     let url = github_manifest_conversion_url(base_url, code)?;
-    let response = Client::new()
-        .post(url)
-        .header("Accept", "application/vnd.github+json")
-        .header("User-Agent", "cto-app")
-        .header("X-GitHub-Api-Version", GITHUB_API_VERSION)
-        .send()
-        .await
-        .map_err(|error| format!("GitHub manifest exchange request failed: {error}"))?;
+    retry_scm_operation("GitHub manifest exchange", || {
+        let url = url.clone();
+        async move {
+            let response = Client::new()
+                .post(url)
+                .header("Accept", "application/vnd.github+json")
+                .header("User-Agent", "cto-app")
+                .header("X-GitHub-Api-Version", GITHUB_API_VERSION)
+                .send()
+                .await
+                .map_err(|error| format!("GitHub manifest exchange request failed: {error}"))?;
 
-    let status = response.status();
-    let body = response
-        .bytes()
-        .await
-        .map_err(|error| format!("failed to read GitHub manifest exchange response: {error}"))?;
+            let status = response.status();
+            let body = response.bytes().await.map_err(|error| {
+                format!("failed to read GitHub manifest exchange response: {error}")
+            })?;
 
-    if !status.is_success() {
-        return Err(format_github_manifest_exchange_error(status, &body));
-    }
+            if !status.is_success() {
+                return Err(format_github_manifest_exchange_error(status, &body));
+            }
 
-    parse_github_manifest_conversion(&body)
+            parse_github_manifest_conversion(&body)
+        }
+    })
+    .await
 }
 
 fn build_github_manifest_exchange_result(
@@ -1065,6 +1083,96 @@ fn now_stamp() -> String {
         .to_string()
 }
 
+fn scm_retry_backoff_delay(retry_index: u32) -> Duration {
+    let multiplier = 1_u128 << retry_index.min(20);
+    let bounded_ms = SCM_HTTP_RETRY_INITIAL_BACKOFF
+        .as_millis()
+        .saturating_mul(multiplier)
+        .min(SCM_HTTP_RETRY_MAX_BACKOFF.as_millis())
+        .min(u128::from(u64::MAX));
+    Duration::from_millis(bounded_ms as u64)
+}
+
+fn is_transient_scm_error(message: &str) -> bool {
+    let normalized = message.to_ascii_lowercase();
+    [
+        "timed out",
+        "timeout",
+        "context deadline exceeded",
+        "i/o timeout",
+        "tls handshake timeout",
+        "temporary failure in name resolution",
+        "connection reset by peer",
+        "connection refused",
+        "was refused",
+        "service unavailable",
+        "server unavailable",
+        "no route to host",
+        "eof",
+        "broken pipe",
+        "network is unreachable",
+        "dns error",
+        "operation timed out",
+        "error sending request",
+        "connection closed before message completed",
+        "502 bad gateway",
+        "503 service unavailable",
+        "504 gateway timeout",
+        "429 too many requests",
+        "couldn't connect to server",
+        "http 408",
+        "http 429",
+        "http 500",
+        "http 502",
+        "http 503",
+        "http 504",
+    ]
+    .iter()
+    .any(|needle| normalized.contains(needle))
+}
+
+fn is_transient_scm_http_status(status: StatusCode) -> bool {
+    matches!(
+        status,
+        StatusCode::REQUEST_TIMEOUT
+            | StatusCode::TOO_MANY_REQUESTS
+            | StatusCode::INTERNAL_SERVER_ERROR
+            | StatusCode::BAD_GATEWAY
+            | StatusCode::SERVICE_UNAVAILABLE
+            | StatusCode::GATEWAY_TIMEOUT
+    )
+}
+
+async fn retry_scm_operation<T, F, Fut>(stage: &str, mut operation: F) -> ScmResult<T>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = ScmResult<T>>,
+{
+    let attempts = SCM_HTTP_RETRY_MAX_ATTEMPTS.max(1);
+    let mut last_error = String::new();
+
+    for attempt in 1..=attempts {
+        match operation().await {
+            Ok(value) => return Ok(value),
+            Err(error) => {
+                last_error = error;
+                if is_transient_scm_error(&last_error) && attempt < attempts {
+                    let delay = scm_retry_backoff_delay(attempt - 1);
+                    tracing::debug!(
+                        "{stage} attempt {attempt}/{attempts} transient error; retrying after {}s: {last_error}",
+                        delay.as_secs()
+                    );
+                    sleep(delay).await;
+                    continue;
+                }
+                return Err(last_error);
+            }
+        }
+    }
+
+    Err(last_error)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1240,6 +1348,15 @@ mod tests {
         assert_eq!(plan.kubernetes_secret_name, "cto-scm-gitlab-acme-gitlab");
         assert_eq!(plan.kubernetes_secret_keys, vec!["token"]);
         assert!(plan.gitlab_application_api_endpoint.is_none());
+    }
+
+    #[test]
+    fn transient_scm_error_detects_network_flakes() {
+        assert!(is_transient_scm_error(
+            "GitHub manifest exchange request failed: error sending request for url: operation timed out"
+        ));
+        assert!(is_transient_scm_http_status(StatusCode::SERVICE_UNAVAILABLE));
+        assert!(!is_transient_scm_error("GitHub manifest exchange failed: HTTP 401 — Bad credentials"));
     }
 
     #[test]

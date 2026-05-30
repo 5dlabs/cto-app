@@ -38,7 +38,7 @@ ctoConfig: {}
 controller:
   enabled: true
   image:
-    repository: ghcr.io/5dlabs/controller
+    repository: ghcr.io/5dlabsinc/controller
     tag: "latest"
     pullPolicy: IfNotPresent
   replicas: 1
@@ -66,8 +66,8 @@ controller:
     harnessAgent: hermes
     runType: documentation
     service: hermes-smoke
-    repositoryUrl: https://github.com/5dlabs/cto-app
-    docsRepositoryUrl: https://github.com/5dlabs/cto-app
+    repositoryUrl: https://github.com/5DLabsInc/cto
+    docsRepositoryUrl: https://github.com/5DLabsInc/cto
     workingDirectory: "."
     githubApp: hermes-smoke
     enableDocker: false
@@ -79,45 +79,45 @@ controller:
 
 agent:
   image:
-    repository: ghcr.io/5dlabs/agents
+    repository: ghcr.io/5dlabsinc/agents
     tag: latest
     pullPolicy: IfNotPresent
   serviceAccountName: cto-agent
   cliImages:
     claude:
-      repository: ghcr.io/5dlabs/agents
+      repository: ghcr.io/5dlabsinc/agents
       tag: latest
       pullPolicy: IfNotPresent
     cursor:
-      repository: ghcr.io/5dlabs/agents
+      repository: ghcr.io/5dlabsinc/agents
       tag: latest
       pullPolicy: IfNotPresent
     codex:
-      repository: ghcr.io/5dlabs/agents
+      repository: ghcr.io/5dlabsinc/agents
       tag: latest
       pullPolicy: IfNotPresent
     code:
-      repository: ghcr.io/5dlabs/agents
+      repository: ghcr.io/5dlabsinc/agents
       tag: latest
       pullPolicy: IfNotPresent
     gemini:
-      repository: ghcr.io/5dlabs/agents
+      repository: ghcr.io/5dlabsinc/agents
       tag: latest
       pullPolicy: IfNotPresent
     factory:
-      repository: ghcr.io/5dlabs/agents
+      repository: ghcr.io/5dlabsinc/agents
       tag: latest
       pullPolicy: IfNotPresent
     opencode:
-      repository: ghcr.io/5dlabs/agents
+      repository: ghcr.io/5dlabsinc/agents
       tag: latest
       pullPolicy: IfNotPresent
     research:
-      repository: ghcr.io/5dlabs/agents
+      repository: ghcr.io/5dlabsinc/agents
       tag: latest
       pullPolicy: IfNotPresent
     grok:
-      repository: ghcr.io/5dlabs/agents
+      repository: ghcr.io/5dlabsinc/agents
       tag: latest
       pullPolicy: IfNotPresent
 
@@ -130,7 +130,7 @@ tools:
   dockerInDocker:
     enabled: false
   image:
-    repository: ghcr.io/5dlabs/tools
+    repository: ghcr.io/5dlabsinc/tools
     tag: "latest"
     pullPolicy: IfNotPresent
   resources:
