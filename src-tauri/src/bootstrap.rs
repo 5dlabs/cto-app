@@ -1056,6 +1056,7 @@ pub struct BootstrapErrorReport {
 #[derive(Clone, Copy, Debug, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BootstrapErrorCategory {
+    #[allow(dead_code)]
     Network,
     Timeout,
     KubernetesApi,
@@ -1101,14 +1102,7 @@ impl BootstrapErrorCollector {
         }
     }
 
-    fn record(
-        &self,
-        stage: &str,
-        message: &str,
-        attempt: u32,
-        max_attempts: u32,
-        recovered: bool,
-    ) {
+    fn record(&self, stage: &str, message: &str, attempt: u32, max_attempts: u32, recovered: bool) {
         let report = BootstrapErrorReport {
             timestamp: bootstrap_log_timestamp(),
             stage: stage.to_string(),
@@ -1384,21 +1378,25 @@ async fn ensure_local_stack_cluster_dependencies(window: &Window) -> BootstrapRe
         KUBECTL_APPLY_RETRY_POLICY,
         "Argo CD applicationset-controller rollout",
         "Check argocd-applicationset-controller deployment status, then retry setup.",
-        || wait_for_rollout(
-            ARGOCD_NAMESPACE,
-            "deployment/argocd-applicationset-controller",
-            "300s",
-        ),
+        || {
+            wait_for_rollout(
+                ARGOCD_NAMESPACE,
+                "deployment/argocd-applicationset-controller",
+                "300s",
+            )
+        },
     )?;
     retry_transient_sync(
         KUBECTL_APPLY_RETRY_POLICY,
         "Argo CD application-controller rollout",
         "Check argocd-application-controller statefulset status, then retry setup.",
-        || wait_for_rollout(
-            ARGOCD_NAMESPACE,
-            "statefulset/argocd-application-controller",
-            "300s",
-        ),
+        || {
+            wait_for_rollout(
+                ARGOCD_NAMESPACE,
+                "statefulset/argocd-application-controller",
+                "300s",
+            )
+        },
     )?;
     ensure_namespace(CTO_NAMESPACE)?;
 
@@ -6399,7 +6397,9 @@ async fn github_api_send_once<T: for<'de> Deserialize<'de>>(
         } else {
             "error"
         };
-        return Err(format!("{action} failed with {qualifier} status {status}: {text}"));
+        return Err(format!(
+            "{action} failed with {qualifier} status {status}: {text}"
+        ));
     }
     serde_json::from_str(&text).map_err(|error| format!("{action} returned invalid JSON: {error}"))
 }
@@ -6668,7 +6668,7 @@ fn retry_backoff_delay(initial: Duration, max: Duration, retry_index: u32) -> Du
         .saturating_mul(multiplier)
         .min(max.as_millis())
         .min(u128::from(u64::MAX));
-    Duration::from_millis(bounded_ms as u64)
+    Duration::from_millis(u64::try_from(bounded_ms).unwrap_or(u64::MAX))
 }
 
 fn is_transient_bootstrap_error(message: &str) -> bool {
@@ -6704,10 +6704,13 @@ fn is_transient_bootstrap_error(message: &str) -> bool {
     .any(|needle| normalized.contains(needle))
 }
 
-fn retry_exhausted_error(stage: &str, attempts: u32, remediation: &str, last_error: &str) -> String {
-    format!(
-        "{stage} failed after {attempts} attempt(s). {remediation} Last error: {last_error}"
-    )
+fn retry_exhausted_error(
+    stage: &str,
+    attempts: u32,
+    remediation: &str,
+    last_error: &str,
+) -> String {
+    format!("{stage} failed after {attempts} attempt(s). {remediation} Last error: {last_error}")
 }
 
 /// Generic synchronous retry wrapper for transient bootstrap errors.
@@ -6729,7 +6732,13 @@ where
             Err(error) => {
                 last_error = error;
                 let transient = is_transient_bootstrap_error(&last_error);
-                record_bootstrap_error(stage, &last_error, attempt, attempts, transient && attempt < attempts);
+                record_bootstrap_error(
+                    stage,
+                    &last_error,
+                    attempt,
+                    attempts,
+                    transient && attempt < attempts,
+                );
                 if transient && attempt < attempts {
                     let delay = retry_backoff_delay(
                         policy.initial_backoff,
@@ -6769,6 +6778,7 @@ where
 }
 
 /// Generic async retry wrapper for transient bootstrap errors.
+#[allow(dead_code)]
 async fn retry_transient_async<F, Fut>(
     policy: RetryPolicy,
     stage: &str,
@@ -6788,7 +6798,13 @@ where
             Err(error) => {
                 last_error = error;
                 let transient = is_transient_bootstrap_error(&last_error);
-                record_bootstrap_error(stage, &last_error, attempt, attempts, transient && attempt < attempts);
+                record_bootstrap_error(
+                    stage,
+                    &last_error,
+                    attempt,
+                    attempts,
+                    transient && attempt < attempts,
+                );
                 if transient && attempt < attempts {
                     let delay = retry_backoff_delay(
                         policy.initial_backoff,
@@ -6847,7 +6863,13 @@ where
             Err(error) => {
                 last_error = error;
                 let transient = is_transient_bootstrap_error(&last_error);
-                record_bootstrap_error(stage, &last_error, attempt, attempts, transient && attempt < attempts);
+                record_bootstrap_error(
+                    stage,
+                    &last_error,
+                    attempt,
+                    attempts,
+                    transient && attempt < attempts,
+                );
                 if transient && attempt < attempts {
                     let delay = retry_backoff_delay(
                         policy.initial_backoff,
@@ -6989,9 +7011,7 @@ async fn ensure_ingress_nginx_for_kind(window: &Window) -> BootstrapResult<()> {
                         emit(
                             window,
                             "ingress",
-                            &format!(
-                                "Still working on ingress setup ({attempt}/{attempts})..."
-                            ),
+                            &format!("Still working on ingress setup ({attempt}/{attempts})..."),
                             52,
                         );
                         thread::sleep(delay);
@@ -7028,7 +7048,8 @@ async fn ensure_metrics_server_for_kind(window: &Window) -> BootstrapResult<()> 
                     break;
                 }
                 Err(error) => {
-                    last_error = format!("Failed to apply metrics-server manifest for Lens: {error}");
+                    last_error =
+                        format!("Failed to apply metrics-server manifest for Lens: {error}");
                     let transient = is_transient_bootstrap_error(&last_error);
                     record_bootstrap_error(
                         "metrics-server manifest download",
@@ -7576,15 +7597,8 @@ fn wait_for_runtime_socket(window: &Window, kind: RuntimeKind) -> BootstrapResul
         thread::sleep(delay);
 
         if runtime_ready(kind) {
-            tracing::info!(
-                "{label} socket became available on attempt {attempt}/{attempts}"
-            );
-            emit(
-                window,
-                "runtime",
-                &format!("{label} is ready."),
-                14,
-            );
+            tracing::info!("{label} socket became available on attempt {attempt}/{attempts}");
+            emit(window, "runtime", &format!("{label} is ready."), 14);
             return Ok(());
         }
 
@@ -7608,14 +7622,29 @@ fn wait_for_runtime_socket(window: &Window, kind: RuntimeKind) -> BootstrapResul
         "Verify {label} is running (`{cmd} status`) and the socket is accessible \
          (`{socket_cmd} info`). If the VM started but the socket is stale, try \
          `{cmd} stop && {cmd} start`, then retry.",
-        cmd = if kind == RuntimeKind::Colima { "colima" } else { "podman machine" },
-        socket_cmd = if kind == RuntimeKind::Colima { "docker" } else { "podman" },
+        cmd = if kind == RuntimeKind::Colima {
+            "colima"
+        } else {
+            "podman machine"
+        },
+        socket_cmd = if kind == RuntimeKind::Colima {
+            "docker"
+        } else {
+            "podman"
+        },
     );
     Err(retry_exhausted_error(
         &format!("{label} socket did not become available"),
         attempts,
         &remediation,
-        &format!("`{} info` returned a non-zero exit code", if kind == RuntimeKind::Colima { "docker" } else { "podman" }),
+        &format!(
+            "`{} info` returned a non-zero exit code",
+            if kind == RuntimeKind::Colima {
+                "docker"
+            } else {
+                "podman"
+            }
+        ),
     ))
 }
 
@@ -7751,19 +7780,18 @@ mod tests {
         parse_cpu_quantity_to_milli, parse_kind_node_container_states, parse_kubelet_summary_usage,
         parse_kubernetes_nodes, parse_kubernetes_pods, parse_memory_quantity_to_bytes,
         parse_runtime_stats_lines, prepare_origin_transfer_inner, remote_manifest_skip_reason,
-        retry_backoff_delay, terminal_argo_application_error, validate_bootstrap_setup,
-        BootstrapAgentKey, BootstrapAiCli, BootstrapAppMode, BootstrapGithubCredentials,
-        BootstrapGithubRequest, BootstrapHarnessMode, BootstrapHarnessRouting,
-        BootstrapLocalStackRequest, BootstrapModelRoute, BootstrapProviderAuth,
-        BootstrapProviderCredentialConfig, BootstrapProviderCredentialRequest,
-        BootstrapProviderSelection, BootstrapProvidersRequest, BootstrapScmRequest,
-        BootstrapSetupAgent, BootstrapSetupHarness, BootstrapSetupProfile, BootstrapSetupSource,
-        BootstrapSourceCredentials, BootstrapSourceProvider, BootstrapToolApiKeyRequest,
-        BootstrapToolsRequest, KindNodeContainerState, OriginEngine, OriginTransferMode,
-        OriginTransferRequest, BOOTSTRAP_TEST_MODE_ENV, CTO_GITOPS_REPO_NAME,
+        retry_backoff_delay, retry_exhausted_error, terminal_argo_application_error,
+        validate_bootstrap_setup, BootstrapAgentKey, BootstrapAiCli, BootstrapAppMode,
+        BootstrapGithubCredentials, BootstrapGithubRequest, BootstrapHarnessMode,
+        BootstrapHarnessRouting, BootstrapLocalStackRequest, BootstrapModelRoute,
+        BootstrapProviderAuth, BootstrapProviderCredentialConfig,
+        BootstrapProviderCredentialRequest, BootstrapProviderSelection, BootstrapProvidersRequest,
+        BootstrapScmRequest, BootstrapSetupAgent, BootstrapSetupHarness, BootstrapSetupProfile,
+        BootstrapSetupSource, BootstrapSourceCredentials, BootstrapSourceProvider,
+        BootstrapToolApiKeyRequest, BootstrapToolsRequest, KindNodeContainerState, OriginEngine,
+        OriginTransferMode, OriginTransferRequest, BOOTSTRAP_TEST_MODE_ENV, CTO_GITOPS_REPO_NAME,
         GITHUB_TOKEN_SECRET_KEY, GITLAB_TOKEN_SECRET_KEY, METRICS_SERVER_KUBELET_INSECURE_TLS_ARG,
         METRICS_SERVER_KUBELET_PREFERRED_ADDRESS_TYPES_ARG, RUNTIME_SOCKET_RETRY_POLICY,
-        retry_exhausted_error,
     };
     use serde_json::json;
     use std::collections::BTreeMap;
@@ -8023,7 +8051,10 @@ mod tests {
     #[test]
     fn runtime_socket_retry_policy_has_bounded_backoff() {
         let policy = RUNTIME_SOCKET_RETRY_POLICY;
-        assert!(policy.max_attempts >= 10, "need enough attempts to cover slow VM start");
+        assert!(
+            policy.max_attempts >= 10,
+            "need enough attempts to cover slow VM start"
+        );
         assert!(
             policy.initial_backoff <= Duration::from_secs(3),
             "first poll should be quick so fast starts aren't delayed"

@@ -1090,7 +1090,7 @@ fn scm_retry_backoff_delay(retry_index: u32) -> Duration {
         .saturating_mul(multiplier)
         .min(SCM_HTTP_RETRY_MAX_BACKOFF.as_millis())
         .min(u128::from(u64::MAX));
-    Duration::from_millis(bounded_ms as u64)
+    Duration::from_millis(u64::try_from(bounded_ms).unwrap_or(u64::MAX))
 }
 
 fn is_transient_scm_error(message: &str) -> bool {
@@ -1131,6 +1131,7 @@ fn is_transient_scm_error(message: &str) -> bool {
     .any(|needle| normalized.contains(needle))
 }
 
+#[allow(dead_code)]
 fn is_transient_scm_http_status(status: StatusCode) -> bool {
     matches!(
         status,
@@ -1355,8 +1356,12 @@ mod tests {
         assert!(is_transient_scm_error(
             "GitHub manifest exchange request failed: error sending request for url: operation timed out"
         ));
-        assert!(is_transient_scm_http_status(StatusCode::SERVICE_UNAVAILABLE));
-        assert!(!is_transient_scm_error("GitHub manifest exchange failed: HTTP 401 — Bad credentials"));
+        assert!(is_transient_scm_http_status(
+            StatusCode::SERVICE_UNAVAILABLE
+        ));
+        assert!(!is_transient_scm_error(
+            "GitHub manifest exchange failed: HTTP 401 — Bad credentials"
+        ));
     }
 
     #[test]
