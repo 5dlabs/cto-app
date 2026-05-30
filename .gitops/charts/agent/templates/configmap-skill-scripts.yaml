@@ -1,0 +1,23 @@
+{{- $files := .Files.Glob "scripts/*/*" }}
+{{- if $files }}
+# =============================================================================
+# Skill helper scripts
+# =============================================================================
+# Mounted at /skill-scripts-template and copied into /workspace/.local/bin by
+# init-workspace. Use subdirectories to keep chart-owned helper sources grouped,
+# e.g. scripts/autoreview/autoreview -> /workspace/.local/bin/autoreview.
+# =============================================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "agent.fullname" . }}-skill-scripts
+  namespace: {{ .Values.namespace | default .Release.Namespace }}
+  labels:
+    {{- include "agent.labels" . | nindent 4 }}
+    app.kubernetes.io/component: skill-scripts
+data:
+  {{- range $path, $content := $files }}
+  {{ base $path }}: |
+{{ $content | toString | indent 4 }}
+  {{- end }}
+{{- end }}

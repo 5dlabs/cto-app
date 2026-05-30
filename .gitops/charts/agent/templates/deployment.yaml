@@ -39,6 +39,7 @@ spec:
         {{- include "agent.podAnnotations" . | nindent 8 }}
         checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
         checksum/openclaw-skills: {{ include (print $.Template.BasePath "/configmap-openclaw-skills.yaml") . | sha256sum }}
+        checksum/skill-scripts: {{ include (print $.Template.BasePath "/configmap-skill-scripts.yaml") . | sha256sum }}
         {{- if .Values.workspace.files }}
         checksum/workspace-files: {{ include (print $.Template.BasePath "/configmap-workspace-files.yaml") . | sha256sum }}
         {{- end }}
@@ -188,11 +189,37 @@ spec:
                 SKILL_COUNT=$((SKILL_COUNT + 1))
               done
               echo "[skills] OpenClaw: $SKILL_COUNT skills loaded"
+
+              # Install chart-owned skill helper scripts into PATH.
+              if [ -d /skill-scripts-template ]; then
+                cp /skill-scripts-template/* /workspace/.local/bin/ 2>/dev/null || true
+                chmod +x /workspace/.local/bin/* 2>/dev/null || true
+                echo "[skills] Helper scripts: $(ls /skill-scripts-template 2>/dev/null | wc -l) loaded"
+              fi
               {{- else }}
               # ---------------------------------------------------------------
               # 2. Hermes config (re-rendered every restart with fresh env)
               # ---------------------------------------------------------------
               mkdir -p /workspace/.hermes/memories /workspace/.hermes/skills /workspace/.hermes/sessions /workspace/.hermes/logs
+              # Always overwrite chart-owned local skills from ConfigMap.
+              find /workspace/.hermes/skills -maxdepth 1 -name "*.md" -type f -delete 2>/dev/null || true
+              HERMES_SKILL_COUNT=0
+              for md in /openclaw-skills-template/*.md; do
+                [ -f "$md" ] || continue
+                SKILL_NAME=$(basename "$md" .md)
+                [ "$SKILL_NAME" = "_placeholder" ] && continue
+                mkdir -p "/workspace/.hermes/skills/$SKILL_NAME"
+                cp "$md" "/workspace/.hermes/skills/$SKILL_NAME/SKILL.md"
+                HERMES_SKILL_COUNT=$((HERMES_SKILL_COUNT + 1))
+              done
+              echo "[skills] Hermes: $HERMES_SKILL_COUNT skills loaded"
+
+              # Install chart-owned skill helper scripts into PATH.
+              if [ -d /skill-scripts-template ]; then
+                cp /skill-scripts-template/* /workspace/.local/bin/ 2>/dev/null || true
+                chmod +x /workspace/.local/bin/* 2>/dev/null || true
+                echo "[skills] Helper scripts: $(ls /skill-scripts-template 2>/dev/null | wc -l) loaded"
+              fi
               cat > /workspace/.hermes/config.yaml <<'HERMESCFG'
               model:
                 provider: {{ .Values.hermes.model.provider | default "auto" | quote }}
@@ -707,6 +734,8 @@ spec:
               mountPath: /config-template
             - name: openclaw-skills-template
               mountPath: /openclaw-skills-template
+            - name: skill-scripts-template
+              mountPath: /skill-scripts-template
             {{- if .Values.claudeCode.enabled }}
             - name: claude-settings-template
               mountPath: /claude-settings-template
@@ -1732,6 +1761,10 @@ spec:
         - name: openclaw-skills-template
           configMap:
             name: {{ include "agent.fullname" . }}-openclaw-skills
+        - name: skill-scripts-template
+          configMap:
+            name: {{ include "agent.fullname" . }}-skill-scripts
+            optional: true
         {{- if .Values.workspace.files }}
         - name: workspace-files-template
           configMap:
