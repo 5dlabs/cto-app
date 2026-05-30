@@ -9,32 +9,36 @@ const reactSource = readFileSync(resolve(repoRoot, "ui/src/components/LocalStack
 const apiSource = readFileSync(resolve(repoRoot, "ui/src/api/sourceControlProvisioning.ts"), "utf8");
 
 describe("1Password saved access readiness contract", () => {
-  it("detects desktop, CLI, account exposure, and vault metadata access separately", () => {
-    assert.match(rustSource, /desktop_installed: bool/);
-    assert.match(rustSource, /cli_installed: bool/);
-    assert.match(rustSource, /cli_access_ready: bool/);
-    assert.match(rustSource, /account_configured: bool/);
-    assert.match(rustSource, /"op"[\s\S]*"vault"[\s\S]*"list"[\s\S]*"--format"[\s\S]*"json"/);
-    assert.match(rustSource, /no accounts configured/);
-    assert.match(rustSource, /turn on the 1password desktop app integration/);
+  it("detects SDK auth, account exposure, and metadata access without default CLI probing", () => {
+    assert.match(rustSource, /onepassword_sdk_auth_configured/);
+    assert.match(rustSource, /OP_SERVICE_ACCOUNT_TOKEN/);
+    assert.match(rustSource, /OP_ACCOUNT/);
+    assert.match(rustSource, /fn preview_onepassword_sdk_matches/);
+    assert.match(rustSource, /SECRET_SOURCE_SDK_BRIDGE/);
+    const defaultDetection = rustSource.slice(
+      rustSource.indexOf("fn detect_secret_sources_inner"),
+      rustSource.indexOf("fn legacy_secret_sources_detection_inner"),
+    );
+    assert.doesNotMatch(defaultDetection, /"op"[\s\S]*"vault"[\s\S]*"list"[\s\S]*"--format"[\s\S]*"json"/);
   });
 
-  it("exposes an install-and-retry path for missing CLI", () => {
-    assert.match(apiSource, /installOnePasswordCli/);
-    assert.match(apiSource, /install_onepassword_cli/);
-    assert.match(reactSource, /installOnePasswordCli/);
-    assert.match(reactSource, /installSavedAccessCliAndRetry/);
-    assert.match(reactSource, /action: "install-cli"/);
-    assert.match(reactSource, /await previewSavedAccess\(detection\)/);
+  it("exposes a connect-and-retry SDK path instead of installing provider CLIs", () => {
+    assert.doesNotMatch(apiSource, /installOnePasswordCli/);
+    assert.doesNotMatch(reactSource, /installOnePasswordCli/);
+    assert.doesNotMatch(reactSource, /installSavedAccessCliAndRetry/);
+    assert.doesNotMatch(reactSource, /action: "install-cli"/);
+    assert.match(reactSource, /connectSavedAccessAndRetry/);
+    assert.match(reactSource, /ONEPASSWORD_SDK_DOCS_URL/);
+    assert.match(reactSource, /BITWARDEN_SECRETS_MANAGER_DOCS_URL/);
   });
 
-  it("opens official 1Password app integration guidance when desktop integration is off", () => {
+  it("opens official SDK connection guidance when provider auth is missing", () => {
     assert.match(apiSource, /desktopAppIntegrationEnabled\?: boolean/);
     assert.match(rustSource, /desktop_app_integration_enabled: bool/);
-    assert.match(rustSource, /onepassword_desktop_app_integration_enabled/);
-    assert.match(reactSource, /ONEPASSWORD_DESKTOP_CLI_SETTINGS_URL/);
-    assert.match(reactSource, /onePassword\?\.cliInstalled && onePassword\?\.desktopAppIntegrationEnabled === false/);
-    assert.match(reactSource, /openExternalUrl\(ONEPASSWORD_DESKTOP_CLI_SETTINGS_URL\)/);
+    assert.match(rustSource, /ONEPASSWORD_SDK_AUTH_DOCS_URL/);
+    assert.match(reactSource, /const providerLabel = provider === "bitwarden" \? "Bitwarden" : "1Password"/);
+    assert.match(reactSource, /Connect \$\{providerLabel\}/);
+    assert.match(reactSource, /openExternalUrl\(docsUrl\)/);
   });
 
   it("maps deterministic readiness branches to the compact bar and Morgan cues", () => {

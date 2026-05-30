@@ -34,5 +34,9 @@
     "mocha": "^11.7.1",
     "selenium-webdriver": "^4.34.0",
     "tauri-plugin-mcp-server": "^0.1.0"
+  },
+  "dependencies": {
+    "@1password/sdk": "^0.4.0",
+    "@bitwarden/sdk-napi": "^1.0.0"
   }
 }

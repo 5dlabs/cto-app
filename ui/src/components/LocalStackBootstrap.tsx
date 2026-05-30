@@ -12,7 +12,8 @@ import fiveDLabsLogo from "../assets/5d-labs-mark.png";
 import {
   applySecretSourceMatches,
   detectSecretSources,
-  installOnePasswordCli,
+  probeSecretSourceAuth,
+  saveSecretSourceAuthConfig,
   prepareOriginTransfer,
   prepareScmProvisioning,
   previewSecretSourceMatches,
@@ -22,8 +23,11 @@ import {
   type OriginTransferPlan,
   type ScmProvider,
   type SecretSourceApplyResult,
+  type SecretSourceAuthConfigRequest,
+  type SecretSourceAuthState,
   type SecretSourceDetectionResult,
   type SecretSourceMatchPreview,
+  type SecretSourceProviderStatus,
   type SecretSourcePreviewResult,
 } from "../api/sourceControlProvisioning";
 import { invokeTauri, isTauriCommandAvailable, listenTauri, openExternalUrl } from "../api/tauri";
@@ -140,7 +144,11 @@ type ToolApiKeyName =
   | "TAVILY_API_KEY"
   | "BRAVE_API_KEY"
   | "CONTEXT7_API_KEY"
-  | "PERPLEXITY_API_KEY";
+  | "PERPLEXITY_API_KEY"
+  | "KUBECONFIG"
+  | "CLOUDFLARE_API_TOKEN"
+  | "CLOUDFLARE_ACCOUNT_ID"
+  | "CLOUDFLARE_TUNNEL_TOKEN";
 type DiscordAgentId =
   | "morgan"
   | "rex"
@@ -377,15 +385,21 @@ type MetricsState = {
   report: LocalStackResourceMetricsReport | null;
 };
 
-type SavedAccessState = "idle" | "detecting" | "installing-cli" | "unavailable" | "review" | "applying" | "connected" | "failed";
+type SavedAccessState = "idle" | "detecting" | "connecting" | "unavailable" | "review" | "applying" | "connected" | "failed";
 type CloudflareEndpointMode = "idle" | "quick" | "login" | "saved" | "local";
 type SavedAccessPrepMode = "idle" | "onepassword" | "bitwarden" | "skipped";
 type SavedAccessCue = "idle" | "ready" | "missing-desktop" | "missing-cli" | "desktop-integration" | "approval-pending" | "needs-access" | "no-account";
+type SavedAccessAuthForm = {
+  onepasswordMode: "desktop-app" | "service-account";
+  onepasswordAccount: string;
+  onepasswordVault: string;
+  onepasswordServiceAccountSecret: string;
+  bitwardenAccessSecret: string;
+  bitwardenOrganizationId: string;
+};
 
-const ONEPASSWORD_DESKTOP_INSTALL_URL = "https://1password.com/downloads/mac/";
-const ONEPASSWORD_CLI_INSTALL_URL = "https://developer.1password.com/docs/cli/get-started/";
-const ONEPASSWORD_DESKTOP_CLI_SETTINGS_URL = "https://developer.1password.com/docs/cli/app-integration/";
-const BITWARDEN_CLI_DOCS_URL = "https://bitwarden.com/help/cli/";
+const ONEPASSWORD_SDK_DOCS_URL = "https://developer.1password.com/docs/sdks/";
+const BITWARDEN_SECRETS_MANAGER_DOCS_URL = "https://bitwarden.com/help/secrets-manager/";
 const SAVED_ACCESS_DETECTION_TIMEOUT_MS = 12_000;
 const SAVED_ACCESS_PREVIEW_TIMEOUT_MS = 15_000;
 const SAVED_ACCESS_APPLY_TIMEOUT_MS = 50_000;
@@ -407,21 +421,65 @@ function savedAccessCueFromDetection(
   state: SavedAccessState,
   provider: "onepassword" | "bitwarden" = "onepassword",
 ): SavedAccessCue {
-  if (state === "idle" || state === "detecting" || state === "installing-cli") return "idle";
+  if (state === "idle" || state === "detecting" || state === "connecting") return "idle";
   const providerStatus = detection?.providers.find((p) => p.provider === provider);
   if (!providerStatus) return "needs-access";
-  if (provider === "onepassword" && !providerStatus.desktopInstalled) return "missing-desktop";
-  if (!providerStatus.cliInstalled) return "missing-cli";
-  if (providerStatus.available || providerStatus.cliAccessReady) return "ready";
-  if (providerStatus.pendingUserPermission) return "approval-pending";
-  if (providerStatus.accountConfigured === false) return "no-account";
-  if (
-    provider === "onepassword" &&
-    providerStatus.cliInstalled &&
-    providerStatus.desktopAppIntegrationEnabled === false
-  )
-    return "desktop-integration";
-  return "needs-access";
+  switch (providerStatus.authState) {
+    case "ready-service-account":
+    case "ready-desktop-account":
+    case "ready-secrets-manager":
+      return "ready";
+    case "approval-needed":
+      return "approval-pending";
+    case "choose-account":
+      return "no-account";
+    case "app-sign-in-needed":
+      return "no-account";
+    case "service-token-needed":
+    case "token-needed":
+    case "org-needed":
+      return "needs-access";
+    case "probe-failed":
+      return "needs-access";
+    case "unavailable":
+      return provider === "onepassword" && providerStatus.desktopInstalled === false
+        ? "missing-desktop"
+        : "needs-access";
+  }
+}
+
+function canContinueFromSavedAccessAuthState(
+  authState: SecretSourceAuthState | undefined,
+  savedAccessState: SavedAccessState,
+  manualOrSkipSelected = false,
+): boolean {
+  if (manualOrSkipSelected) return true;
+  if (savedAccessState === "connected" || savedAccessState === "review") return true;
+  return (
+    authState === "ready-service-account" ||
+    authState === "ready-desktop-account" ||
+    authState === "ready-secrets-manager"
+  );
+}
+
+function savedAccessCanContinue(
+  providerStatus: SecretSourceProviderStatus | undefined,
+  savedAccessState: SavedAccessState,
+  manualOrSkipSelected = false,
+): boolean {
+  // CLI-only and no-account/app-sign-in-needed states are diagnostic/prefill only; no automatic advance.
+  return canContinueFromSavedAccessAuthState(providerStatus?.authState, savedAccessState, manualOrSkipSelected);
+}
+
+function savedAccessProviderStatus(
+  detection: SecretSourceDetectionResult | null,
+  provider: "onepassword" | "bitwarden",
+): SecretSourceProviderStatus | undefined {
+  return detection?.providers.find((candidate) => candidate.provider === provider);
+}
+
+function savedAccessProviderReady(providerStatus: SecretSourceProviderStatus | undefined): boolean {
+  return providerStatus?.ready === true;
 }
 
 function savedAccessReadinessPercent(cue: SavedAccessCue): number {
@@ -447,14 +505,14 @@ function savedAccessReadinessPercent(cue: SavedAccessCue): number {
 
 function savedAccessCueLabel(cue: SavedAccessCue, state: SavedAccessState): string {
   if (state === "detecting") return "Checking";
-  if (state === "installing-cli") return "Installing CLI";
+  if (state === "connecting") return "Connecting";
   switch (cue) {
     case "ready":
       return "Ready";
     case "missing-desktop":
       return "Desktop";
     case "missing-cli":
-      return "CLI";
+      return "Connect";
     case "approval-pending":
       return "Approve";
     case "desktop-integration":
@@ -475,7 +533,7 @@ function savedAccessConditionalMediaKey(
 ): string | null {
   if (mode === "bitwarden") {
     const status = bitwarden?.status?.toLowerCase() ?? "";
-    if (bitwarden?.available || bitwarden?.cliAccessReady || status.includes("unlocked")) {
+    if (savedAccessProviderReady(bitwarden) || status.includes("unlocked")) {
       return "bitwarden-unlocked";
     }
     if (bitwarden?.cliInstalled || status.includes("locked") || status.includes("unauthenticated")) {
@@ -502,37 +560,28 @@ function cloudflareConditionalMediaKey(mode: CloudflareEndpointMode): string | n
   }
 }
 
+function openSavedAccessDocs(docsUrl: string) {
+  void openExternalUrl(docsUrl);
+}
+
 function savedAccessCueAction(
   cue: SavedAccessCue,
   provider: "onepassword" | "bitwarden" = "onepassword",
-): { label: string; url?: string; action?: "install-cli" | "open-url" } | null {
-  if (provider === "bitwarden") {
-    switch (cue) {
-      case "missing-cli":
-        return { label: "Install Bitwarden CLI", url: BITWARDEN_CLI_DOCS_URL, action: "open-url" };
-      case "needs-access":
-      case "no-account":
-        return { label: "Unlock Bitwarden", url: BITWARDEN_CLI_DOCS_URL, action: "open-url" };
-      case "ready":
-        return null;
-      default:
-        return { label: "Open guide", url: BITWARDEN_CLI_DOCS_URL, action: "open-url" };
-    }
-  }
+): { label: string; url?: string; action?: "open-url" } | null {
+  const docsUrl = provider === "bitwarden" ? BITWARDEN_SECRETS_MANAGER_DOCS_URL : ONEPASSWORD_SDK_DOCS_URL;
+  const providerLabel = provider === "bitwarden" ? "Bitwarden" : "1Password";
   switch (cue) {
-    case "missing-desktop":
-      return { label: "Install 1Password", url: ONEPASSWORD_DESKTOP_INSTALL_URL, action: "open-url" };
-    case "missing-cli":
-      return { label: "Install CLI", action: "install-cli" };
+    case "ready":
+      return null;
     case "approval-pending":
       return { label: "Retry after approval" };
+    case "missing-desktop":
+    case "missing-cli":
     case "desktop-integration":
-      return { label: "Open guide", url: ONEPASSWORD_DESKTOP_CLI_SETTINGS_URL, action: "open-url" };
     case "needs-access":
-      return { label: "Enable access", url: ONEPASSWORD_DESKTOP_CLI_SETTINGS_URL, action: "open-url" };
     case "no-account":
-      return { label: "Open guide", url: ONEPASSWORD_DESKTOP_CLI_SETTINGS_URL, action: "open-url" };
-    default:
+      return { label: `Connect ${providerLabel}`, url: docsUrl, action: "open-url" };
+    case "idle":
       return null;
   }
 }
@@ -733,6 +782,34 @@ const TOOL_API_KEYS: ToolApiKeyOption[] = [
     icon: IconKey,
     summary: "Documentation lookup provider key for library research.",
     placeholder: "ctx7-...",
+  },
+  {
+    name: "KUBECONFIG",
+    label: "Kubernetes",
+    icon: IconTerminal,
+    summary: "Kubeconfig consumed by Kubernetes MCP/tooling when agents need cluster access.",
+    placeholder: "apiVersion: v1",
+  },
+  {
+    name: "CLOUDFLARE_API_TOKEN",
+    label: "Cloudflare API",
+    icon: IconCloud,
+    summary: "Cloudflare token for endpoint setup and tunnel automation.",
+    placeholder: "cf_...",
+  },
+  {
+    name: "CLOUDFLARE_ACCOUNT_ID",
+    label: "Cloudflare account",
+    icon: IconCloud,
+    summary: "Cloudflare account identifier used with the endpoint token.",
+    placeholder: "account id",
+  },
+  {
+    name: "CLOUDFLARE_TUNNEL_TOKEN",
+    label: "Cloudflare tunnel",
+    icon: IconCloud,
+    summary: "Tunnel token persisted for Cloudflare endpoint setup.",
+    placeholder: "eyJ...",
   },
 ];
 
@@ -1650,6 +1727,78 @@ function providerApiKeyName(providerId: AiProviderId): string {
   );
 }
 
+function savedAccessPreviewTargets(sourceProvider: ScmProvider): string[] {
+  const sourceTarget = sourceProvider === "github" ? "GITHUB_TOKEN" : "GITLAB_TOKEN";
+  const providerTargets = AI_PROVIDERS
+    .map((provider) => providerApiKeyName(provider.id))
+    .filter((target, index, targets) => targets.indexOf(target) === index);
+  const toolTargets = TOOL_API_KEYS.map((tool) => tool.name);
+  const agentTargets = CODING_DISCORD_AGENTS.map(
+    (agent) => `${agent.id.toUpperCase()}_DISCORD_BOT_TOKEN`,
+  );
+  return [sourceTarget, ...providerTargets, ...toolTargets, ...agentTargets];
+}
+
+function applySavedAccessReferencesToSetup(
+  result: SecretSourceApplyResult,
+  setProviderAuthInputs: React.Dispatch<React.SetStateAction<Partial<Record<AiProviderId, string>>>>,
+  setProviderAuthApiKeys: React.Dispatch<React.SetStateAction<Partial<Record<AiProviderId, string>>>>,
+  setToolApiKeys: React.Dispatch<React.SetStateAction<Partial<Record<ToolApiKeyName, string>>>>,
+  setDiscordAgentTokens: React.Dispatch<React.SetStateAction<Partial<Record<DiscordAgentId, string>>>>,
+): void {
+  const appliedTargets = result.applied
+    .filter((reference) => reference.status === "applied")
+    .map((reference) => reference.targetSecretKey);
+  if (appliedTargets.length === 0) return;
+
+  const providerBySecretKey = new Map(
+    AI_PROVIDERS.map((provider) => [providerApiKeyName(provider.id), provider]),
+  );
+  const toolNames = new Set<ToolApiKeyName>(TOOL_API_KEYS.map((tool) => tool.name));
+  const agentIds = new Set<DiscordAgentId>(CODING_DISCORD_AGENTS.map((agent) => agent.id));
+
+  setProviderAuthInputs((current) => {
+    const next = { ...current };
+    for (const target of appliedTargets) {
+      const provider = providerBySecretKey.get(target);
+      if (provider?.auth === "api-key") {
+        next[provider.id] = next[provider.id] || "[REDACTED]";
+      }
+    }
+    return next;
+  });
+  setProviderAuthApiKeys((current) => {
+    const next = { ...current };
+    for (const target of appliedTargets) {
+      const provider = providerBySecretKey.get(target);
+      if (provider && (provider.auth === "gateway" || provider.auth === "local")) {
+        next[provider.id] = next[provider.id] || "[REDACTED]";
+      }
+    }
+    return next;
+  });
+  setToolApiKeys((current) => {
+    const next = { ...current };
+    for (const target of appliedTargets) {
+      if (toolNames.has(target as ToolApiKeyName)) {
+        next[target as ToolApiKeyName] = next[target as ToolApiKeyName] || "[REDACTED]";
+      }
+    }
+    return next;
+  });
+  setDiscordAgentTokens((current) => {
+    const next = { ...current };
+    for (const target of appliedTargets) {
+      const match = target.match(/^([A-Z0-9_]+)_DISCORD_BOT_TOKEN$/);
+      const agentId = match?.[1]?.toLowerCase() as DiscordAgentId | undefined;
+      if (agentId && agentIds.has(agentId)) {
+        next[agentId] = next[agentId] || "[REDACTED]";
+      }
+    }
+    return next;
+  });
+}
+
 function isFiniteNumber(value: number | null | undefined): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
@@ -1796,6 +1945,9 @@ function buildMetricsItems(metrics: MetricsState): MetricsItem[] {
 }
 
 function buildBootstrapRequest(
+  // Saved-access / secretSource selections are applied before this call and
+  // represented as [REDACTED] markers so the final bootstrap request carries
+  // approved provider/tool/agent/Cloudflare references without raw values.
   sourceProvider: ScmProvider,
   sourceOwner: string,
   githubToken: string,
@@ -2090,6 +2242,16 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
   const [savedAccessPreview, setSavedAccessPreview] = useState<SecretSourcePreviewResult | null>(null);
   const [savedAccessApplyResult, setSavedAccessApplyResult] = useState<SecretSourceApplyResult | null>(null);
   const [showSavedAccessReview, setShowSavedAccessReview] = useState(false);
+  const [savedAccessConnectProvider, setSavedAccessConnectProvider] =
+    useState<"onepassword" | "bitwarden" | null>(null);
+  const [savedAccessAuthForm, setSavedAccessAuthForm] = useState<SavedAccessAuthForm>({
+    onepasswordMode: "desktop-app",
+    onepasswordAccount: "",
+    onepasswordVault: "Automation",
+    onepasswordServiceAccountSecret: "",
+    bitwardenAccessSecret: "",
+    bitwardenOrganizationId: "",
+  });
   const [enabledDiscordAgents, setEnabledDiscordAgents] = useState<Partial<Record<DiscordAgentId, true>>>(
     () =>
       Object.fromEntries(
@@ -2298,11 +2460,18 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
       : state === "credentials" && MORGAN_VIDEO_SCREENS.has(setupScreen)
         ? MORGAN_MEDIA_SCREEN_SLUG[setupScreen]
         : null;
-  const bitwardenDetection = savedAccessDetection?.providers.find((provider) => provider.provider === "bitwarden");
+  const activeSavedAccessProvider = savedAccessPrepMode === "bitwarden" ? "bitwarden" : "onepassword";
+  const bitwardenDetection = savedAccessProviderStatus(savedAccessDetection, "bitwarden");
+  const activeSavedAccessStatus = savedAccessProviderStatus(savedAccessDetection, activeSavedAccessProvider);
+  const savedAccessCanContinueFromModal = savedAccessCanContinue(
+    activeSavedAccessStatus,
+    savedAccessState,
+    savedAccessPrepMode === "skipped",
+  );
   const savedAccessCue = savedAccessCueFromDetection(
     savedAccessDetection,
     savedAccessState,
-    savedAccessPrepMode === "bitwarden" ? "bitwarden" : "onepassword",
+    activeSavedAccessProvider,
   );
   const savedAccessConditionalKey = savedAccessConditionalMediaKey(
     savedAccessPrepMode,
@@ -2764,12 +2933,13 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
     knownDetection?: SecretSourceDetectionResult,
     provider: "onepassword" | "bitwarden" = "onepassword",
   ) => {
+    const providerLabel = provider === "bitwarden" ? "Bitwarden" : "1Password";
     setSavedAccessState("detecting");
     setShowSavedAccessReview(false);
     setSavedAccessPreview(null);
     setSavedAccessApplyResult(null);
     setError(null);
-    setScmProvisioningMessage("Checking approved access.");
+    setScmProvisioningMessage(`Checking ${providerLabel} SDK connection.`);
     try {
       const detection = knownDetection ?? await withSavedAccessTimeout(
         detectSecretSources(),
@@ -2778,41 +2948,20 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
       );
       setSavedAccessDetection(detection);
       const providerStatus = detection.providers.find((p) => p.provider === provider);
-      if (!providerStatus?.available) {
+      if (!savedAccessProviderReady(providerStatus)) {
         setSavedAccessState("unavailable");
-        setScmProvisioningMessage(detection.message || "Approved access is not ready yet.");
-        if (
-          provider === "onepassword" &&
-          providerStatus?.cliInstalled &&
-          providerStatus?.desktopAppIntegrationEnabled === false
-        ) {
-          void openExternalUrl(ONEPASSWORD_DESKTOP_CLI_SETTINGS_URL).catch(() => undefined);
-        }
+        setScmProvisioningMessage(providerStatus?.reason || detection.message || `${providerLabel} SDK connection is not ready yet.`);
         setShowSourceAdvanced(true);
-        return;
-      }
-
-      if (provider === "bitwarden") {
-        // Bitwarden preview is not yet supported by the backend; show detection success only.
-        setSavedAccessState("review");
-        setSavedAccessPreview({
-          provider: "bitwarden",
-          discovery: "metadata-only",
-          matches: [],
-          warnings: ["Bitwarden secrets preview is coming soon. Paste token remains available."],
-        });
-        setShowSavedAccessReview(true);
-        setScmProvisioningMessage("Bitwarden CLI is unlocked. Secrets apply is coming soon.");
         return;
       }
 
       const preview = await withSavedAccessTimeout(
         previewSecretSourceMatches({
-          provider: "onepassword",
-          targets: [sourceProvider === "github" ? "GITHUB_TOKEN" : "GITLAB_TOKEN"],
+          provider,
+          targets: savedAccessPreviewTargets(sourceProvider),
         }),
         SAVED_ACCESS_PREVIEW_TIMEOUT_MS,
-        "1Password metadata preview",
+        `${providerLabel} SDK metadata preview`,
       );
       setSavedAccessPreview(preview);
       setSavedAccessState("review");
@@ -2830,37 +2979,122 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
     }
   }, [sourceProvider]);
 
-  const installSavedAccessCliAndRetry = useCallback(async (provider: "onepassword" | "bitwarden" = "onepassword") => {
-    if (provider === "bitwarden") {
-      void openExternalUrl(BITWARDEN_CLI_DOCS_URL).catch(() => undefined);
-      return;
-    }
-    setSavedAccessState("installing-cli");
+  const openSavedAccessConnectSheet = useCallback((provider: "onepassword" | "bitwarden" = "onepassword") => {
+    setSavedAccessConnectProvider(provider);
+    setSavedAccessModalOpen(true);
+    setSavedAccessState("unavailable");
     setError(null);
-    setScmProvisioningMessage("Installing the official 1Password CLI, then I'll check your secrets setup again.");
+    setScmProvisioningMessage(
+      provider === "bitwarden"
+        ? "Connect Bitwarden Secrets Manager once, then CTO can preview saved names."
+        : "Connect 1Password with the app approval path first; service account stays under Advanced.",
+    );
+  }, []);
+
+  const saveSavedAccessAuthAndRetry = useCallback(async (provider: "onepassword" | "bitwarden" = "onepassword") => {
+    const providerLabel = provider === "bitwarden" ? "Bitwarden" : "1Password";
+    const request: SecretSourceAuthConfigRequest =
+      provider === "bitwarden"
+        ? {
+            provider,
+            authMode: "secrets-manager",
+            accessToken: savedAccessAuthForm.bitwardenAccessSecret,
+            organizationId: savedAccessAuthForm.bitwardenOrganizationId,
+          }
+        : {
+            provider,
+            authMode: savedAccessAuthForm.onepasswordMode,
+            account: savedAccessAuthForm.onepasswordAccount,
+            vault: savedAccessAuthForm.onepasswordVault,
+            serviceAccountToken: savedAccessAuthForm.onepasswordServiceAccountSecret,
+          };
+    setSavedAccessState("connecting");
+    setError(null);
+    setScmProvisioningMessage(
+      provider === "onepassword" && savedAccessAuthForm.onepasswordMode === "desktop-app"
+        ? "Checking 1Password app approval before saving."
+        : provider === "onepassword" && savedAccessAuthForm.onepasswordMode === "service-account"
+          ? "Checking 1Password service account access before saving."
+          : "Checking Bitwarden Secrets Manager access before saving.",
+    );
     try {
-      const detection = await withSavedAccessTimeout(
-        installOnePasswordCli(),
+      if (provider === "onepassword" && savedAccessAuthForm.onepasswordMode === "desktop-app") {
+        const probe = await withSavedAccessTimeout(
+          probeSecretSourceAuth({
+            provider,
+            authMode: "desktop-app",
+            accountName: savedAccessAuthForm.onepasswordAccount,
+            vault: savedAccessAuthForm.onepasswordVault,
+          }),
+          SAVED_ACCESS_DETECTION_TIMEOUT_MS,
+          "1Password DesktopAuth probe",
+        );
+        if (!probe.ok) {
+          setSavedAccessState("unavailable");
+          setScmProvisioningMessage(probe.message);
+          setShowSourceAdvanced(true);
+          return;
+        }
+      } else if (provider === "onepassword" && savedAccessAuthForm.onepasswordMode === "service-account") {
+        const probe = await withSavedAccessTimeout(
+          probeSecretSourceAuth({
+            provider,
+            authMode: "service-account",
+            vault: savedAccessAuthForm.onepasswordVault,
+            serviceAccountToken: savedAccessAuthForm.onepasswordServiceAccountSecret,
+          }),
+          SAVED_ACCESS_DETECTION_TIMEOUT_MS,
+          "1Password service account probe",
+        );
+        if (!probe.ok) {
+          setSavedAccessState("failed");
+          setScmProvisioningMessage(probe.message);
+          setShowSourceAdvanced(true);
+          return;
+        }
+      } else if (provider === "bitwarden") {
+        const probe = await withSavedAccessTimeout(
+          probeSecretSourceAuth({
+            provider,
+            authMode: "secrets-manager",
+            accessToken: savedAccessAuthForm.bitwardenAccessSecret,
+            organizationId: savedAccessAuthForm.bitwardenOrganizationId,
+          }),
+          SAVED_ACCESS_DETECTION_TIMEOUT_MS,
+          "Bitwarden Secrets Manager probe",
+        );
+        if (!probe.ok) {
+          setSavedAccessState("failed");
+          setScmProvisioningMessage(probe.message);
+          setShowSourceAdvanced(true);
+          return;
+        }
+      }
+      const result = await withSavedAccessTimeout(
+        saveSecretSourceAuthConfig(request),
         SAVED_ACCESS_DETECTION_TIMEOUT_MS,
-        "1Password CLI install check",
+        `${providerLabel} SDK connection save`,
       );
-      setSavedAccessDetection(detection);
-      await previewSavedAccess(detection, "onepassword");
+      setSavedAccessDetection(result.detection);
+      setSavedAccessConnectProvider(null);
+      setScmProvisioningMessage(result.message);
+      await previewSavedAccess(result.detection, provider);
     } catch (err) {
       setSavedAccessState("failed");
       setError(String(err));
-      setScmProvisioningMessage("I could not install the 1Password CLI automatically. I opened the official setup guide instead.");
-      void openExternalUrl(ONEPASSWORD_CLI_INSTALL_URL).catch(() => undefined);
+      setScmProvisioningMessage(`${providerLabel} SDK connection was not saved. Paste token is available.`);
+      setShowSourceAdvanced(true);
     }
-  }, [previewSavedAccess]);
+  }, [previewSavedAccess, savedAccessAuthForm]);
 
+  const connectSavedAccessAndRetry = useCallback(async (provider: "onepassword" | "bitwarden" = "onepassword") => {
+    const docsUrl = provider === "bitwarden" ? BITWARDEN_SECRETS_MANAGER_DOCS_URL : ONEPASSWORD_SDK_DOCS_URL;
+    openSavedAccessDocs(docsUrl);
+    openSavedAccessConnectSheet(provider);
+  }, [openSavedAccessConnectSheet]);
 
   const applySavedAccess = useCallback(async (provider: "onepassword" | "bitwarden" = "onepassword") => {
-    if (provider === "bitwarden") {
-      setScmProvisioningMessage("Bitwarden secrets apply is coming soon. Paste token is available.");
-      setShowSourceAdvanced(true);
-      return;
-    }
+    const providerLabel = provider === "bitwarden" ? "Bitwarden" : "1Password";
     const matches = savedAccessPreview?.matches ?? [];
     if (matches.length === 0) {
       setShowSourceAdvanced(true);
@@ -2874,7 +3108,7 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
     try {
       const result = await withSavedAccessTimeout(
         applySecretSourceMatches({
-          provider: "onepassword",
+          provider,
           approved: true,
           matches: matches.map((match: SecretSourceMatchPreview) => ({
             purpose: match.purpose,
@@ -2883,9 +3117,16 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
           })),
         }),
         SAVED_ACCESS_APPLY_TIMEOUT_MS,
-        "1Password approved field read",
+        `${providerLabel} approved field read`,
       );
       setSavedAccessApplyResult(result);
+      applySavedAccessReferencesToSetup(
+        result,
+        setProviderAuthInputs,
+        setProviderAuthApiKeys,
+        setToolApiKeys,
+        setDiscordAgentTokens,
+      );
       setSavedAccessState("connected");
       setShowSavedAccessReview(false);
       setScmProvisioningMessage(result.message || "Access connected");
@@ -3047,6 +3288,7 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
         progress: 8,
       });
       await invokeTauri("bootstrap_local_stack", {
+        savedAccessApplyResult,
         request: buildBootstrapRequest(
           sourceProvider,
           sourceOwner,
@@ -3087,6 +3329,7 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
     providerAuthApiKeys,
     providerAuthInputs,
     refreshMetrics,
+    savedAccessApplyResult,
     selectedProviders,
     setupProfile,
     sourceOwner,
@@ -3514,20 +3757,14 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
 
   const handleSavedAccessCueAction = useCallback(() => {
     if (!savedAccessCueActionItem) return;
-    if (savedAccessCueActionItem.action === "install-cli") {
-      void installSavedAccessCliAndRetry(
-        savedAccessPrepMode === "bitwarden" ? "bitwarden" : "onepassword",
-      );
-      return;
-    }
     if (savedAccessCue === "approval-pending") {
       void previewSavedAccess(undefined, savedAccessPrepMode === "bitwarden" ? "bitwarden" : "onepassword");
       return;
     }
     if (savedAccessCueActionItem.url) {
-      void openExternalUrl(savedAccessCueActionItem.url).catch(() => undefined);
+      void connectSavedAccessAndRetry(savedAccessPrepMode === "bitwarden" ? "bitwarden" : "onepassword");
     }
-  }, [installSavedAccessCliAndRetry, previewSavedAccess, savedAccessCue, savedAccessCueActionItem, savedAccessPrepMode]);
+  }, [connectSavedAccessAndRetry, previewSavedAccess, savedAccessCue, savedAccessCueActionItem, savedAccessPrepMode]);
 
   const officialBrandIcon = (src: string, label: string, className?: string) => (
     <img className={className} src={src} alt="" aria-hidden="true" data-official-icon={label} />
@@ -3572,6 +3809,7 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
             onClick={() => {
               setCloudflareEndpointMode("saved");
               setSavedAccessPrepMode("onepassword");
+              void previewSavedAccess(undefined, "onepassword");
               setPreviewBanner("Morgan will check 1Password for approved Cloudflare access before Source.");
             }}
           >
@@ -3734,8 +3972,8 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
             className={`local-bootstrap__auth-choice local-bootstrap__auth-choice--icon-first local-bootstrap__auth-choice--manual${savedAccessPrepMode === "skipped" ? " is-selected" : ""}`}
             onClick={() => {
               setSavedAccessPrepMode("skipped");
-              setSavedAccessModalOpen(false);
-              void speakMorganCue("Skipping secret manager setup. I'll keep manual setup available and only ask for credentials later when a provider truly needs them.");
+              setSetupScreen("cloudflare");
+              setPreviewBanner("");
             }}
           >
             <span className="local-bootstrap__install-stack">
@@ -3840,6 +4078,21 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
                   {savedAccessState === "connected" ? (
                     <div className="local-bootstrap__hint-row local-bootstrap__hint-row--compact" data-testid="saved-access-connected">Connected.</div>
                   ) : null}
+                  <span className="field__help">
+                    CLI metadata is diagnostic only; CLI-only, no-account, and app-sign-in-needed states do not auto-advance.
+                  </span>
+                  <button
+                    className="ghost-btn"
+                    type="button"
+                    data-testid="saved-access-modal-manual"
+                    onClick={() => {
+                      setSavedAccessPrepMode("skipped");
+                      setSavedAccessModalOpen(false);
+                      setSetupScreen("cloudflare");
+                    }}
+                  >
+                    Continue without a secret manager
+                  </button>
                 </div>
               </div>
               <button
@@ -3847,7 +4100,9 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
                 type="button"
                 data-testid="saved-access-modal-continue"
                 title="Continue to Cloudflare"
+                disabled={!savedAccessCanContinueFromModal}
                 onClick={() => {
+                  if (!savedAccessCanContinueFromModal) return;
                   setSavedAccessModalOpen(false);
                   setSetupScreen("cloudflare");
                 }}
@@ -3897,6 +4152,102 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
             <span className="sr-only">Paste token</span>
           </button>
         </div>
+        {savedAccessConnectProvider ? (
+          <div className="local-bootstrap__saved-access-connect-sheet" data-testid="saved-access-connect-sheet">
+            <strong>{savedAccessConnectProvider === "bitwarden" ? "Connect Bitwarden Secrets Manager" : "Connect 1Password"}</strong>
+            {savedAccessConnectProvider === "onepassword" ? (
+              <>
+                <div className="local-bootstrap__auth-choice" role="group" aria-label="1Password connection mode">
+                  <button
+                    className={savedAccessAuthForm.onepasswordMode === "desktop-app" ? "primary-btn" : "ghost-btn"}
+                    type="button"
+                    onClick={() => setSavedAccessAuthForm((current) => ({ ...current, onepasswordMode: "desktop-app" }))}
+                  >
+                    Use 1Password app
+                  </button>
+                  <button
+                    className={savedAccessAuthForm.onepasswordMode === "service-account" ? "primary-btn" : "ghost-btn"}
+                    type="button"
+                    onClick={() => setSavedAccessAuthForm((current) => ({ ...current, onepasswordMode: "service-account" }))}
+                  >
+                    Service account token
+                  </button>
+                </div>
+                {savedAccessAuthForm.onepasswordMode === "desktop-app" ? (
+                  <>
+                    <label className="field">
+                      <span>Account name or UUID</span>
+                      <input
+                        className="field__input"
+                        value={savedAccessAuthForm.onepasswordAccount}
+                        onChange={(event) => setSavedAccessAuthForm((current) => ({ ...current, onepasswordAccount: event.target.value }))}
+                        placeholder="Account name or UUID"
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Vault</span>
+                      <input
+                        className="field__input"
+                        value={savedAccessAuthForm.onepasswordVault}
+                        onChange={(event) => setSavedAccessAuthForm((current) => ({ ...current, onepasswordVault: event.target.value }))}
+                        placeholder="Automation"
+                      />
+                    </label>
+                    <span className="field__help">CTO uses 1Password app approval/biometrics; no CLI sign-in required.</span>
+                  </>
+                ) : (
+                  <label className="field">
+                    <span>Advanced fallback — Service account token</span>
+                    <input
+                      className="field__input"
+                      type="password"
+                      value={savedAccessAuthForm.onepasswordServiceAccountSecret}
+                      onChange={(event) => setSavedAccessAuthForm((current) => ({ ...current, onepasswordServiceAccountSecret: event.target.value }))}
+                      placeholder="Paste token"
+                    />
+                    <span className="field__help">Fallback service account token for automation when app approval is not available.</span>
+                  </label>
+                )}
+              </>
+            ) : (
+              <>
+                <label className="field">
+                  <span>Secrets Manager access token</span>
+                  <input
+                    className="field__input"
+                    type="password"
+                    value={savedAccessAuthForm.bitwardenAccessSecret}
+                    onChange={(event) => setSavedAccessAuthForm((current) => ({ ...current, bitwardenAccessSecret: event.target.value }))}
+                    placeholder="Paste token"
+                  />
+                </label>
+                <label className="field">
+                  <span>Organization ID</span>
+                  <input
+                    className="field__input"
+                    value={savedAccessAuthForm.bitwardenOrganizationId}
+                    onChange={(event) => setSavedAccessAuthForm((current) => ({ ...current, bitwardenOrganizationId: event.target.value }))}
+                    placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                  />
+                </label>
+                <span className="field__help">Bitwarden Secrets Manager uses an access token and organization ID; it is separate from Bitwarden Password Manager and not the Password Manager browser vault unlock.</span>
+              </>
+            )}
+            <div className="local-bootstrap__saved-access-actions">
+              <button
+                className="primary-btn"
+                type="button"
+                onClick={() => void saveSavedAccessAuthAndRetry(savedAccessConnectProvider)}
+                disabled={savedAccessState === "connecting"}
+              >
+                {savedAccessState === "connecting" ? "Checking..." : "Save and check"}
+              </button>
+              <button className="ghost-btn" type="button" onClick={() => setSavedAccessConnectProvider(null)}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : null}
         {showSavedAccessReview && savedAccessPreview ? (
           <div className="local-bootstrap__saved-access-review" data-testid="source-saved-access-review">
             <strong>Review before connecting</strong>
@@ -4419,7 +4770,7 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
                   {showBootstrapError ? <div className="local-bootstrap__inline-error">{error}</div> : null}
 
                   <div className="local-bootstrap__actions local-bootstrap__actions--onepage local-bootstrap__actions--intro">
-                    {dependencyPrepState === "running" || dependencyPrepState === "failed" ? (
+                    {dependencyPrepState !== "ready" ? (
                       <button
                         className="primary-btn"
                         type="button"

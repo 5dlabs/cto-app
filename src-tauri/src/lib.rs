@@ -65,6 +65,8 @@ pub fn run() {
             bootstrap::local_stack_resource_metrics,
             bootstrap::reset_local_stack_bootstrap,
             bootstrap::detect_secret_sources,
+            bootstrap::save_secret_source_auth_config,
+            bootstrap::probe_secret_source_auth,
             bootstrap::install_onepassword_cli,
             bootstrap::preview_secret_source_matches,
             bootstrap::apply_secret_source_matches,

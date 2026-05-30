@@ -55,7 +55,7 @@ describe("intent evaluator", () => {
   it("fails secret redaction when raw token-like material appears", () => {
     const result = evaluateSnapshotIntent(sourceContract, {
       heading: "Source",
-      text: "GitHub repository github_pat_abc123SECRET",
+      text: "GitHub repository github_pat_NOT_REDACTED_VALUE",
       controls: [
         { text: "Authorize with GitHub", visible: true, disabled: false },
         { title: "Continue to harness selection", visible: true, disabled: true },

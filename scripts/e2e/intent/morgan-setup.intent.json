@@ -9,7 +9,8 @@
       "docs": "docs/intent/morgan-setup/saved-access.md",
       "requiredText": [],
       "requiredControls": [
-        "Use 1Password saved access",
+        "Use 1Password for secrets",
+        "Use Bitwarden for secrets",
         "Continue without saved access",
         "Continue to Cloudflare"
       ],
@@ -35,41 +36,53 @@
         {
           "id": "onepassword",
           "label": "1Password",
-          "availability": "detected-first",
+          "availability": "sdk-connect",
           "tier": "free-local",
-          "rawSecretAccess": false
+          "rawSecretAccess": false,
+          "backend": "sdk",
+          "requiresCli": false,
+          "priority": "peer",
+          "firstView": true,
+          "sdk": {
+            "package": "@1password/sdk",
+            "auth": [
+              "OP_SERVICE_ACCOUNT_TOKEN",
+              "OP_ACCOUNT"
+            ],
+            "metadataPreview": "client.items.list(vault)",
+            "approvedRead": "client.items.get(itemId)"
+          },
+          "safetyNotes": [
+            "Do not require the op CLI by default; use SDK auth or official 1Password SDK guidance.",
+            "Do not read secret values before approval; preview metadata and redacted target matches only.",
+            "Do not display, log, or persist item fields; values may exist only in memory during approved apply."
+          ]
         },
         {
           "id": "bitwarden",
           "label": "Bitwarden",
-          "availability": "more-options",
+          "availability": "sdk-connect",
           "tier": "pro-team",
-          "priority": "secondary",
-          "firstView": false,
+          "priority": "peer",
+          "firstView": true,
           "rawSecretAccess": false,
-          "cli": {
-            "command": "bw",
-            "docs": "https://bitwarden.com/help/cli/",
-            "statusProbe": "bw status",
-            "statuses": [
-              "unauthenticated",
-              "locked",
-              "unlocked"
-            ],
-            "sessionInputs": [
-              "BW_SESSION",
-              "--session"
-            ],
-            "availableWhen": "status-unlocked",
-            "metadataPreview": "bw list items --search <target>",
-            "approvedRead": "bw get item <id>"
-          },
           "safetyNotes": [
-            "Show Bitwarden only after More options or local bw detection; keep 1Password as the first quick-connect provider.",
-            "Do not ask for a Bitwarden master password; use an existing unlocked CLI session via BW_SESSION or --session.",
-            "Do not run bw list items before approval; use bw status first and require explicit user action before metadata preview.",
-            "Do not display, log, or persist item fields; values may exist only in memory during approved apply."
-          ]
+            "Do not ask for a Bitwarden master password; use Secrets Manager SDK auth only.",
+            "Do not require the bw CLI for default setup.",
+            "Do not read secret values before approval; preview metadata and redacted target matches only.",
+            "Do not display, log, or persist secret fields; values may exist only in memory during approved apply."
+          ],
+          "backend": "sdk",
+          "requiresCli": false,
+          "sdk": {
+            "package": "@bitwarden/sdk-napi",
+            "auth": [
+              "BWS_ACCESS_TOKEN",
+              "organizationId"
+            ],
+            "metadataPreview": "client.secrets().list(organizationId)",
+            "approvedRead": "client.secrets().get(secretId)"
+          }
         },
         {
           "id": "lastpass",
@@ -118,6 +131,10 @@
           "FIRECRAWL_API_KEY",
           "TAVILY_API_KEY",
           "DISCORD_BOT_TOKEN"
+        ],
+        "providers": [
+          "onepassword",
+          "bitwarden"
         ]
       },
       "mediaFolder": "02_saved-access",

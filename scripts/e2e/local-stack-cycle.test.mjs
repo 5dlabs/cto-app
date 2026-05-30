@@ -103,6 +103,15 @@ describe("local stack setup E2E selector coverage", () => {
     assert.match(runnerSource, /report\.md/);
     assert.match(runnerSource, /evaluateSnapshotIntent/);
   });
+
+  it("captures Tauri screenshots and Morgan media state at every checkpoint", () => {
+    assert.match(runnerSource, /captureVisualFeedbackArtifact/);
+    assert.match(runnerSource, /take_screenshot/);
+    assert.match(runnerSource, /mediaState/);
+    assert.match(runnerSource, /consoleEvents/);
+    assert.match(runnerSource, /__ctoConsoleEvents/);
+    assert.match(runnerSource, /\.local.*e2e-visual-runs/s);
+  });
 });
 
 function escapeRegExp(value) {

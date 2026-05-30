@@ -18,6 +18,30 @@ export type RepositorySelection = "all" | "selected";
 export type SecretSourceProvider = "onepassword" | "bitwarden";
 export type SecretSourceQuickConnectProvider = "onepassword" | "bitwarden";
 
+export type SecretSourceAuthState =
+  | "ready-service-account"
+  | "ready-desktop-account"
+  | "ready-secrets-manager"
+  | "approval-needed"
+  | "choose-account"
+  | "app-sign-in-needed"
+  | "service-token-needed"
+  | "token-needed"
+  | "org-needed"
+  | "probe-failed"
+  | "unavailable";
+
+export interface OnePasswordAccountCandidate {
+  id?: string;
+  label: string;
+  accountName: string;
+  signInAddress?: string | null;
+  email?: string | null;
+  source: "saved-config" | "cli-metadata" | "manual";
+  vaultCandidates?: Array<{ id?: string; name: string; source: string }>;
+  preferred?: boolean;
+}
+
 export type OriginEngine = "standard" | "gitlab-compatible";
 export type OriginTransferMode = "mirror" | "migrate";
 
@@ -61,6 +85,11 @@ export interface OriginProvisionResult {
 export interface SecretSourceProviderStatus {
   provider: SecretSourceProvider;
   label: string;
+  authState: SecretSourceAuthState;
+  ready: boolean;
+  canAttemptDesktopApproval?: boolean;
+  accountCandidates?: OnePasswordAccountCandidate[];
+  warnings?: string[];
   desktopInstalled?: boolean;
   cliInstalled?: boolean;
   cliAccessReady?: boolean;
@@ -75,6 +104,45 @@ export interface SecretSourceProviderStatus {
   version: string | null;
   reason: string | null;
   primaryAction: string;
+  authModes?: string[];
+  configuredLabel?: string | null;
+}
+
+export interface SecretSourceAuthConfigRequest {
+  provider: SecretSourceQuickConnectProvider;
+  authMode?: "desktop-app" | "service-account" | "secrets-manager";
+  account?: string;
+  vault?: string;
+  serviceAccountToken?: string;
+  accessToken?: string;
+  organizationId?: string;
+}
+
+export interface SecretSourceAuthConfigResult {
+  provider: SecretSourceQuickConnectProvider;
+  configured: boolean;
+  message: string;
+  detection: SecretSourceDetectionResult;
+}
+
+export interface SecretSourceAuthProbeRequest {
+  provider: SecretSourceQuickConnectProvider;
+  authMode?: "desktop-app" | "service-account" | "secrets-manager";
+  accountName?: string;
+  account?: string;
+  vault?: string;
+  serviceAccountToken?: string;
+  accessToken?: string;
+  organizationId?: string;
+}
+
+export interface SecretSourceAuthProbeResult {
+  provider: SecretSourceQuickConnectProvider;
+  operation: "probe";
+  ok: boolean;
+  authMode: "desktop-app" | "service-account" | "secrets-manager" | string;
+  message: string;
+  redaction: "[REDACTED]" | string;
 }
 
 export interface SecretSourceDetectionResult {
@@ -271,8 +339,16 @@ export function detectSecretSources(): Promise<SecretSourceDetectionResult> {
   return invokeTauri<SecretSourceDetectionResult>("detect_secret_sources");
 }
 
-export function installOnePasswordCli(): Promise<SecretSourceDetectionResult> {
-  return invokeTauri<SecretSourceDetectionResult>("install_onepassword_cli");
+export function saveSecretSourceAuthConfig(
+  request: SecretSourceAuthConfigRequest,
+): Promise<SecretSourceAuthConfigResult> {
+  return invokeTauri<SecretSourceAuthConfigResult>("save_secret_source_auth_config", { request });
+}
+
+export function probeSecretSourceAuth(
+  request: SecretSourceAuthProbeRequest,
+): Promise<SecretSourceAuthProbeResult> {
+  return invokeTauri<SecretSourceAuthProbeResult>("probe_secret_source_auth", { request });
 }
 
 export function previewSecretSourceMatches(

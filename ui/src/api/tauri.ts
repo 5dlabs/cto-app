@@ -165,44 +165,100 @@ async function invokeBootstrapPreview<T>(command: string, args?: TauriInvokeArgs
             pendingUserPermission: false,
             detected: false,
             available: false,
+            status: "sdk-auth-missing",
+            docsUrl: "https://developer.1password.com/docs/sdks/",
             version: null,
-            reason: "Browser preview",
-            primaryAction: "Paste token",
+            reason: "Browser preview SDK auth is not configured.",
+            primaryAction: "Connect 1Password",
           },
           {
             provider: "bitwarden",
             label: "Bitwarden",
+            desktopInstalled: false,
             cliInstalled: false,
             cliAccessReady: false,
+            desktopAppIntegrationEnabled: false,
             accountConfigured: false,
             pendingUserPermission: false,
             detected: false,
             available: false,
-            status: "not-installed",
-            docsUrl: "https://bitwarden.com/help/cli/",
-            secondary: true,
+            status: "sdk-auth-missing",
+            docsUrl: "https://bitwarden.com/help/secrets-manager/",
             version: null,
-            reason: "More options / local bw detection only in Tauri",
-            primaryAction: "More options",
+            reason: "Browser preview SDK auth is not configured.",
+            primaryAction: "Connect Bitwarden",
           },
         ],
         manualFallbackAvailable: true,
-        message: "Browser preview keeps secrets optional; Paste token remains available.",
+        message: "Browser preview uses SDK-style saved-access mocks; Paste token remains available.",
       } as T;
-    case "preview_secret_source_matches":
+    case "save_secret_source_auth_config": {
+      const request = (args?.request ?? {}) as Record<string, unknown>;
+      const provider = request.provider === "bitwarden" ? "bitwarden" : "onepassword";
       return {
-        provider: "onepassword",
+        provider,
+        configured: true,
+        message: "Saved access connection details saved locally for the SDK flow.",
+        detection: {
+          providers: [
+            {
+              provider,
+              label: provider === "bitwarden" ? "Bitwarden" : "1Password",
+              desktopInstalled: provider === "onepassword",
+              cliInstalled: false,
+              cliAccessReady: true,
+              desktopAppIntegrationEnabled: provider === "onepassword",
+              accountConfigured: true,
+              pendingUserPermission: false,
+              detected: true,
+              available: true,
+              status: "sdk-auth-ready",
+              docsUrl: provider === "bitwarden" ? "https://bitwarden.com/help/secrets-manager/" : "https://developer.1password.com/docs/sdks/",
+              version: null,
+              reason: null,
+              primaryAction: "Review saved access",
+              authModes: provider === "bitwarden" ? ["secrets-manager"] : ["desktop-app", "service-account"],
+              configuredLabel: provider === "bitwarden" ? "Secrets Manager organization" : "Desktop app approval",
+            },
+          ],
+          manualFallbackAvailable: true,
+          message: "Saved access connection is ready.",
+        },
+      } as T;
+    }
+    case "probe_secret_source_auth": {
+      const request = (args?.request ?? {}) as Record<string, unknown>;
+      const provider = request.provider === "bitwarden" ? "bitwarden" : "onepassword";
+      return {
+        provider,
+        operation: "probe",
+        ok: provider === "onepassword",
+        authMode: String(request.authMode ?? (provider === "onepassword" ? "desktop-app" : "secrets-manager")),
+        message:
+          provider === "onepassword"
+            ? "Browser preview 1Password app approval probe succeeded."
+            : "Browser preview Bitwarden Secrets Manager probe succeeded.",
+        redaction: "[REDACTED]",
+      } as T;
+    }
+    case "preview_secret_source_matches": {
+      const request = (args?.request ?? {}) as Record<string, unknown>;
+      return {
+        provider: request.provider === "bitwarden" ? "bitwarden" : "onepassword",
         discovery: "metadata-only",
         matches: [],
-        warnings: ["Browser preview does not read vault metadata."],
+        warnings: ["Browser preview does not read secret-manager metadata."],
       } as T;
-    case "apply_secret_source_matches":
+    }
+    case "apply_secret_source_matches": {
+      const request = (args?.request ?? {}) as Record<string, unknown>;
       return {
-        provider: "onepassword",
+        provider: request.provider === "bitwarden" ? "bitwarden" : "onepassword",
         applied: [],
         rawValuesPersisted: false,
         message: "Access connected",
       } as T;
+    }
     case "probe_gitlab_coderun_auth":
       return {
         provider: "gitlab",

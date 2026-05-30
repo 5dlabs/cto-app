@@ -32,38 +32,41 @@ describe("Morgan secret-source intent", () => {
     assert.ok(secretSourceScreen.rules.includes("secrets-redacted"));
   });
 
-  it("keeps provider complexity behind detection or more-options disclosure", () => {
+  it("represents 1Password and Bitwarden as equal SDK-backed saved-access providers", () => {
     assert.deepEqual(secretSourceScreen.requiredControls, [
-      "Use 1Password saved access",
+      "Use 1Password for secrets",
+      "Use Bitwarden for secrets",
       "Continue without saved access",
       "Continue to Cloudflare",
     ]);
     assert.ok(secretSourceScreen.secretSources.some((source) => source.id === "onepassword"));
     const onePassword = secretSourceScreen.secretSources.find((source) => source.id === "onepassword");
-    assert.equal(onePassword.availability, "detected-first");
-    assert.equal(onePassword.tier, "free-local");
+    assert.equal(onePassword.availability, "sdk-connect");
+    assert.equal(onePassword.backend, "sdk");
+    assert.equal(onePassword.requiresCli, false);
     const bitwarden = secretSourceScreen.secretSources.find((source) => source.id === "bitwarden");
-    assert.ok(bitwarden, "Bitwarden should be represented as a secondary saved-access provider");
-    assert.equal(bitwarden.availability, "more-options");
-    assert.equal(bitwarden.priority, "secondary");
-    assert.equal(bitwarden.firstView, false);
+    assert.ok(bitwarden, "Bitwarden should be represented as a first-view saved-access provider");
+    assert.equal(bitwarden.availability, "sdk-connect");
+    assert.equal(bitwarden.backend, "sdk");
+    assert.equal(bitwarden.requiresCli, false);
+    assert.equal(bitwarden.priority, "peer");
+    assert.equal(bitwarden.firstView, true);
     for (const source of secretSourceScreen.secretSources) {
       assert.notEqual(source.rawSecretAccess, true, `${source.id} must not imply raw secret access`);
     }
   });
 
-  it("captures Bitwarden CLI support as a safe secondary-provider plan", () => {
+  it("captures SDK/no-CLI default and approval safety for both providers", () => {
     const bitwarden = secretSourceScreen.secretSources.find((source) => source.id === "bitwarden");
-    assert.ok(bitwarden?.cli, "Bitwarden CLI contract should be explicit before source support lands");
-    assert.equal(bitwarden.cli.command, "bw");
-    assert.equal(bitwarden.cli.docs, "https://bitwarden.com/help/cli/");
-    assert.equal(bitwarden.cli.statusProbe, "bw status");
-    assert.deepEqual(bitwarden.cli.statuses, ["unauthenticated", "locked", "unlocked"]);
-    assert.deepEqual(bitwarden.cli.sessionInputs, ["BW_SESSION", "--session"]);
-    assert.equal(bitwarden.cli.availableWhen, "status-unlocked");
+    assert.ok(bitwarden?.sdk, "Bitwarden SDK contract should be explicit");
+    assert.equal(bitwarden.sdk.package, "@bitwarden/sdk-napi");
+    assert.deepEqual(bitwarden.sdk.auth, ["BWS_ACCESS_TOKEN", "organizationId"]);
+    assert.equal(bitwarden.sdk.metadataPreview, "client.secrets().list(organizationId)");
+    assert.equal(bitwarden.sdk.approvedRead, "client.secrets().get(secretId)");
     assert.match(bitwarden.safetyNotes.join("\n"), /Do not ask for.*master password/i);
-    assert.match(bitwarden.safetyNotes.join("\n"), /Do not run bw list items before approval/i);
-    assert.equal(secretSourceScreen.quickConnect.provider, "onepassword");
+    assert.match(bitwarden.safetyNotes.join("\n"), /Do not require.*bw.*CLI/i);
+    assert.match(bitwarden.safetyNotes.join("\n"), /Do not read secret values before approval/i);
+    assert.deepEqual(secretSourceScreen.quickConnect.providers, ["onepassword", "bitwarden"]);
   });
 
   it("declares conditional media keys for saved-access and Cloudflare branches", () => {
@@ -97,7 +100,7 @@ describe("Morgan secret-source intent", () => {
       "preview_secret_source_matches",
       "apply_secret_source_matches",
     ]);
-    assert.equal(secretSourceScreen.quickConnect.provider, "onepassword");
+    assert.deepEqual(secretSourceScreen.quickConnect.providers, ["onepassword", "bitwarden"]);
     assert.equal(secretSourceScreen.quickConnect.discovery, "metadata-only");
     assert.equal(secretSourceScreen.quickConnect.approvalRequired, true);
     assert.deepEqual(secretSourceScreen.quickConnect.targets, [
@@ -128,7 +131,51 @@ describe("Morgan secret-source intent", () => {
       assert.match(localStackBootstrap, new RegExp(escapeRegExp(label)));
     }
     assert.match(localStackBootstrap, /redactedValuePreview/);
-    assert.doesNotMatch(localStackBootstrap, /savedAccess.*token/i);
+    assert.doesNotMatch(localStackBootstrap, /OP_SERVICE_ACCOUNT_TOKEN|BWS_ACCESS_TOKEN|BWS_ORGANIZATION_ID/);
+    assert.doesNotMatch(localStackBootstrap, /Bitwarden secrets preview is coming soon/);
+    assert.doesNotMatch(localStackBootstrap, /Bitwarden secrets apply is coming soon/);
+  });
+
+
+
+  it("shows provider-specific SDK connect sheets instead of env-var dead ends", () => {
+    for (const symbol of [
+      "SecretSourceAuthConfigRequest",
+      "saveSecretSourceAuthConfig",
+      "savedAccessAuthForm",
+      "saved-access-connect-sheet",
+    ]) {
+      assert.match(localStackBootstrap, new RegExp(escapeRegExp(symbol)));
+    }
+    for (const phrase of [
+      "Use 1Password app",
+      "Account name or UUID",
+      "Service account token",
+      "Secrets Manager access token",
+      "Organization ID",
+      "Save and check",
+    ]) {
+      assert.match(localStackBootstrap, new RegExp(escapeRegExp(phrase)));
+    }
+    assert.doesNotMatch(localStackBootstrap, /set OP_SERVICE_ACCOUNT_TOKEN or OP_ACCOUNT/i);
+    assert.doesNotMatch(localStackBootstrap, /set BWS_ACCESS_TOKEN and BWS_ORGANIZATION_ID/i);
+  });
+
+  it("freezes low-friction auth copy for the primary Secrets screen", () => {
+    const screenStart = localStackBootstrap.indexOf("const savedAccessPrepPanel = (");
+    const screenEnd = localStackBootstrap.indexOf("const savedAccessPanel =", screenStart);
+    assert.notEqual(screenStart, -1, "Secrets screen panel should exist");
+    assert.notEqual(screenEnd, -1, "Secrets screen panel should be bounded");
+    const secretsScreen = localStackBootstrap.slice(screenStart, screenEnd);
+
+    assert.match(secretsScreen, /title=\"Secrets\"/);
+    assert.match(secretsScreen, /Use 1Password for secrets/);
+    assert.match(secretsScreen, /Use Bitwarden for secrets/);
+    assert.match(secretsScreen, /Continue without (?:a )?secret manager/);
+    assert.doesNotMatch(secretsScreen, /Set\s+OP_ACCOUNT/i);
+    assert.doesNotMatch(secretsScreen, /OP_SERVICE_ACCOUNT_TOKEN/);
+    assert.doesNotMatch(secretsScreen, /install\s+(?:the\s+)?SDK/i);
+    assert.doesNotMatch(secretsScreen, /1Password[\s\S]{0,240}(username|user name)\s*\/\s*password/i);
   });
 
   it("documents compliance guardrails and redaction requirements", () => {

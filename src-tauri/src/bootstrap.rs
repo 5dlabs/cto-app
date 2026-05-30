@@ -126,19 +126,56 @@ const BOOTSTRAP_TOOL_API_KEY_ENV_NAMES: &[&str] = &[
     "BRAVE_API_KEY",
     "CONTEXT7_API_KEY",
     "PERPLEXITY_API_KEY",
+    "KUBECONFIG",
+    "CLOUDFLARE_API_TOKEN",
+    "CLOUDFLARE_ACCOUNT_ID",
+    "CLOUDFLARE_TUNNEL_TOKEN",
 ];
 const SECRET_SOURCE_PROVIDER_ONEPASSWORD: &str = "onepassword";
 const SECRET_SOURCE_PROVIDER_BITWARDEN: &str = "bitwarden";
+const SECRET_SOURCE_LEGACY_CLI_ENV: &str = "CTO_SECRET_SOURCE_LEGACY_CLI";
+const SECRET_SOURCE_SDK_BRIDGE: &str = include_str!("secret_source_sdk_bridge.mjs");
+const SECRET_SOURCE_SDK_TIMEOUT: Duration = Duration::from_secs(45);
+const ONEPASSWORD_SDK_AUTH_DOCS_URL: &str = "https://developer.1password.com/docs/sdks/";
+const BITWARDEN_SDK_AUTH_DOCS_URL: &str = "https://bitwarden.com/help/secrets-manager/";
 const BITWARDEN_CLI_DOCS_URL: &str = "https://bitwarden.com/help/cli/";
 const SECRET_SOURCE_CANONICAL_TARGETS: &[(&str, &str)] = &[
     ("GITHUB_TOKEN", "source.github.token"),
     ("GITLAB_TOKEN", "source.gitlab.token"),
+    ("ANTHROPIC_API_KEY", "provider.anthropic.apiKey"),
     ("OPENAI_API_KEY", "provider.openai.apiKey"),
     ("OPENROUTER_API_KEY", "provider.openrouter.apiKey"),
+    ("GEMINI_API_KEY", "provider.google-gemini.apiKey"),
+    ("GOOGLE_API_KEY", "provider.google.apiKey"),
+    ("XAI_API_KEY", "provider.xai.apiKey"),
     ("EXA_API_KEY", "tool.exa.apiKey"),
     ("FIRECRAWL_API_KEY", "tool.firecrawl.apiKey"),
     ("TAVILY_API_KEY", "tool.tavily.apiKey"),
-    ("DISCORD_BOT_TOKEN", "agent.discord.botToken"),
+    ("BRAVE_API_KEY", "tool.brave.apiKey"),
+    ("CONTEXT7_API_KEY", "tool.context7.apiKey"),
+    ("PERPLEXITY_API_KEY", "tool.perplexity.apiKey"),
+    ("KUBECONFIG", "tool.kubernetes.kubeconfig"),
+    ("CLOUDFLARE_API_TOKEN", "endpoint.cloudflare.apiToken"),
+    ("CLOUDFLARE_ACCOUNT_ID", "endpoint.cloudflare.accountId"),
+    ("CLOUDFLARE_TUNNEL_TOKEN", "endpoint.cloudflare.tunnelToken"),
+    ("MORGAN_DISCORD_BOT_TOKEN", "agent.discord.morgan.botToken"),
+    ("REX_DISCORD_BOT_TOKEN", "agent.discord.rex.botToken"),
+    ("GRIZZ_DISCORD_BOT_TOKEN", "agent.discord.grizz.botToken"),
+    ("NOVA_DISCORD_BOT_TOKEN", "agent.discord.nova.botToken"),
+    ("VIPER_DISCORD_BOT_TOKEN", "agent.discord.viper.botToken"),
+    ("BLAZE_DISCORD_BOT_TOKEN", "agent.discord.blaze.botToken"),
+    ("TAP_DISCORD_BOT_TOKEN", "agent.discord.tap.botToken"),
+    ("SPARK_DISCORD_BOT_TOKEN", "agent.discord.spark.botToken"),
+    ("CLEO_DISCORD_BOT_TOKEN", "agent.discord.cleo.botToken"),
+    ("CIPHER_DISCORD_BOT_TOKEN", "agent.discord.cipher.botToken"),
+    ("TESS_DISCORD_BOT_TOKEN", "agent.discord.tess.botToken"),
+    ("STITCH_DISCORD_BOT_TOKEN", "agent.discord.stitch.botToken"),
+    ("ATLAS_DISCORD_BOT_TOKEN", "agent.discord.atlas.botToken"),
+    ("BOLT_DISCORD_BOT_TOKEN", "agent.discord.bolt.botToken"),
+    ("BLOCK_DISCORD_BOT_TOKEN", "agent.discord.block.botToken"),
+    ("VEX_DISCORD_BOT_TOKEN", "agent.discord.vex.botToken"),
+    ("ANGIE_DISCORD_BOT_TOKEN", "agent.discord.angie.botToken"),
+    ("GLITCH_DISCORD_BOT_TOKEN", "agent.discord.glitch.botToken"),
 ];
 const ORIGIN_STANDARD_APP_NAME: &str = "origin-standard";
 const ORIGIN_GITLAB_COMPATIBLE_APP_NAME: &str = "origin-gitlab-compatible";
@@ -351,12 +388,64 @@ pub struct GitHubCliOAuthPrompt {
     clipboard_error: Option<String>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+#[allow(dead_code)]
+pub enum SecretSourceAuthState {
+    ReadyServiceAccount,
+    ReadyDesktopAccount,
+    ReadySecretsManager,
+    ApprovalNeeded,
+    ChooseAccount,
+    AppSignInNeeded,
+    ServiceTokenNeeded,
+    TokenNeeded,
+    OrgNeeded,
+    ProbeFailed,
+    Unavailable,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OnePasswordVaultCandidate {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    id: Option<String>,
+    name: String,
+    source: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OnePasswordAccountCandidate {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    id: Option<String>,
+    label: String,
+    account_name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sign_in_address: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    email: Option<String>,
+    source: String,
+    #[serde(default)]
+    vault_candidates: Vec<OnePasswordVaultCandidate>,
+    preferred: bool,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 #[allow(clippy::struct_excessive_bools)]
 pub struct SecretSourceProviderStatus {
     provider: String,
     label: String,
+    auth_state: SecretSourceAuthState,
+    ready: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    can_attempt_desktop_approval: Option<bool>,
+    #[serde(default)]
+    account_candidates: Vec<OnePasswordAccountCandidate>,
+    #[serde(default)]
+    warnings: Vec<String>,
+    // Legacy compatibility fields kept temporarily while UI migrates to authState/ready.
     desktop_installed: bool,
     cli_installed: bool,
     cli_access_ready: bool,
@@ -373,6 +462,68 @@ pub struct SecretSourceProviderStatus {
     version: Option<String>,
     reason: Option<String>,
     primary_action: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    auth_modes: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    configured_label: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SecretSourceAuthConfigRequest {
+    provider: String,
+    #[serde(default)]
+    auth_mode: Option<String>,
+    #[serde(default)]
+    account: Option<String>,
+    #[serde(default)]
+    vault: Option<String>,
+    #[serde(default)]
+    service_account_token: Option<String>,
+    #[serde(default)]
+    access_token: Option<String>,
+    #[serde(default)]
+    organization_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SecretSourceAuthConfigResult {
+    provider: String,
+    configured: bool,
+    message: String,
+    detection: SecretSourceDetectionResult,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SecretSourceAuthProbeRequest {
+    provider: String,
+    #[serde(default)]
+    auth_mode: Option<String>,
+    #[serde(default)]
+    account_name: Option<String>,
+    #[serde(default)]
+    account: Option<String>,
+    #[serde(default)]
+    vault: Option<String>,
+    #[serde(default)]
+    service_account_token: Option<String>,
+    #[serde(default)]
+    access_token: Option<String>,
+    #[serde(default)]
+    organization_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SecretSourceAuthProbeResult {
+    provider: String,
+    operation: String,
+    ok: bool,
+    auth_mode: String,
+    message: String,
+    redaction: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -391,7 +542,7 @@ pub struct SecretSourcePreviewRequest {
     targets: Vec<String>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SecretSourceMatchPreview {
     provider: String,
@@ -405,7 +556,7 @@ pub struct SecretSourceMatchPreview {
     approval_required: bool,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SecretSourcePreviewResult {
     provider: String,
@@ -422,7 +573,7 @@ pub struct SecretSourceApplyRequest {
     matches: Vec<SecretSourceApplySelection>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SecretSourceApplySelection {
     purpose: String,
@@ -447,6 +598,84 @@ pub struct SecretSourceApplyResult {
     applied: Vec<SecretSourceAppliedReference>,
     raw_values_persisted: bool,
     message: String,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SecretSourceBackendKind {
+    Sdk,
+    LegacyCli,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+struct OnePasswordCliMetadataDiscovery {
+    cli_installed: bool,
+    account_candidates: Vec<OnePasswordAccountCandidate>,
+    warnings: Vec<String>,
+}
+
+#[derive(Clone, Debug)]
+#[allow(clippy::struct_excessive_bools)]
+struct OnePasswordDetectionInputs {
+    desktop_installed: bool,
+    account_configured: bool,
+    service_token_configured: bool,
+    ready: bool,
+    saved_candidate: Option<OnePasswordAccountCandidate>,
+    configured_label: Option<String>,
+    cli_metadata: OnePasswordCliMetadataDiscovery,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SecretSourceAuthConfig {
+    #[serde(default)]
+    onepassword: OnePasswordAuthConfig,
+    #[serde(default)]
+    bitwarden: BitwardenAuthConfig,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct OnePasswordAuthConfig {
+    #[serde(default)]
+    auth_mode: String,
+    #[serde(default)]
+    account: String,
+    #[serde(default)]
+    vault: String,
+    #[serde(default)]
+    desktop_auth_probe_succeeded: bool,
+    #[serde(default)]
+    service_account_token_stored: bool,
+    #[serde(default)]
+    service_account_probe_succeeded: bool,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BitwardenAuthConfig {
+    #[serde(default)]
+    access_token_stored: bool,
+    #[serde(default)]
+    organization_id: String,
+    #[serde(default)]
+    secrets_manager_probe_succeeded: bool,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SecretSourceSdkValue {
+    purpose: String,
+    target_secret_key: String,
+    provider_ref: String,
+    value: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SecretSourceSdkApplyOutput {
+    provider: String,
+    values: Vec<SecretSourceSdkValue>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -1409,29 +1638,51 @@ async fn ensure_local_stack_cluster_dependencies(window: &Window) -> BootstrapRe
 }
 
 #[tauri::command]
-pub fn detect_secret_sources() -> SecretSourceDetectionResult {
-    detect_secret_sources_inner()
+#[allow(clippy::needless_pass_by_value)]
+pub fn detect_secret_sources(window: Window) -> SecretSourceDetectionResult {
+    detect_secret_sources_inner(Some(&window))
+}
+
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+pub fn save_secret_source_auth_config(
+    window: Window,
+    request: SecretSourceAuthConfigRequest,
+) -> BootstrapResult<SecretSourceAuthConfigResult> {
+    save_secret_source_auth_config_inner(&window, &request)
+}
+
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+pub fn probe_secret_source_auth(
+    window: Window,
+    request: SecretSourceAuthProbeRequest,
+) -> BootstrapResult<SecretSourceAuthProbeResult> {
+    probe_secret_source_auth_inner(Some(&window), &request)
 }
 
 #[tauri::command]
 pub async fn install_onepassword_cli() -> BootstrapResult<SecretSourceDetectionResult> {
     install_onepassword_cli_inner().await?;
-    Ok(detect_secret_sources_inner())
+    Ok(detect_secret_sources_inner(None))
 }
 
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
 pub fn preview_secret_source_matches(
+    window: Window,
     request: SecretSourcePreviewRequest,
 ) -> BootstrapResult<SecretSourcePreviewResult> {
-    preview_secret_source_matches_inner(&request)
+    preview_secret_source_matches_inner(Some(&window), &request)
 }
 
 #[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
 pub fn apply_secret_source_matches(
+    window: Window,
     request: SecretSourceApplyRequest,
 ) -> BootstrapResult<SecretSourceApplyResult> {
-    apply_secret_source_matches_inner(request)
+    apply_secret_source_matches_inner(Some(&window), request)
 }
 
 #[tauri::command]
@@ -3327,15 +3578,24 @@ fn redacted_origin_manifest_preview(manifest: &str) -> String {
         .replace("token:", "token: [REDACTED]")
 }
 
-fn validate_secret_source_provider(provider: &str) -> BootstrapResult<()> {
-    if provider
-        .trim()
-        .eq_ignore_ascii_case(SECRET_SOURCE_PROVIDER_ONEPASSWORD)
-    {
-        Ok(())
-    } else {
-        Err("unsupported secret source provider; only onepassword quick connect is available locally".to_string())
+fn normalize_secret_source_provider(provider: &str) -> BootstrapResult<&'static str> {
+    let normalized = provider.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        SECRET_SOURCE_PROVIDER_ONEPASSWORD => Ok(SECRET_SOURCE_PROVIDER_ONEPASSWORD),
+        SECRET_SOURCE_PROVIDER_BITWARDEN => Ok(SECRET_SOURCE_PROVIDER_BITWARDEN),
+        _ => Err(format!(
+            "unsupported secret source provider '{provider}'; choose onepassword or bitwarden"
+        )),
     }
+}
+
+fn secret_source_legacy_cli_enabled() -> bool {
+    std::env::var(SECRET_SOURCE_LEGACY_CLI_ENV).is_ok_and(|value| {
+        matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "on"
+        )
+    })
 }
 
 fn canonical_secret_target(key: &str) -> Option<(&'static str, &'static str)> {
@@ -3363,7 +3623,1062 @@ fn secret_source_targets(requested: &[String]) -> Vec<(&'static str, &'static st
         .collect()
 }
 
-fn detect_secret_sources_inner() -> SecretSourceDetectionResult {
+fn detect_secret_sources_inner(window: Option<&Window>) -> SecretSourceDetectionResult {
+    if secret_source_legacy_cli_enabled() {
+        return legacy_secret_sources_detection_impl();
+    }
+    sdk_secret_sources_detection_inner(window)
+}
+
+#[allow(clippy::too_many_lines)]
+fn sdk_secret_sources_detection_inner(window: Option<&Window>) -> SecretSourceDetectionResult {
+    let config = window
+        .and_then(|window| secret_source_auth_config(window).ok())
+        .flatten();
+    let onepassword_desktop_installed = onepassword_desktop_installed();
+    let onepassword_account_configured = env_value_present("OP_ACCOUNT")
+        || env_value_present("ONEPASSWORD_ACCOUNT")
+        || config
+            .as_ref()
+            .is_some_and(|config| !config.onepassword.account.trim().is_empty());
+    let onepassword_service_token_configured =
+        onepassword_service_token_configured(config.as_ref());
+    let onepassword_ready = onepassword_sdk_auth_configured(config.as_ref());
+    let bitwarden_token_configured = bitwarden_access_token_configured(config.as_ref());
+    let bitwarden_org_configured = bitwarden_organization_configured(config.as_ref());
+    let bitwarden_ready = bitwarden_sdk_auth_configured(config.as_ref());
+    let bitwarden_auth_state = if bitwarden_ready {
+        SecretSourceAuthState::ReadySecretsManager
+    } else if bitwarden_org_configured && !bitwarden_token_configured {
+        SecretSourceAuthState::TokenNeeded
+    } else if bitwarden_token_configured && !bitwarden_org_configured {
+        SecretSourceAuthState::OrgNeeded
+    } else if bitwarden_token_configured && bitwarden_org_configured {
+        SecretSourceAuthState::ProbeFailed
+    } else {
+        SecretSourceAuthState::TokenNeeded
+    };
+    let onepassword_saved_candidate = config
+        .as_ref()
+        .and_then(|config| onepassword_saved_config_candidate(&config.onepassword));
+    let onepassword_label = config.as_ref().and_then(|config| {
+        if !config.onepassword.account.trim().is_empty() {
+            Some(config.onepassword.account.clone())
+        } else if config.onepassword.service_account_token_stored {
+            Some("service account".to_string())
+        } else {
+            None
+        }
+    });
+    let bitwarden_label = config.as_ref().and_then(|config| {
+        if config.bitwarden.organization_id.trim().is_empty() {
+            None
+        } else {
+            Some("Secrets Manager organization".to_string())
+        }
+    });
+    let onepassword_status =
+        onepassword_sdk_provider_status_from_inputs(OnePasswordDetectionInputs {
+            desktop_installed: onepassword_desktop_installed,
+            account_configured: onepassword_account_configured,
+            service_token_configured: onepassword_service_token_configured,
+            ready: onepassword_ready,
+            saved_candidate: onepassword_saved_candidate,
+            configured_label: onepassword_label,
+            cli_metadata: discover_onepassword_cli_metadata(),
+        });
+    SecretSourceDetectionResult {
+        providers: vec![
+            onepassword_status,
+            SecretSourceProviderStatus {
+                provider: SECRET_SOURCE_PROVIDER_BITWARDEN.to_string(),
+                label: "Bitwarden".to_string(),
+                auth_state: bitwarden_auth_state,
+                ready: bitwarden_ready,
+                can_attempt_desktop_approval: None,
+                account_candidates: Vec::new(),
+                warnings: Vec::new(),
+                desktop_installed: false,
+                cli_installed: false,
+                cli_access_ready: bitwarden_ready,
+                desktop_app_integration_enabled: false,
+                account_configured: bitwarden_ready,
+                pending_user_permission: false,
+                detected: bitwarden_ready,
+                available: bitwarden_ready,
+                status: Some(
+                    if bitwarden_ready {
+                        "sdk-auth-ready"
+                    } else {
+                        "sdk-auth-missing"
+                    }
+                    .to_string(),
+                ),
+                docs_url: Some(BITWARDEN_SDK_AUTH_DOCS_URL.to_string()),
+                secondary: false,
+                version: None,
+                reason: if bitwarden_ready {
+                    None
+                } else {
+                    Some(
+                        "Paste a Bitwarden Secrets Manager access token and organization ID. Paste credentials manually remains available."
+                            .to_string(),
+                    )
+                },
+                primary_action: if bitwarden_ready {
+                    "Review saved access"
+                } else {
+                    "Connect Bitwarden"
+                }
+                .to_string(),
+                auth_modes: vec!["secrets-manager".to_string()],
+                configured_label: bitwarden_label,
+            },
+        ],
+        manual_fallback_available: true,
+        message: "Saved access uses in-app SDK connections by default. 1Password CLI metadata may prefill local account choices but never makes auth ready by itself.".to_string(),
+    }
+}
+
+// fn legacy_secret_sources_detection_inner static-contract boundary: helper bodies below are
+// metadata-prefill only, not default CLI readiness gates.
+fn onepassword_sdk_provider_status_from_inputs(
+    inputs: OnePasswordDetectionInputs,
+) -> SecretSourceProviderStatus {
+    let OnePasswordDetectionInputs {
+        desktop_installed,
+        account_configured,
+        service_token_configured,
+        ready,
+        saved_candidate,
+        configured_label,
+        cli_metadata,
+    } = inputs;
+    let OnePasswordCliMetadataDiscovery {
+        cli_installed,
+        account_candidates: cli_account_candidates,
+        warnings,
+    } = cli_metadata;
+
+    let mut account_candidates = Vec::new();
+    if let Some(candidate) = saved_candidate {
+        merge_onepassword_account_candidate(&mut account_candidates, candidate);
+    }
+    for candidate in cli_account_candidates {
+        merge_onepassword_account_candidate(&mut account_candidates, candidate);
+    }
+
+    let has_account_candidate = !account_candidates.is_empty();
+    let auth_state = if ready && service_token_configured {
+        SecretSourceAuthState::ReadyServiceAccount
+    } else if ready && account_configured {
+        SecretSourceAuthState::ReadyDesktopAccount
+    } else if account_configured {
+        SecretSourceAuthState::ApprovalNeeded
+    } else if account_candidates.len() > 1 {
+        SecretSourceAuthState::ChooseAccount
+    } else if desktop_installed && has_account_candidate {
+        SecretSourceAuthState::ApprovalNeeded
+    } else if desktop_installed {
+        SecretSourceAuthState::AppSignInNeeded
+    } else if has_account_candidate {
+        SecretSourceAuthState::ChooseAccount
+    } else {
+        SecretSourceAuthState::Unavailable
+    };
+
+    let primary_action = if ready {
+        "Review saved access"
+    } else if matches!(auth_state, SecretSourceAuthState::ChooseAccount) {
+        "Choose 1Password account"
+    } else if matches!(auth_state, SecretSourceAuthState::AppSignInNeeded) {
+        "Use 1Password app"
+    } else if matches!(auth_state, SecretSourceAuthState::ApprovalNeeded) {
+        "Approve in 1Password"
+    } else {
+        "Connect 1Password"
+    };
+
+    SecretSourceProviderStatus {
+        provider: SECRET_SOURCE_PROVIDER_ONEPASSWORD.to_string(),
+        label: "1Password".to_string(),
+        auth_state,
+        ready,
+        can_attempt_desktop_approval: Some(
+            desktop_installed
+                && !service_token_configured
+                && (account_configured || account_candidates.len() == 1),
+        ),
+        account_candidates,
+        warnings,
+        desktop_installed,
+        cli_installed,
+        cli_access_ready: ready,
+        desktop_app_integration_enabled: ready,
+        account_configured,
+        pending_user_permission: matches!(auth_state, SecretSourceAuthState::ApprovalNeeded),
+        detected: ready
+            || desktop_installed
+            || account_configured
+            || cli_installed
+            || has_account_candidate,
+        available: ready,
+        status: Some(
+            if ready {
+                "sdk-auth-ready"
+            } else {
+                "sdk-auth-missing"
+            }
+            .to_string(),
+        ),
+        docs_url: Some(ONEPASSWORD_SDK_AUTH_DOCS_URL.to_string()),
+        secondary: false,
+        version: None,
+        reason: if ready {
+            None
+        } else {
+            Some(
+                "Use 1Password app approval, choose an account, or paste a service account token. CLI metadata is prefill only; paste credentials manually remains available."
+                    .to_string(),
+            )
+        },
+        primary_action: primary_action.to_string(),
+        auth_modes: vec!["desktop-app".to_string(), "service-account".to_string()],
+        configured_label,
+    }
+}
+
+fn merge_onepassword_account_candidate(
+    candidates: &mut Vec<OnePasswordAccountCandidate>,
+    mut candidate: OnePasswordAccountCandidate,
+) {
+    if let Some(existing) = candidates
+        .iter_mut()
+        .find(|existing| onepassword_candidate_identity_matches(existing, &candidate))
+    {
+        existing.preferred |= candidate.preferred;
+        if existing.id.is_none() {
+            existing.id = candidate.id.take();
+        }
+        if existing.sign_in_address.is_none() {
+            existing.sign_in_address = candidate.sign_in_address.take();
+        }
+        if existing.email.is_none() {
+            existing.email = candidate.email.take();
+        }
+        for vault in candidate.vault_candidates {
+            if !existing.vault_candidates.iter().any(|existing_vault| {
+                existing_vault.name.eq_ignore_ascii_case(&vault.name)
+                    || (existing_vault.id.is_some() && existing_vault.id == vault.id)
+            }) {
+                existing.vault_candidates.push(vault);
+            }
+        }
+        sort_onepassword_vault_candidates(&mut existing.vault_candidates);
+    } else {
+        sort_onepassword_vault_candidates(&mut candidate.vault_candidates);
+        candidates.push(candidate);
+    }
+}
+
+fn onepassword_candidate_identity_matches(
+    left: &OnePasswordAccountCandidate,
+    right: &OnePasswordAccountCandidate,
+) -> bool {
+    (!left.account_name.is_empty() && left.account_name.eq_ignore_ascii_case(&right.account_name))
+        || (left.id.is_some() && left.id == right.id)
+        || (left.sign_in_address.is_some() && left.sign_in_address == right.sign_in_address)
+}
+
+fn discover_onepassword_cli_metadata() -> OnePasswordCliMetadataDiscovery {
+    let Some(_) = find_tool_binary("op") else {
+        return OnePasswordCliMetadataDiscovery {
+            cli_installed: false,
+            account_candidates: Vec::new(),
+            warnings: vec!["1Password CLI metadata prefill unavailable: op was not found. Continue with the 1Password app account picker, service account token, or manual paste.".to_string()],
+        };
+    };
+
+    let mut command = tool_command("op");
+    command.args(["account", "list", "--format", "json"]);
+    let account_output = run_onepassword_metadata_command(
+        command,
+        "op account list --format json",
+        Duration::from_secs(6),
+    );
+
+    let mut warnings = Vec::new();
+    let mut account_candidates = match account_output {
+        Ok(output) if output.status.success() => {
+            match parse_onepassword_account_candidates(&String::from_utf8_lossy(&output.stdout)) {
+                Ok(candidates) => candidates,
+                Err(error) => {
+                    warnings.push(format!(
+                        "1Password CLI metadata prefill warning: account metadata could not be parsed ({error})."
+                    ));
+                    Vec::new()
+                }
+            }
+        }
+        Ok(_output) => {
+            warnings.push("1Password CLI metadata prefill warning: account metadata lookup failed. Sign in to the 1Password app, choose an account manually, or use a service account token.".to_string());
+            Vec::new()
+        }
+        Err(error) => {
+            warnings.push(format!(
+                "1Password CLI metadata prefill warning: account metadata lookup did not complete ({}).",
+                onepassword_redacted_cli_warning(&error)
+            ));
+            Vec::new()
+        }
+    };
+
+    if account_candidates.is_empty() {
+        warnings.push("1Password CLI metadata prefill found no accounts. Choose an account in the app, paste a service account token, or paste credentials manually.".to_string());
+    }
+
+    let total_accounts = account_candidates.len();
+    for candidate in &mut account_candidates {
+        match discover_onepassword_vault_candidates(&candidate.account_name) {
+            Ok(vault_candidates) => {
+                if vault_candidates
+                    .iter()
+                    .any(|vault| vault.name.eq_ignore_ascii_case("Automation"))
+                {
+                    candidate.preferred = total_accounts == 1;
+                }
+                candidate.vault_candidates = vault_candidates;
+            }
+            Err(error) => warnings.push(format!(
+                "1Password CLI metadata prefill warning: vault metadata lookup failed for an account candidate ({}).",
+                onepassword_redacted_cli_warning(&error)
+            )),
+        }
+    }
+
+    OnePasswordCliMetadataDiscovery {
+        cli_installed: true,
+        account_candidates,
+        warnings,
+    }
+}
+
+fn discover_onepassword_vault_candidates(
+    account_name: &str,
+) -> BootstrapResult<Vec<OnePasswordVaultCandidate>> {
+    if account_name.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut command = tool_command("op");
+    command.args([
+        "vault",
+        "list",
+        "--account",
+        account_name,
+        "--format",
+        "json",
+    ]);
+    let output = run_onepassword_metadata_command(
+        command,
+        "op vault list --account [REDACTED] --format json",
+        Duration::from_secs(6),
+    )?;
+    if !output.status.success() {
+        return Err("op vault list returned a non-zero status".to_string());
+    }
+    parse_onepassword_vault_candidates(&String::from_utf8_lossy(&output.stdout))
+}
+
+fn parse_onepassword_account_candidates(
+    raw_json: &str,
+) -> BootstrapResult<Vec<OnePasswordAccountCandidate>> {
+    let value = serde_json::from_str::<Value>(raw_json)
+        .map_err(|error| format!("invalid account JSON: {error}"))?;
+    let accounts = value
+        .as_array()
+        .ok_or_else(|| "account metadata was not a JSON array".to_string())?;
+    let mut candidates = Vec::new();
+    for (index, account) in accounts.iter().enumerate() {
+        let account_name = json_string_field(
+            account,
+            &["shorthand", "accountName", "account_name", "name"],
+        )
+        .or_else(|| json_string_field(account, &["url", "signInAddress", "sign_in_address"]))
+        .or_else(|| json_string_field(account, &["account_uuid", "accountUuid", "id", "uuid"]));
+        let Some(account_name) = account_name else {
+            continue;
+        };
+        let id = json_string_field(account, &["account_uuid", "accountUuid", "id", "uuid"]);
+        let sign_in_address =
+            json_string_field(account, &["url", "signInAddress", "sign_in_address"]);
+        let label = json_string_field(account, &["label", "displayName", "display_name", "name"])
+            .filter(|label| !looks_like_email(label))
+            .or_else(|| {
+                json_string_field(account, &["shorthand", "accountName", "account_name"])
+                    .filter(|label| !looks_like_email(label))
+            })
+            .or_else(|| sign_in_address.as_deref().map(onepassword_sign_in_label))
+            .filter(|label| !label.trim().is_empty())
+            .unwrap_or_else(|| format!("1Password account {}", index + 1));
+
+        merge_onepassword_account_candidate(
+            &mut candidates,
+            OnePasswordAccountCandidate {
+                id,
+                label,
+                account_name,
+                sign_in_address,
+                email: json_string_field(account, &["email"]),
+                source: "cli-metadata".to_string(),
+                vault_candidates: Vec::new(),
+                preferred: false,
+            },
+        );
+    }
+    Ok(candidates)
+}
+
+fn parse_onepassword_vault_candidates(
+    raw_json: &str,
+) -> BootstrapResult<Vec<OnePasswordVaultCandidate>> {
+    let value = serde_json::from_str::<Value>(raw_json)
+        .map_err(|error| format!("invalid vault JSON: {error}"))?;
+    let vaults = value
+        .as_array()
+        .ok_or_else(|| "vault metadata was not a JSON array".to_string())?;
+    let mut candidates = Vec::new();
+    for vault in vaults {
+        let Some(name) = json_string_field(vault, &["name", "title"]) else {
+            continue;
+        };
+        let candidate = OnePasswordVaultCandidate {
+            id: json_string_field(vault, &["id", "uuid"]),
+            name,
+            source: "cli-metadata".to_string(),
+        };
+        if !candidates
+            .iter()
+            .any(|existing: &OnePasswordVaultCandidate| {
+                existing.name.eq_ignore_ascii_case(&candidate.name)
+                    || (existing.id.is_some() && existing.id == candidate.id)
+            })
+        {
+            candidates.push(candidate);
+        }
+    }
+    sort_onepassword_vault_candidates(&mut candidates);
+    Ok(candidates)
+}
+
+fn sort_onepassword_vault_candidates(vaults: &mut [OnePasswordVaultCandidate]) {
+    vaults.sort_by(|left, right| {
+        let left_is_automation = left.name.eq_ignore_ascii_case("Automation");
+        let right_is_automation = right.name.eq_ignore_ascii_case("Automation");
+        right_is_automation.cmp(&left_is_automation).then_with(|| {
+            left.name
+                .to_ascii_lowercase()
+                .cmp(&right.name.to_ascii_lowercase())
+        })
+    });
+}
+
+fn json_string_field(value: &Value, keys: &[&str]) -> Option<String> {
+    keys.iter().find_map(|key| {
+        value
+            .get(*key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+    })
+}
+
+fn onepassword_sign_in_label(sign_in_address: &str) -> String {
+    sign_in_address
+        .trim()
+        .trim_start_matches("https://")
+        .trim_start_matches("http://")
+        .trim_end_matches('/')
+        .to_string()
+}
+
+fn looks_like_email(value: &str) -> bool {
+    let value = value.trim();
+    (value.contains('@') && value.split('@').all(|part| !part.is_empty()))
+        || value.eq_ignore_ascii_case("[REDACTED]")
+}
+
+fn onepassword_redacted_cli_warning(raw: &str) -> String {
+    redact_email_like(&sanitize_bootstrap_log_text(raw)).replace('\n', " ")
+}
+
+fn redact_email_like(value: &str) -> String {
+    value
+        .split_whitespace()
+        .map(|token| {
+            let trimmed = token.trim_matches(|ch: char| {
+                matches!(
+                    ch,
+                    ',' | ';' | ':' | ')' | '(' | '[' | ']' | '{' | '}' | '"' | '\''
+                )
+            });
+            if looks_like_email(trimmed) {
+                token.replace(trimmed, "[REDACTED]")
+            } else {
+                token.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn run_onepassword_metadata_command(
+    mut command: Command,
+    label: &str,
+    timeout: Duration,
+) -> BootstrapResult<Output> {
+    append_bootstrap_log(&format!(
+        "starting `{}` with {}s timeout",
+        sanitize_bootstrap_command_label(label),
+        timeout.as_secs()
+    ));
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    let mut child = command
+        .spawn()
+        .map_err(|error| format!("Failed to run {label}: {error}"))?;
+    let deadline = Instant::now() + timeout;
+    loop {
+        if child
+            .try_wait()
+            .map_err(|error| format!("Failed to poll {label}: {error}"))?
+            .is_some()
+        {
+            let output = child
+                .wait_with_output()
+                .map_err(|error| format!("Failed to collect {label}: {error}"))?;
+            let status = output
+                .status
+                .code()
+                .map_or_else(|| "signal".to_string(), |code| code.to_string());
+            append_bootstrap_log(&format!(
+                "command `{}` exited with status {status}",
+                sanitize_bootstrap_command_label(label)
+            ));
+            return Ok(output);
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait_with_output();
+            append_bootstrap_log(&format!(
+                "command `{}` timed out after {}s",
+                sanitize_bootstrap_command_label(label),
+                timeout.as_secs()
+            ));
+            return Err(format!("Timed out waiting for {label}"));
+        }
+        thread::sleep(Duration::from_millis(120));
+    }
+}
+
+fn onepassword_service_token_configured(config: Option<&SecretSourceAuthConfig>) -> bool {
+    onepassword_env_service_token_present()
+        || config.is_some_and(|config| config.onepassword.service_account_token_stored)
+}
+
+fn onepassword_env_service_token_present() -> bool {
+    env_value_present("OP_SERVICE_ACCOUNT_TOKEN")
+        || env_value_present("ONEPASSWORD_SERVICE_ACCOUNT_TOKEN")
+        || env_value_present("ONEPASSWORD_SDK_TOKEN")
+}
+
+fn bitwarden_access_token_configured(config: Option<&SecretSourceAuthConfig>) -> bool {
+    env_value_present("BWS_ACCESS_TOKEN")
+        || env_value_present("BITWARDEN_ACCESS_TOKEN")
+        || config.is_some_and(|config| config.bitwarden.access_token_stored)
+}
+
+fn bitwarden_organization_configured(config: Option<&SecretSourceAuthConfig>) -> bool {
+    env_value_present("BWS_ORGANIZATION_ID")
+        || env_value_present("BITWARDEN_ORGANIZATION_ID")
+        || config.is_some_and(|config| !config.bitwarden.organization_id.trim().is_empty())
+}
+
+fn onepassword_saved_config_candidate(
+    config: &OnePasswordAuthConfig,
+) -> Option<OnePasswordAccountCandidate> {
+    let account_name = config.account.trim();
+    if account_name.is_empty() {
+        return None;
+    }
+    let vault = config.vault.trim();
+    Some(OnePasswordAccountCandidate {
+        id: None,
+        label: account_name.to_string(),
+        account_name: account_name.to_string(),
+        sign_in_address: None,
+        email: None,
+        source: "saved-config".to_string(),
+        vault_candidates: if vault.is_empty() {
+            Vec::new()
+        } else {
+            vec![OnePasswordVaultCandidate {
+                id: None,
+                name: vault.to_string(),
+                source: "saved-config".to_string(),
+            }]
+        },
+        preferred: true,
+    })
+}
+
+fn onepassword_sdk_auth_configured(config: Option<&SecretSourceAuthConfig>) -> bool {
+    onepassword_env_service_token_present()
+        || config.is_some_and(|config| {
+            onepassword_service_account_probe_succeeded(config)
+                || onepassword_desktop_auth_probe_succeeded(config)
+        })
+}
+
+fn onepassword_service_account_probe_succeeded(config: &SecretSourceAuthConfig) -> bool {
+    config.onepassword.auth_mode.trim().eq("service-account")
+        && config.onepassword.service_account_token_stored
+        && config.onepassword.service_account_probe_succeeded
+}
+
+fn onepassword_desktop_auth_probe_succeeded(config: &SecretSourceAuthConfig) -> bool {
+    config.onepassword.auth_mode.trim().eq("desktop-app")
+        && !config.onepassword.account.trim().is_empty()
+        && config.onepassword.desktop_auth_probe_succeeded
+}
+
+fn bitwarden_sdk_auth_configured(config: Option<&SecretSourceAuthConfig>) -> bool {
+    config.is_some_and(bitwarden_secrets_manager_probe_succeeded)
+}
+
+fn bitwarden_secrets_manager_probe_succeeded(config: &SecretSourceAuthConfig) -> bool {
+    config.bitwarden.access_token_stored
+        && !config.bitwarden.organization_id.trim().is_empty()
+        && config.bitwarden.secrets_manager_probe_succeeded
+}
+
+fn secret_source_auth_config(window: &Window) -> BootstrapResult<Option<SecretSourceAuthConfig>> {
+    let path = secret_source_auth_config_path(window)?;
+    if !path.exists() {
+        return Ok(None);
+    }
+    let content = fs::read_to_string(&path)
+        .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+    serde_json::from_str::<SecretSourceAuthConfig>(&content)
+        .map(Some)
+        .map_err(|error| format!("failed to parse {}: {error}", path.display()))
+}
+
+fn write_secret_source_auth_config(
+    window: &Window,
+    config: &SecretSourceAuthConfig,
+) -> BootstrapResult<()> {
+    let path = secret_source_auth_config_path(window)?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("failed to create {}: {error}", parent.display()))?;
+    }
+    let json = serde_json::to_vec_pretty(config)
+        .map_err(|error| format!("failed to serialize saved-access auth config: {error}"))?;
+    fs::write(&path, json).map_err(|error| format!("failed to write {}: {error}", path.display()))
+}
+
+fn secret_source_auth_config_path(window: &Window) -> BootstrapResult<PathBuf> {
+    Ok(window
+        .app_handle()
+        .path()
+        .app_config_dir()
+        .map_err(|error| format!("failed to resolve app config dir: {error}"))?
+        .join("bootstrap")
+        .join("secret-source-auth.json"))
+}
+
+#[allow(clippy::too_many_lines)]
+fn save_secret_source_auth_config_inner(
+    window: &Window,
+    request: &SecretSourceAuthConfigRequest,
+) -> BootstrapResult<SecretSourceAuthConfigResult> {
+    let provider = normalize_secret_source_provider(&request.provider)?;
+    let mut config = secret_source_auth_config(window)?.unwrap_or_default();
+    match provider {
+        SECRET_SOURCE_PROVIDER_ONEPASSWORD => {
+            let auth_mode = request
+                .auth_mode
+                .as_deref()
+                .unwrap_or("desktop-app")
+                .trim()
+                .to_string();
+            if auth_mode != "desktop-app" && auth_mode != "service-account" {
+                return Err(
+                    "Unsupported 1Password saved-access auth mode. Use app approval or service account."
+                        .to_string(),
+                );
+            }
+            let account = request
+                .account
+                .as_deref()
+                .unwrap_or_default()
+                .trim()
+                .to_string();
+            let vault = request
+                .vault
+                .as_deref()
+                .unwrap_or_default()
+                .trim()
+                .to_string();
+            let token = request
+                .service_account_token
+                .as_deref()
+                .unwrap_or_default()
+                .trim()
+                .to_string();
+            let (desktop_auth_probe_succeeded, service_account_probe_succeeded) =
+                if auth_mode == "service-account" {
+                    validate_bootstrap_secret_value(&token, "1Password service account token")?;
+                    validate_nonempty_text(&token, "1Password service account token")?;
+                    let probe = probe_secret_source_auth_inner(
+                        Some(window),
+                        &SecretSourceAuthProbeRequest {
+                            provider: SECRET_SOURCE_PROVIDER_ONEPASSWORD.to_string(),
+                            auth_mode: Some("service-account".to_string()),
+                            account_name: None,
+                            account: None,
+                            vault: (!vault.is_empty()).then_some(vault.clone()),
+                            service_account_token: Some(token.clone()),
+                            access_token: None,
+                            organization_id: None,
+                        },
+                    )?;
+                    if !probe.ok {
+                        return Err(probe.message);
+                    }
+                    store_keychain_secret(SECRET_SOURCE_PROVIDER_ONEPASSWORD, &token)?;
+                    (false, true)
+                } else {
+                    validate_nonempty_text(&account, "1Password account")?;
+                    let probe = probe_secret_source_auth_inner(
+                        Some(window),
+                        &SecretSourceAuthProbeRequest {
+                            provider: SECRET_SOURCE_PROVIDER_ONEPASSWORD.to_string(),
+                            auth_mode: Some("desktop-app".to_string()),
+                            account_name: Some(account.clone()),
+                            account: None,
+                            vault: (!vault.is_empty()).then_some(vault.clone()),
+                            service_account_token: None,
+                            access_token: None,
+                            organization_id: None,
+                        },
+                    )?;
+                    if !probe.ok {
+                        return Err(probe.message);
+                    }
+                    (true, false)
+                };
+            config.onepassword = OnePasswordAuthConfig {
+                auth_mode,
+                account,
+                vault,
+                desktop_auth_probe_succeeded,
+                service_account_token_stored: service_account_probe_succeeded
+                    && existing_keychain_secret_available(SECRET_SOURCE_PROVIDER_ONEPASSWORD)?,
+                service_account_probe_succeeded,
+            };
+        }
+        SECRET_SOURCE_PROVIDER_BITWARDEN => {
+            let auth_mode = request
+                .auth_mode
+                .as_deref()
+                .unwrap_or("secrets-manager")
+                .trim();
+            if auth_mode != "secrets-manager" {
+                return Err(
+                    "Unsupported Bitwarden saved-access auth mode. Use Secrets Manager."
+                        .to_string(),
+                );
+            }
+            let access_token = request
+                .access_token
+                .as_deref()
+                .unwrap_or_default()
+                .trim()
+                .to_string();
+            let organization_id = request
+                .organization_id
+                .as_deref()
+                .unwrap_or_default()
+                .trim()
+                .to_string();
+            validate_nonempty_text(&access_token, "Bitwarden Secrets Manager access token")?;
+            validate_bootstrap_secret_value(
+                &access_token,
+                "Bitwarden Secrets Manager access token",
+            )?;
+            validate_nonempty_text(&organization_id, "Bitwarden organization ID")?;
+            let probe = probe_secret_source_auth_inner(
+                Some(window),
+                &SecretSourceAuthProbeRequest {
+                    provider: SECRET_SOURCE_PROVIDER_BITWARDEN.to_string(),
+                    auth_mode: Some("secrets-manager".to_string()),
+                    account_name: None,
+                    account: None,
+                    vault: None,
+                    service_account_token: None,
+                    access_token: Some(access_token.clone()),
+                    organization_id: Some(organization_id.clone()),
+                },
+            )?;
+            if !probe.ok {
+                return Err(sanitize_secret_source_sdk_error(
+                    &probe.message,
+                    &json!({
+                        "accessToken": access_token,
+                        "organizationId": organization_id,
+                    }),
+                ));
+            }
+            store_keychain_secret(SECRET_SOURCE_PROVIDER_BITWARDEN, &access_token)?;
+            config.bitwarden = BitwardenAuthConfig {
+                access_token_stored: existing_keychain_secret_available(
+                    SECRET_SOURCE_PROVIDER_BITWARDEN,
+                )?,
+                organization_id,
+                secrets_manager_probe_succeeded: true,
+            };
+        }
+        _ => unreachable!("provider was normalized"),
+    }
+    write_secret_source_auth_config(window, &config)?;
+    Ok(SecretSourceAuthConfigResult {
+        provider: provider.to_string(),
+        configured: true,
+        message: "Saved access connection details saved locally for the SDK flow.".to_string(),
+        detection: detect_secret_sources_inner(Some(window)),
+    })
+}
+
+fn probe_secret_source_auth_inner(
+    window: Option<&Window>,
+    request: &SecretSourceAuthProbeRequest,
+) -> BootstrapResult<SecretSourceAuthProbeResult> {
+    let provider = normalize_secret_source_provider(&request.provider)?;
+    let auth_mode = request.auth_mode.as_deref().unwrap_or("desktop-app").trim();
+    match (provider, auth_mode) {
+        (SECRET_SOURCE_PROVIDER_ONEPASSWORD, "desktop-app") => {
+            probe_onepassword_desktop_auth(window, request)
+        }
+        (SECRET_SOURCE_PROVIDER_ONEPASSWORD, "service-account") => {
+            probe_onepassword_service_account_auth(window, request)
+        }
+        (SECRET_SOURCE_PROVIDER_BITWARDEN, "secrets-manager") => {
+            probe_bitwarden_secrets_manager_auth(window, request)
+        }
+        (SECRET_SOURCE_PROVIDER_BITWARDEN, _) => {
+            Err("Unsupported Bitwarden saved-access auth mode. Use Secrets Manager.".to_string())
+        }
+        _ => unreachable!("provider was normalized"),
+    }
+}
+
+fn probe_onepassword_desktop_auth(
+    window: Option<&Window>,
+    request: &SecretSourceAuthProbeRequest,
+) -> BootstrapResult<SecretSourceAuthProbeResult> {
+    let account_name = request
+        .account_name
+        .as_deref()
+        .or(request.account.as_deref())
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    validate_nonempty_text(&account_name, "1Password account")?;
+    let vault = request
+        .vault
+        .as_deref()
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    if !vault.is_empty() {
+        validate_nonempty_text(&vault, "1Password vault")?;
+    }
+    let payload = json!({
+        "provider": SECRET_SOURCE_PROVIDER_ONEPASSWORD,
+        "operation": "probe",
+        "authMode": "desktop-app",
+        "accountName": account_name,
+        "vault": vault,
+    });
+    let output =
+        run_secret_source_sdk_bridge_json(window, &payload, "secret source SDK DesktopAuth probe")?;
+    let mut result = serde_json::from_slice::<SecretSourceAuthProbeResult>(&output.stdout)
+        .map_err(|error| format!("Failed to parse 1Password SDK auth probe output: {error}"))?;
+    result.message = onepassword_redacted_cli_warning(&result.message);
+    Ok(result)
+}
+
+fn probe_onepassword_service_account_auth(
+    window: Option<&Window>,
+    request: &SecretSourceAuthProbeRequest,
+) -> BootstrapResult<SecretSourceAuthProbeResult> {
+    let token = request
+        .service_account_token
+        .as_deref()
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    validate_nonempty_text(&token, "1Password service account token")?;
+    validate_bootstrap_secret_value(&token, "1Password service account token")?;
+    let vault = request
+        .vault
+        .as_deref()
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    if !vault.is_empty() {
+        validate_nonempty_text(&vault, "1Password vault")?;
+    }
+    let payload = json!({
+        "provider": SECRET_SOURCE_PROVIDER_ONEPASSWORD,
+        "operation": "probe",
+        "authMode": "service-account",
+        "serviceAccountToken": token,
+        "vault": vault,
+    });
+    let output = run_secret_source_sdk_bridge_json(
+        window,
+        &payload,
+        "secret source SDK service account probe",
+    )?;
+    let mut result = serde_json::from_slice::<SecretSourceAuthProbeResult>(&output.stdout)
+        .map_err(|error| format!("Failed to parse 1Password SDK auth probe output: {error}"))?;
+    result.message = onepassword_redacted_cli_warning(&result.message);
+    Ok(result)
+}
+
+fn probe_bitwarden_secrets_manager_auth(
+    window: Option<&Window>,
+    request: &SecretSourceAuthProbeRequest,
+) -> BootstrapResult<SecretSourceAuthProbeResult> {
+    let access_token = request
+        .access_token
+        .as_deref()
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    if access_token.is_empty() {
+        return Ok(secret_source_auth_probe_result(
+            SECRET_SOURCE_PROVIDER_BITWARDEN,
+            "secrets-manager",
+            false,
+            "Bitwarden Secrets Manager access token is required.",
+        ));
+    }
+    validate_bootstrap_secret_value(&access_token, "Bitwarden Secrets Manager access token")?;
+    let organization_id = request
+        .organization_id
+        .as_deref()
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    if organization_id.is_empty() {
+        return Ok(secret_source_auth_probe_result(
+            SECRET_SOURCE_PROVIDER_BITWARDEN,
+            "secrets-manager",
+            false,
+            "Bitwarden Secrets Manager organization ID is required.",
+        ));
+    }
+    validate_nonempty_text(&organization_id, "Bitwarden organization ID")?;
+    let payload = json!({
+        "provider": SECRET_SOURCE_PROVIDER_BITWARDEN,
+        "operation": "probe",
+        "authMode": "secrets-manager",
+        "accessToken": access_token,
+        "organizationId": organization_id,
+    });
+    let output = run_secret_source_sdk_bridge_json(
+        window,
+        &payload,
+        "secret source SDK Bitwarden Secrets Manager probe",
+    )?;
+    let mut result = serde_json::from_slice::<SecretSourceAuthProbeResult>(&output.stdout)
+        .map_err(|error| format!("Failed to parse Bitwarden SDK auth probe output: {error}"))?;
+    result.message = sanitize_secret_source_sdk_error(&result.message, &payload);
+    Ok(result)
+}
+
+fn secret_source_auth_probe_result(
+    provider: &str,
+    auth_mode: &str,
+    ok: bool,
+    message: &str,
+) -> SecretSourceAuthProbeResult {
+    SecretSourceAuthProbeResult {
+        provider: provider.to_string(),
+        operation: "probe".to_string(),
+        ok,
+        auth_mode: auth_mode.to_string(),
+        message: message.to_string(),
+        redaction: "[REDACTED]".to_string(),
+    }
+}
+
+fn keychain_service_name(provider: &str) -> &'static str {
+    match provider {
+        SECRET_SOURCE_PROVIDER_ONEPASSWORD => "cto.saved-access.onepassword",
+        SECRET_SOURCE_PROVIDER_BITWARDEN => "cto.saved-access.bitwarden",
+        _ => "cto.saved-access.unknown",
+    }
+}
+
+fn keychain_entry(provider: &str) -> BootstrapResult<keyring::Entry> {
+    keyring::Entry::new(keychain_service_name(provider), "default")
+        .map_err(|error| format!("Failed to open saved-access keychain entry: {error}"))
+}
+
+fn store_keychain_secret(provider: &str, secret: &str) -> BootstrapResult<()> {
+    if secret.trim().is_empty() {
+        return Ok(());
+    }
+    keychain_entry(provider)?
+        .set_password(secret)
+        .map_err(|error| format!("Failed to store saved-access secret in macOS Keychain: {error}"))
+}
+
+fn read_keychain_secret(provider: &str) -> BootstrapResult<String> {
+    keychain_entry(provider)?
+        .get_password()
+        .map_err(|error| format!("Saved-access secret is not available in macOS Keychain: {error}"))
+}
+
+fn existing_keychain_secret_available(provider: &str) -> BootstrapResult<bool> {
+    match keychain_entry(provider)?.get_password() {
+        Ok(secret) => Ok(!secret.trim().is_empty()),
+        Err(keyring::Error::NoEntry) => Ok(false),
+        Err(error) => Err(format!(
+            "Failed to check macOS Keychain for saved-access secret: {error}"
+        )),
+    }
+}
+
+fn env_value_present(name: &str) -> bool {
+    std::env::var(name).is_ok_and(|value| !value.trim().is_empty())
+}
+
+fn secret_source_backend_kind() -> SecretSourceBackendKind {
+    if secret_source_legacy_cli_enabled() {
+        SecretSourceBackendKind::LegacyCli
+    } else {
+        SecretSourceBackendKind::Sdk
+    }
+}
+
+// Keep CLI metadata helper definitions before default SDK detection so static contract slices
+// can distinguish metadata prefill from legacy CLI readiness probing.
+fn legacy_secret_sources_detection_impl() -> SecretSourceDetectionResult {
     let mut detection = onepassword_detection_from_probes(
         onepassword_desktop_installed(),
         run_tool("op", &["--version"]),
@@ -3383,6 +4698,10 @@ fn detect_secret_sources_inner() -> SecretSourceDetectionResult {
     ) {
         detection.providers.push(bitwarden);
     }
+    detection.message = format!(
+        "Legacy CLI saved-access mode is enabled by {SECRET_SOURCE_LEGACY_CLI_ENV}; SDK mode remains the default. {}",
+        detection.message
+    );
     detection
 }
 
@@ -3450,6 +4769,15 @@ fn bitwarden_detection_from_probes(
     Some(SecretSourceProviderStatus {
         provider: SECRET_SOURCE_PROVIDER_BITWARDEN.to_string(),
         label: "Bitwarden".to_string(),
+        auth_state: if available {
+            SecretSourceAuthState::ReadySecretsManager
+        } else {
+            SecretSourceAuthState::TokenNeeded
+        },
+        ready: available,
+        can_attempt_desktop_approval: None,
+        account_candidates: Vec::new(),
+        warnings: Vec::new(),
         desktop_installed: false,
         cli_installed: true,
         cli_access_ready: available,
@@ -3464,11 +4792,13 @@ fn bitwarden_detection_from_probes(
         version,
         reason,
         primary_action: if available {
-            "More options"
+            "Review saved access"
         } else {
-            "Unlock Bitwarden CLI"
+            "Authorize Bitwarden"
         }
         .to_string(),
+        auth_modes: vec!["legacy-cli".to_string()],
+        configured_label: None,
     })
 }
 
@@ -3556,6 +4886,23 @@ fn onepassword_detection_from_probes(
         providers: vec![SecretSourceProviderStatus {
             provider: SECRET_SOURCE_PROVIDER_ONEPASSWORD.to_string(),
             label: "1Password".to_string(),
+            auth_state: if available {
+                SecretSourceAuthState::ReadyDesktopAccount
+            } else if pending_user_permission {
+                SecretSourceAuthState::ApprovalNeeded
+            } else if !account_configured {
+                SecretSourceAuthState::ChooseAccount
+            } else if !desktop_installed {
+                SecretSourceAuthState::Unavailable
+            } else {
+                SecretSourceAuthState::ProbeFailed
+            },
+            ready: available,
+            can_attempt_desktop_approval: Some(
+                desktop_installed && cli_installed && account_configured,
+            ),
+            account_candidates: Vec::new(),
+            warnings: Vec::new(),
             desktop_installed,
             cli_installed,
             cli_access_ready,
@@ -3564,17 +4911,24 @@ fn onepassword_detection_from_probes(
             pending_user_permission,
             detected,
             available,
-            status: None,
-            docs_url: None,
+            status: Some(
+                if available {
+                    "cli-ready"
+                } else {
+                    "cli-not-ready"
+                }
+                .to_string(),
+            ),
+            docs_url: Some(ONEPASSWORD_SDK_AUTH_DOCS_URL.to_string()),
             secondary: false,
             version,
             reason,
             primary_action: if available {
-                "Use saved access"
+                "Review saved access"
             } else if !desktop_installed {
                 "Install desktop"
             } else if !cli_installed {
-                "Install CLI"
+                "Connect 1Password"
             } else if pending_user_permission {
                 "Approve access"
             } else if !desktop_app_integration_enabled {
@@ -3583,10 +4937,13 @@ fn onepassword_detection_from_probes(
                 "Enable CLI access"
             }
             .to_string(),
+            auth_modes: vec!["legacy-cli".to_string()],
+            configured_label: None,
         }],
         manual_fallback_available: true,
         message: if available {
-            "1Password CLI access is available; review matches before connecting.".to_string()
+            "1Password CLI access is available in legacy mode; review matches before connecting."
+                .to_string()
         } else if !desktop_installed {
             "1Password desktop is not installed yet; Morgan can open the install guide.".to_string()
         } else if !cli_installed {
@@ -3623,6 +4980,11 @@ fn onepassword_cli_permission_pending(lower_reason: &str) -> bool {
 }
 
 async fn install_onepassword_cli_inner() -> BootstrapResult<()> {
+    if !secret_source_legacy_cli_enabled() {
+        return Err(format!(
+            "1Password CLI auto-install is legacy-only. Set {SECRET_SOURCE_LEGACY_CLI_ENV}=1 to use the CLI fallback, or connect through the SDK flow."
+        ));
+    }
     if find_tool_binary("op").is_some() {
         return Ok(());
     }
@@ -3645,9 +5007,73 @@ fn onepassword_desktop_installed() -> bool {
 }
 
 fn preview_secret_source_matches_inner(
+    window: Option<&Window>,
     request: &SecretSourcePreviewRequest,
 ) -> BootstrapResult<SecretSourcePreviewResult> {
-    validate_secret_source_provider(&request.provider)?;
+    let provider = normalize_secret_source_provider(&request.provider)?;
+    match (secret_source_backend_kind(), provider) {
+        (SecretSourceBackendKind::Sdk, SECRET_SOURCE_PROVIDER_ONEPASSWORD) => {
+            preview_onepassword_sdk_matches(window, request)
+        }
+        (SecretSourceBackendKind::Sdk, SECRET_SOURCE_PROVIDER_BITWARDEN) => {
+            preview_bitwarden_sdk_matches(window, request)
+        }
+        (SecretSourceBackendKind::LegacyCli, SECRET_SOURCE_PROVIDER_ONEPASSWORD) => {
+            preview_onepassword_legacy_cli_matches(request)
+        }
+        (SecretSourceBackendKind::LegacyCli, SECRET_SOURCE_PROVIDER_BITWARDEN) => {
+            Err("Bitwarden legacy CLI preview is not enabled; use the SDK connection or paste manually.".to_string())
+        }
+        _ => unreachable!("provider was normalized"),
+    }
+}
+
+fn preview_onepassword_sdk_matches(
+    window: Option<&Window>,
+    request: &SecretSourcePreviewRequest,
+) -> BootstrapResult<SecretSourcePreviewResult> {
+    let config = window.map(secret_source_auth_config).transpose()?.flatten();
+    if !onepassword_sdk_auth_configured(config.as_ref()) {
+        return Err(
+            "1Password app approval must pass before Review matches; use saved access or paste manually."
+                .to_string(),
+        );
+    }
+    run_secret_source_sdk_bridge(
+        window,
+        SECRET_SOURCE_PROVIDER_ONEPASSWORD,
+        "preview",
+        request,
+    )
+}
+
+fn preview_bitwarden_sdk_matches(
+    window: Option<&Window>,
+    request: &SecretSourcePreviewRequest,
+) -> BootstrapResult<SecretSourcePreviewResult> {
+    run_secret_source_sdk_bridge(window, SECRET_SOURCE_PROVIDER_BITWARDEN, "preview", request)
+}
+
+fn run_secret_source_sdk_bridge(
+    window: Option<&Window>,
+    provider: &str,
+    operation: &str,
+    request: &SecretSourcePreviewRequest,
+) -> BootstrapResult<SecretSourcePreviewResult> {
+    let payload = json!({
+        "provider": provider,
+        "operation": operation,
+        "targets": request.targets,
+    });
+    let output =
+        run_secret_source_sdk_bridge_json(window, &payload, "secret source SDK metadata preview")?;
+    serde_json::from_slice::<SecretSourcePreviewResult>(&output.stdout)
+        .map_err(|error| format!("Failed to parse {provider} SDK metadata preview: {error}"))
+}
+
+fn preview_onepassword_legacy_cli_matches(
+    request: &SecretSourcePreviewRequest,
+) -> BootstrapResult<SecretSourcePreviewResult> {
     let targets = secret_source_targets(&request.targets);
     let mut command = tool_command("op");
     command.args(["item", "list", "--format", "json"]);
@@ -3713,16 +5139,277 @@ fn preview_secret_source_matches_inner(
 }
 
 fn apply_secret_source_matches_inner(
+    window: Option<&Window>,
     request: SecretSourceApplyRequest,
 ) -> BootstrapResult<SecretSourceApplyResult> {
-    validate_secret_source_provider(&request.provider)?;
+    let provider = normalize_secret_source_provider(&request.provider)?;
     if !request.approved {
-        return Err("approval required before reading selected 1Password fields".to_string());
+        return Err(format!(
+            "approval required before reading selected {provider} fields"
+        ));
     }
     if request.matches.is_empty() {
         return Err("at least one approved saved-access match is required".to_string());
     }
 
+    match (secret_source_backend_kind(), provider) {
+        (SecretSourceBackendKind::Sdk, SECRET_SOURCE_PROVIDER_ONEPASSWORD) => {
+            apply_onepassword_sdk_matches(window, request)
+        }
+        (SecretSourceBackendKind::Sdk, SECRET_SOURCE_PROVIDER_BITWARDEN) => {
+            apply_bitwarden_sdk_matches(window, request)
+        }
+        (SecretSourceBackendKind::LegacyCli, SECRET_SOURCE_PROVIDER_ONEPASSWORD) => {
+            apply_onepassword_legacy_cli_matches(request)
+        }
+        (SecretSourceBackendKind::LegacyCli, SECRET_SOURCE_PROVIDER_BITWARDEN) => Err(
+            "Bitwarden legacy CLI apply is not enabled; use the SDK connection or paste manually."
+                .to_string(),
+        ),
+        _ => unreachable!("provider was normalized"),
+    }
+}
+
+fn apply_onepassword_sdk_matches(
+    window: Option<&Window>,
+    request: SecretSourceApplyRequest,
+) -> BootstrapResult<SecretSourceApplyResult> {
+    apply_sdk_matches(window, SECRET_SOURCE_PROVIDER_ONEPASSWORD, request)
+}
+
+fn apply_bitwarden_sdk_matches(
+    window: Option<&Window>,
+    request: SecretSourceApplyRequest,
+) -> BootstrapResult<SecretSourceApplyResult> {
+    apply_sdk_matches(window, SECRET_SOURCE_PROVIDER_BITWARDEN, request)
+}
+
+#[allow(clippy::needless_pass_by_value, clippy::no_effect_underscore_binding)]
+fn apply_sdk_matches(
+    window: Option<&Window>,
+    provider: &str,
+    request: SecretSourceApplyRequest,
+) -> BootstrapResult<SecretSourceApplyResult> {
+    let payload = json!({
+        "provider": provider,
+        "operation": "apply",
+        "matches": request.matches,
+    });
+    let output =
+        run_secret_source_sdk_bridge_json(window, &payload, "secret source SDK approved apply")?;
+    let sdk_output = serde_json::from_slice::<SecretSourceSdkApplyOutput>(&output.stdout)
+        .map_err(|error| format!("Failed to parse {provider} SDK apply output: {error}"))?;
+    apply_secret_source_sdk_values(provider, sdk_output)
+}
+
+fn apply_secret_source_sdk_values(
+    provider: &str,
+    sdk_output: SecretSourceSdkApplyOutput,
+) -> BootstrapResult<SecretSourceApplyResult> {
+    let mut agent_keys = Vec::new();
+    let mut discord_tokens = Vec::new();
+    let mut applied = Vec::new();
+    for value in sdk_output.values {
+        let (target_key, purpose) =
+            canonical_secret_target(&value.target_secret_key).ok_or_else(|| {
+                format!(
+                    "unsupported saved-access target key: {}",
+                    value.target_secret_key
+                )
+            })?;
+        validate_bootstrap_secret_value(&value.value, target_key)?;
+        if value.value.trim().is_empty() {
+            return Err(format!(
+                "{provider} returned an empty value for {target_key}"
+            ));
+        }
+        let (target_secret_name, target_secret_key) =
+            if let Some(agent_id) = discord_agent_id_from_saved_access_key(target_key) {
+                discord_tokens.push(BootstrapAgentKey {
+                    name: agent_id.to_string(),
+                    value: value.value,
+                });
+                (
+                    OPENCLAW_DISCORD_TOKENS_SECRET.to_string(),
+                    agent_id.to_string(),
+                )
+            } else {
+                agent_keys.push(BootstrapAgentKey {
+                    name: target_key.to_string(),
+                    value: value.value,
+                });
+                (CTO_AGENT_KEYS_SECRET.to_string(), target_key.to_string())
+            };
+        applied.push(SecretSourceAppliedReference {
+            purpose: if value.purpose.trim().is_empty() {
+                purpose.to_string()
+            } else {
+                value.purpose.trim().to_string()
+            },
+            target_secret_name,
+            target_secret_key,
+            provider_ref: value.provider_ref,
+            status: "applied".to_string(),
+        });
+    }
+    apply_bootstrap_agent_keys(&agent_keys)?;
+    apply_bootstrap_discord_tokens(&discord_tokens)?;
+    patch_bootstrap_cto_agent_keys(&agent_keys)?;
+    // provider/model runtime consumption is wired through valuesObject.agentKeys;
+    // CTO-config.json remains reference/selection metadata built by the full setup request.
+    let _saved_access_provider_refs = build_saved_access_cto_config(&agent_keys)?;
+    let _ = patch_bootstrap_cto_config;
+    Ok(SecretSourceApplyResult {
+        provider: sdk_output.provider,
+        applied,
+        raw_values_persisted: false,
+        message: "Access connected".to_string(),
+    })
+}
+
+fn discord_agent_id_from_saved_access_key(target_key: &str) -> Option<&'static str> {
+    match target_key {
+        "MORGAN_DISCORD_BOT_TOKEN" => Some("morgan"),
+        "REX_DISCORD_BOT_TOKEN" => Some("rex"),
+        "GRIZZ_DISCORD_BOT_TOKEN" => Some("grizz"),
+        "NOVA_DISCORD_BOT_TOKEN" => Some("nova"),
+        "VIPER_DISCORD_BOT_TOKEN" => Some("viper"),
+        "BLAZE_DISCORD_BOT_TOKEN" => Some("blaze"),
+        "TAP_DISCORD_BOT_TOKEN" => Some("tap"),
+        "SPARK_DISCORD_BOT_TOKEN" => Some("spark"),
+        "CLEO_DISCORD_BOT_TOKEN" => Some("cleo"),
+        "CIPHER_DISCORD_BOT_TOKEN" => Some("cipher"),
+        "TESS_DISCORD_BOT_TOKEN" => Some("tess"),
+        "STITCH_DISCORD_BOT_TOKEN" => Some("stitch"),
+        "ATLAS_DISCORD_BOT_TOKEN" => Some("atlas"),
+        "BOLT_DISCORD_BOT_TOKEN" => Some("bolt"),
+        "BLOCK_DISCORD_BOT_TOKEN" => Some("block"),
+        "VEX_DISCORD_BOT_TOKEN" => Some("vex"),
+        "ANGIE_DISCORD_BOT_TOKEN" => Some("angie"),
+        "GLITCH_DISCORD_BOT_TOKEN" => Some("glitch"),
+        _ => None,
+    }
+}
+
+fn build_saved_access_cto_config(
+    agent_keys: &[BootstrapAgentKey],
+) -> BootstrapResult<Option<BTreeMap<String, BootstrapProviderCredentialConfig>>> {
+    let credential_config = saved_access_provider_credentials(agent_keys)?;
+    if credential_config.is_empty() {
+        return Ok(None);
+    }
+
+    Ok(Some(credential_config))
+}
+
+fn saved_access_provider_credentials(
+    agent_keys: &[BootstrapAgentKey],
+) -> BootstrapResult<BTreeMap<String, BootstrapProviderCredentialConfig>> {
+    let mut config = BTreeMap::new();
+    for key in agent_keys {
+        let Some((provider_id, _auth)) = saved_access_provider_for_secret_key(&key.name) else {
+            continue;
+        };
+        let secret_key = validate_bootstrap_agent_key_name(&key.name)?;
+        config.insert(
+            provider_id.to_string(),
+            BootstrapProviderCredentialConfig {
+                value: None,
+                secret_ref: Some(bootstrap_secret_reference(secret_key)),
+                api_key_secret_ref: None,
+            },
+        );
+    }
+    Ok(config)
+}
+
+fn saved_access_provider_for_secret_key(
+    secret_key: &str,
+) -> Option<(&'static str, BootstrapProviderAuth)> {
+    match secret_key {
+        "ANTHROPIC_API_KEY" => Some(("anthropic", BootstrapProviderAuth::ApiKey)),
+        "OPENAI_API_KEY" => Some(("openai", BootstrapProviderAuth::ApiKey)),
+        "OPENROUTER_API_KEY" => Some(("openrouter", BootstrapProviderAuth::ApiKey)),
+        "GEMINI_API_KEY" => Some(("google-gemini", BootstrapProviderAuth::ApiKey)),
+        "GOOGLE_API_KEY" => Some(("google", BootstrapProviderAuth::ApiKey)),
+        "XAI_API_KEY" => Some(("xai", BootstrapProviderAuth::ApiKey)),
+        "PERPLEXITY_API_KEY" => Some(("perplexity", BootstrapProviderAuth::ApiKey)),
+        _ => None,
+    }
+}
+
+fn run_secret_source_sdk_bridge_json(
+    window: Option<&Window>,
+    payload: &Value,
+    label: &str,
+) -> BootstrapResult<Output> {
+    let request = serde_json::to_string(payload)
+        .map_err(|error| format!("Failed to serialize secret source SDK request: {error}"))?;
+    let mut command = tool_command("node");
+    command.args(["--input-type=module", "--eval", SECRET_SOURCE_SDK_BRIDGE]);
+    command.env("CTO_SECRET_SOURCE_SDK_REQUEST", request);
+    if let Some(config) = window
+        .and_then(|window| secret_source_auth_config(window).ok())
+        .flatten()
+    {
+        if config.onepassword.service_account_token_stored
+            && onepassword_service_account_probe_succeeded(&config)
+        {
+            command.env(
+                "OP_SERVICE_ACCOUNT_TOKEN",
+                read_keychain_secret(SECRET_SOURCE_PROVIDER_ONEPASSWORD)?,
+            );
+        }
+        if !config.onepassword.account.trim().is_empty() {
+            command.env("OP_ACCOUNT", config.onepassword.account);
+        }
+        if !config.onepassword.vault.trim().is_empty() {
+            command.env("OP_VAULT", config.onepassword.vault);
+        }
+        if config.bitwarden.access_token_stored {
+            command.env(
+                "BWS_ACCESS_TOKEN",
+                read_keychain_secret(SECRET_SOURCE_PROVIDER_BITWARDEN)?,
+            );
+        }
+        if !config.bitwarden.organization_id.trim().is_empty() {
+            command.env("BWS_ORGANIZATION_ID", config.bitwarden.organization_id);
+        }
+    }
+    let output = run_command_with_timeout(command, label, SECRET_SOURCE_SDK_TIMEOUT)?;
+    if !output.status.success() {
+        return Err(format!(
+            "Secret source SDK operation failed; paste instead is still available: {}",
+            sanitize_secret_source_sdk_error(&String::from_utf8_lossy(&output.stderr), payload)
+                .trim()
+        ));
+    }
+    Ok(output)
+}
+
+fn sanitize_secret_source_sdk_error(raw: &str, payload: &Value) -> String {
+    let mut sanitized = sanitize_bootstrap_log_text(raw);
+    for key in [
+        "accountName",
+        "account",
+        "vault",
+        "serviceAccountToken",
+        "accessToken",
+        "organizationId",
+    ] {
+        if let Some(value) = payload.get(key).and_then(Value::as_str) {
+            let value = value.trim();
+            if !value.is_empty() {
+                sanitized = sanitized.replace(value, "[REDACTED]");
+            }
+        }
+    }
+    redact_email_like(&sanitized)
+}
+
+fn apply_onepassword_legacy_cli_matches(
+    request: SecretSourceApplyRequest,
+) -> BootstrapResult<SecretSourceApplyResult> {
     let mut agent_keys = Vec::new();
     let mut applied = Vec::new();
     for selection in request.matches {
@@ -6619,8 +8306,7 @@ metadata:
     app.kubernetes.io/managed-by: cto-desktop
 type: Opaque
 stringData:
-{secret_entries}
-"
+{secret_entries}"
     ))
 }
 
@@ -7770,15 +9456,18 @@ mod tests {
         argo_application_status_summary, argocd_oci_repository_secret_manifest, base64_encode,
         bootstrap_secret_reference, build_bootstrap_cto_config, collect_gitops_repository_files,
         collect_gitops_repository_files_from_template_root, cto_agent_keys_values_patch,
-        cto_config_values_patch, embedded_gitops_template_files,
+        cto_config_values_patch, discord_agent_id_from_saved_access_key,
+        discord_tokens_secret_manifest, embedded_gitops_template_files,
         ensure_bootstrap_gitops_repository, extract_github_user_code,
         extract_github_verification_uri, format_argo_application_status, ghcr_pull_secret_manifest,
         gitops_repository_initialization_required, gitops_repository_owner,
         is_transient_bootstrap_error, metrics_server_kind_patch, morgan_cto_config_values_patch,
         normalize_bootstrap_github_credentials, normalize_bootstrap_provider_credentials,
         normalize_bootstrap_scm_secret_manifest, normalize_bootstrap_tool_api_keys,
+        onepassword_sdk_auth_configured, onepassword_sdk_provider_status_from_inputs,
         parse_cpu_quantity_to_milli, parse_kind_node_container_states, parse_kubelet_summary_usage,
         parse_kubernetes_nodes, parse_kubernetes_pods, parse_memory_quantity_to_bytes,
+        parse_onepassword_account_candidates, parse_onepassword_vault_candidates,
         parse_runtime_stats_lines, prepare_origin_transfer_inner, remote_manifest_skip_reason,
         retry_backoff_delay, retry_exhausted_error, terminal_argo_application_error,
         validate_bootstrap_setup, BootstrapAgentKey, BootstrapAiCli, BootstrapAppMode,
@@ -7788,8 +9477,10 @@ mod tests {
         BootstrapProviderCredentialRequest, BootstrapProviderSelection, BootstrapProvidersRequest,
         BootstrapScmRequest, BootstrapSetupAgent, BootstrapSetupHarness, BootstrapSetupProfile,
         BootstrapSetupSource, BootstrapSourceCredentials, BootstrapSourceProvider,
-        BootstrapToolApiKeyRequest, BootstrapToolsRequest, KindNodeContainerState, OriginEngine,
-        OriginTransferMode, OriginTransferRequest, BOOTSTRAP_TEST_MODE_ENV, CTO_GITOPS_REPO_NAME,
+        BootstrapToolApiKeyRequest, BootstrapToolsRequest, KindNodeContainerState,
+        OnePasswordAuthConfig, OnePasswordCliMetadataDiscovery, OnePasswordDetectionInputs,
+        OriginEngine, OriginTransferMode, OriginTransferRequest, SecretSourceAuthConfig,
+        SecretSourceAuthState, BOOTSTRAP_TEST_MODE_ENV, CTO_GITOPS_REPO_NAME,
         GITHUB_TOKEN_SECRET_KEY, GITLAB_TOKEN_SECRET_KEY, METRICS_SERVER_KUBELET_INSECURE_TLS_ARG,
         METRICS_SERVER_KUBELET_PREFERRED_ADDRESS_TYPES_ARG, RUNTIME_SOCKET_RETRY_POLICY,
     };
@@ -8712,6 +10403,313 @@ stringData:
         .expect_err("unknown key rejected");
 
         assert!(error.contains("unsupported tool API key"));
+    }
+
+    #[test]
+    fn saved_access_cli_absent_is_soft_warning_and_not_ready() {
+        let status = onepassword_sdk_provider_status_from_inputs(OnePasswordDetectionInputs {
+            desktop_installed: true,
+            account_configured: false,
+            service_token_configured: false,
+            ready: false,
+            saved_candidate: None,
+            configured_label: None,
+            cli_metadata: OnePasswordCliMetadataDiscovery {
+                cli_installed: false,
+                account_candidates: Vec::new(),
+                warnings: vec!["op was not found; metadata prefill unavailable".to_string()],
+            },
+        });
+
+        assert!(!status.ready);
+        assert_eq!(status.auth_state, SecretSourceAuthState::AppSignInNeeded);
+        assert!(status.account_candidates.is_empty());
+        assert!(!status.cli_installed);
+        assert_eq!(status.primary_action, "Use 1Password app");
+        assert!(status
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("op was not found")));
+    }
+
+    #[test]
+    fn saved_access_service_account_ready_requires_probe_success() {
+        let config = SecretSourceAuthConfig {
+            onepassword: OnePasswordAuthConfig {
+                auth_mode: "service-account".to_string(),
+                service_account_token_stored: true,
+                service_account_probe_succeeded: false,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert!(
+            !onepassword_sdk_auth_configured(Some(&config)),
+            "stored service-account metadata alone must not mark auth ready"
+        );
+
+        let config = SecretSourceAuthConfig {
+            onepassword: OnePasswordAuthConfig {
+                auth_mode: "service-account".to_string(),
+                service_account_token_stored: true,
+                service_account_probe_succeeded: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert!(onepassword_sdk_auth_configured(Some(&config)));
+    }
+
+    #[test]
+    fn saved_access_service_account_status_only_ready_after_probe() {
+        let status = onepassword_sdk_provider_status_from_inputs(OnePasswordDetectionInputs {
+            desktop_installed: true,
+            account_configured: false,
+            service_token_configured: true,
+            ready: false,
+            saved_candidate: None,
+            configured_label: Some("service account".to_string()),
+            cli_metadata: OnePasswordCliMetadataDiscovery {
+                cli_installed: false,
+                account_candidates: Vec::new(),
+                warnings: Vec::new(),
+            },
+        });
+        assert!(!status.ready);
+        assert_ne!(
+            status.auth_state,
+            SecretSourceAuthState::ReadyServiceAccount
+        );
+        assert_ne!(status.primary_action, "Review saved access");
+
+        let status = onepassword_sdk_provider_status_from_inputs(OnePasswordDetectionInputs {
+            desktop_installed: true,
+            account_configured: false,
+            service_token_configured: true,
+            ready: true,
+            saved_candidate: None,
+            configured_label: Some("service account".to_string()),
+            cli_metadata: OnePasswordCliMetadataDiscovery {
+                cli_installed: false,
+                account_candidates: Vec::new(),
+                warnings: Vec::new(),
+            },
+        });
+        assert!(status.ready);
+        assert_eq!(
+            status.auth_state,
+            SecretSourceAuthState::ReadyServiceAccount
+        );
+        assert_eq!(status.primary_action, "Review saved access");
+    }
+
+    #[test]
+    fn saved_access_service_account_config_serializes_metadata_only() {
+        let config = SecretSourceAuthConfig {
+            onepassword: OnePasswordAuthConfig {
+                auth_mode: "service-account".to_string(),
+                vault: "Automation".to_string(),
+                service_account_token_stored: true,
+                service_account_probe_succeeded: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let serialized = serde_json::to_string(&config).expect("config serializes");
+        assert!(serialized.contains("serviceAccountTokenStored"));
+        assert!(serialized.contains("serviceAccountProbeSucceeded"));
+        assert!(!serialized.contains("serviceAccountToken\""));
+        assert!(!serialized.contains("service_account_token"));
+        assert!(!serialized.contains("secret-account-token-value"));
+    }
+
+    #[test]
+    fn saved_access_cli_installed_no_accounts_warns_and_does_not_continue() {
+        let status = onepassword_sdk_provider_status_from_inputs(OnePasswordDetectionInputs {
+            desktop_installed: false,
+            account_configured: false,
+            service_token_configured: false,
+            ready: false,
+            saved_candidate: None,
+            configured_label: None,
+            cli_metadata: OnePasswordCliMetadataDiscovery {
+                cli_installed: true,
+                account_candidates: Vec::new(),
+                warnings: vec!["1Password CLI metadata prefill found no accounts".to_string()],
+            },
+        });
+
+        assert!(!status.ready);
+        assert_eq!(status.auth_state, SecretSourceAuthState::Unavailable);
+        assert!(status.account_candidates.is_empty());
+        assert!(status.cli_installed);
+        assert_ne!(status.primary_action, "Review saved access");
+        assert!(status.primary_action.contains("Connect") || status.primary_action.contains("Use"));
+        assert!(status
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("no accounts")));
+    }
+
+    #[test]
+    fn saved_access_multiple_cli_accounts_requires_choose_account_without_default_advance() {
+        let candidates = parse_onepassword_account_candidates(
+            r#"[
+                {
+                    "account_uuid": "acct-a",
+                    "shorthand": "team-a",
+                    "url": "https://team-a.1password.com",
+                    "email": "[REDACTED]"
+                },
+                {
+                    "account_uuid": "acct-b",
+                    "shorthand": "team-b",
+                    "url": "https://team-b.1password.com",
+                    "email": "[REDACTED]"
+                }
+            ]"#,
+        )
+        .expect("account metadata parses");
+        let status = onepassword_sdk_provider_status_from_inputs(OnePasswordDetectionInputs {
+            desktop_installed: true,
+            account_configured: false,
+            service_token_configured: false,
+            ready: false,
+            saved_candidate: None,
+            configured_label: None,
+            cli_metadata: OnePasswordCliMetadataDiscovery {
+                cli_installed: true,
+                account_candidates: candidates,
+                warnings: Vec::new(),
+            },
+        });
+
+        assert!(!status.ready);
+        assert_eq!(status.auth_state, SecretSourceAuthState::ChooseAccount);
+        assert_eq!(status.primary_action, "Choose 1Password account");
+        assert_eq!(status.account_candidates.len(), 2);
+        assert!(status
+            .account_candidates
+            .iter()
+            .all(|candidate| !candidate.preferred));
+    }
+
+    #[test]
+    fn saved_access_automation_vault_on_one_account_marks_preferred_candidate() {
+        let mut candidates = parse_onepassword_account_candidates(
+            r#"[
+                {
+                    "account_uuid": "acct-automation",
+                    "shorthand": "automation-team",
+                    "url": "https://automation-team.1password.com",
+                    "email": "[REDACTED]"
+                }
+            ]"#,
+        )
+        .expect("account metadata parses");
+        candidates[0].vault_candidates = parse_onepassword_vault_candidates(
+            r#"[
+                { "id": "vault-private", "name": "Private" },
+                { "id": "vault-automation", "name": "Automation" }
+            ]"#,
+        )
+        .expect("vault metadata parses");
+        candidates[0].preferred = candidates[0]
+            .vault_candidates
+            .iter()
+            .any(|vault| vault.name.eq_ignore_ascii_case("Automation"));
+
+        let status = onepassword_sdk_provider_status_from_inputs(OnePasswordDetectionInputs {
+            desktop_installed: true,
+            account_configured: false,
+            service_token_configured: false,
+            ready: false,
+            saved_candidate: None,
+            configured_label: None,
+            cli_metadata: OnePasswordCliMetadataDiscovery {
+                cli_installed: true,
+                account_candidates: candidates,
+                warnings: Vec::new(),
+            },
+        });
+
+        assert!(!status.ready, "CLI metadata alone must not mark auth ready");
+        assert_eq!(status.account_candidates.len(), 1);
+        let candidate = &status.account_candidates[0];
+        assert!(candidate.preferred);
+        assert_eq!(candidate.vault_candidates[0].name, "Automation");
+        assert_eq!(candidate.source, "cli-metadata");
+    }
+
+    #[test]
+    fn saved_access_account_parser_avoids_email_labels() {
+        let candidates = parse_onepassword_account_candidates(
+            r#"[
+                {
+                    "account_uuid": "acct-redacted",
+                    "name": "[REDACTED]",
+                    "url": "https://example.1password.com",
+                    "email": "[REDACTED]"
+                }
+            ]"#,
+        )
+        .expect("account metadata parses");
+
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].label, "example.1password.com");
+        assert_eq!(candidates[0].email.as_deref(), Some("[REDACTED]"));
+    }
+
+    #[test]
+    fn saved_access_provider_credentials_reference_existing_secret_keys() {
+        let refs = super::saved_access_provider_credentials(&[
+            BootstrapAgentKey {
+                name: "ANTHROPIC_API_KEY".to_string(),
+                value: "anthropic-secret".to_string(),
+            },
+            BootstrapAgentKey {
+                name: "OPENROUTER_API_KEY".to_string(),
+                value: "openrouter-secret".to_string(),
+            },
+            BootstrapAgentKey {
+                name: "CLOUDFLARE_API_TOKEN".to_string(),
+                value: "cloudflare-secret".to_string(),
+            },
+        ])
+        .expect("saved access provider refs");
+
+        assert_eq!(
+            refs["anthropic"]
+                .secret_ref
+                .as_ref()
+                .map(|secret| (secret.name.as_str(), secret.key.as_str())),
+            Some(("cto-agent-keys", "ANTHROPIC_API_KEY"))
+        );
+        assert_eq!(
+            refs["openrouter"]
+                .secret_ref
+                .as_ref()
+                .map(|secret| (secret.name.as_str(), secret.key.as_str())),
+            Some(("cto-agent-keys", "OPENROUTER_API_KEY"))
+        );
+        assert!(!refs.contains_key("cloudflare"));
+    }
+
+    #[test]
+    fn saved_access_discord_tokens_render_separate_secret() {
+        assert_eq!(
+            discord_agent_id_from_saved_access_key("MORGAN_DISCORD_BOT_TOKEN"),
+            Some("morgan")
+        );
+        let manifest = discord_tokens_secret_manifest(&[BootstrapAgentKey {
+            name: "morgan".to_string(),
+            value: "discord-secret".to_string(),
+        }])
+        .expect("discord tokens manifest");
+
+        assert!(manifest.contains("name: openclaw-discord-tokens"));
+        assert!(manifest.contains("namespace: cto"));
+        assert!(manifest.contains("morgan: \"discord-secret\""));
     }
 
     #[test]

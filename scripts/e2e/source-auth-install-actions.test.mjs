@@ -35,13 +35,13 @@ describe("Source install actions", () => {
     assert.match(preSource, /data-testid="cloudflare-endpoint-saved-access"/);
     assert.match(preSource, /data-testid="cloudflare-endpoint-quick-tunnel"/);
     assert.match(preSource, /data-testid="saved-access-onepassword"/);
-    assert.match(preSource, /aria-label="Use 1Password saved access"/);
-    assert.match(preSource, /data-testid="saved-access-more-options"/);
+    assert.match(preSource, /aria-label="Use 1Password for secrets"/);
+    assert.doesNotMatch(preSource, /data-testid="saved-access-more-options"/);
     assert.match(preSource, /data-testid="saved-access-bitwarden"/);
-    assert.match(preSource, /data-secondary-provider="true"/);
-    assert.match(preSource, /shouldShowBitwardenOption/);
-    assert.match(source, /Bitwarden stays in More options unless the local bw CLI is detected/);
-    assert.match(preSource, /data-testid="saved-access-onepassword-modal"/);
+    assert.doesNotMatch(preSource, /data-secondary-provider="true"/);
+    assert.doesNotMatch(preSource, /shouldShowBitwardenOption/);
+    assert.doesNotMatch(source, /Bitwarden stays in More options unless the local bw CLI is detected/);
+    assert.match(source, /data-testid=\{`saved-access-\$\{savedAccessPrepMode === "bitwarden" \? "bitwarden" : "onepassword"\}-modal`\}/);
     assert.match(preSource, /\/icons\/1password\.svg/);
     assert.match(preSource, /data-testid="saved-access-readiness"/);
     assert.match(source, /savedAccessCueFromDetection/);
@@ -51,7 +51,7 @@ describe("Source install actions", () => {
     assert.match(source, /SAVED_ACCESS_DETECTION_TIMEOUT_MS/);
     assert.match(source, /data-testid="cloudflare-endpoint-local"/);
     assert.match(preSource, /data-testid="saved-access-skip"/);
-    assert.match(preSource, /local-bootstrap__skip-wordmark/);
+    assert.match(preSource, /Continue without a secret manager/);
     assert.doesNotMatch(preSource, /IconClose size=\{44\}/);
     assert.match(preSource, /speakMorganCue/);
   });
@@ -133,5 +133,67 @@ describe("Source install actions", () => {
     assert.match(uxDoc, /GitLab/i);
     assert.match(uxDoc, /agent-native/i);
     assert.match(uxDoc, /mirror|migrate|off-ramp/i);
+  });
+
+  it("does not preview saved access as source-token-only", () => {
+    assert.doesNotMatch(
+      source,
+      /targets:\s*\[sourceProvider === "github" \? "GITHUB_TOKEN" : "GITLAB_TOKEN"\]/,
+    );
+
+    for (const target of [
+      "GITHUB_TOKEN",
+      "GITLAB_TOKEN",
+      "OPENAI_API_KEY",
+      "OPENROUTER_API_KEY",
+      "ANTHROPIC_API_KEY",
+      "EXA_API_KEY",
+      "FIRECRAWL_API_KEY",
+      "TAVILY_API_KEY",
+      "BRAVE_API_KEY",
+      "CONTEXT7_API_KEY",
+      "PERPLEXITY_API_KEY",
+      "CLOUDFLARE_API_TOKEN",
+      "KUBECONFIG",
+    ]) {
+      assert.match(source, new RegExp(`"${target}"`), `${target} should be previewable from saved access`);
+    }
+  });
+
+  it("carries approved saved-access references into final bootstrap request", () => {
+    const buildRequest = source.slice(
+      source.indexOf("function buildBootstrapRequest"),
+      source.indexOf("function providerAuthLabel"),
+    );
+
+    assert.match(buildRequest, /savedAccess|secretSource/i);
+
+    const runBootstrapStart = source.indexOf('await invokeTauri("bootstrap_local_stack"');
+    const runBootstrap = source.slice(runBootstrapStart, source.indexOf(");", runBootstrapStart));
+    assert.match(runBootstrap, /savedAccessApplyResult|secretSource/i);
+
+    assert.match(
+      source,
+      /savedAccessApplyResult[\s\S]*(setGithubForm|setSourceCredentialForm|setProviderAuthInputs|setProviderAuthApiKeys|setToolApiKeys|setDiscordAgentTokens)/,
+    );
+  });
+
+  it("Cloudflare saved-access path previews and applies Cloudflare credentials", () => {
+    const preSource = preSourceRegion();
+    const savedAccessStart = preSource.indexOf('data-testid="cloudflare-endpoint-saved-access"');
+    const cloudflareSavedAccess = preSource.slice(
+      savedAccessStart,
+      preSource.indexOf('data-testid="cloudflare-endpoint-quick-tunnel"', savedAccessStart),
+    );
+
+    assert.match(cloudflareSavedAccess, /previewSavedAccess|connectSavedAccessAndRetry/);
+
+    for (const target of [
+      "CLOUDFLARE_API_TOKEN",
+      "CLOUDFLARE_ACCOUNT_ID",
+      "CLOUDFLARE_TUNNEL_TOKEN",
+    ]) {
+      assert.match(source, new RegExp(target), `${target} should be part of Cloudflare saved-access flow`);
+    }
   });
 });

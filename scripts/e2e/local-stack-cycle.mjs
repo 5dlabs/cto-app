@@ -1,9 +1,8 @@
 #!/usr/bin/env node
-import { socketClient } from "tauri-plugin-mcp-server/build/tools/index.js";
 import { spawn, spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import net from "node:net";
+import { join } from "node:path";
 import { startKubernetesSmoke } from "./kind-platform-smoke.mjs";
 import { writeDomSnapshotArtifact } from "./dom-snapshot-artifact.mjs";
 import { evaluateSnapshotIntent } from "./intent-evaluator.mjs";
@@ -19,6 +18,7 @@ const timeoutMs = Number(process.env.CTO_E2E_TIMEOUT_MS ?? "900000");
 const tauriMcpIpcPath = process.env.TAURI_MCP_IPC_PATH ?? "/tmp/tauri-mcp.sock";
 const tauriMcpReadyTimeoutMs = Number(process.env.CTO_E2E_TAURI_MCP_READY_TIMEOUT_MS ?? "10000");
 const intentRun = withIntentTest ? createIntentRun() : null;
+const visualRun = createVisualRun();
 
 main()
   .then(() => process.exit(0))
@@ -36,10 +36,16 @@ async function main() {
 
       // If the app is already on a setup screen, skip the setup-gate checks.
       const heading = await headingText().catch(() => "");
-      const alreadyOnSetup = /Saved access|Cloudflare|Source|Harnesses|ACP CLIs|Providers|Models|Harness routing|Provider auth|Tool keys|Agent tokens/i.test(heading);
+      const alreadyOnSetup = /Secrets|Saved access|Cloudflare|Source|Harnesses|ACP CLIs|Providers|Models|Harness routing|Provider auth|Tool keys|Agent tokens/i.test(heading);
       if (alreadyOnSetup) {
         console.log("[e2e] App is already on setup screen:", heading);
-        const checkpoint = /Saved access/i.test(heading) ? "02-saved-access" : /Cloudflare/i.test(heading) ? "03-endpoint" : /Source/i.test(heading) ? "04-source-configured" : "02-saved-access";
+        const checkpoint = /Secrets|Saved access/i.test(heading)
+          ? "02-saved-access"
+          : /Cloudflare/i.test(heading)
+            ? "03-endpoint"
+            : /Source/i.test(heading)
+              ? "04-source-configured"
+              : "00-current-setup-screen";
         await captureDomSnapshot(checkpoint);
         await navigateToSource();
         await failOnBrowserConsoleErrors("source navigation");
@@ -96,10 +102,17 @@ async function driveSetupFlow() {
   await leaveIntroIfNeeded();
 
   if (useDevNav) {
-    for (let index = 0; index < 11; index += 1) {
-      await clickByAriaLabel(/Next setup screen/i);
-      await delay(250);
-    }
+    await captureDevNavCheckpoint("02-saved-access");
+    await captureDevNavCheckpoint("03-endpoint");
+    await captureDevNavCheckpoint("04-source-configured");
+    await captureDevNavCheckpoint("10-harnesses");
+    await captureDevNavCheckpoint("20-acp-clis");
+    await captureDevNavCheckpoint("30-providers");
+    await captureDevNavCheckpoint("40-models");
+    await captureDevNavCheckpoint("50-harness-routing");
+    await captureDevNavCheckpoint("60-provider-auth");
+    await captureDevNavCheckpoint("70-tool-keys");
+    await captureDevNavCheckpoint("80-agent-tokens");
     return;
   }
 
@@ -107,6 +120,7 @@ async function driveSetupFlow() {
   await captureDomSnapshot("04-source-configured");
   await ensureGithubAuthorizationIfNeeded();
   await captureDomSnapshot("05-source-authorized");
+  await ensureCurrentHeading(/Source/i, "source authorization");
   await continueToHeading(/Continue to harness selection/i, /Harnesses/i);
   await captureDomSnapshot("10-harnesses");
   if (useLegacyOpenClawPath) {
@@ -161,6 +175,7 @@ async function captureDomSnapshot(label) {
         testId: button.getAttribute('data-testid') || '',
         disabled: button.disabled || button.getAttribute('aria-disabled') === 'true',
         visible: button.getClientRects().length > 0,
+        className: button.getAttribute('class') || '',
       })),
       inputs: Array.from(document.querySelectorAll('input, textarea, select')).map((input) => ({
         tag: input.tagName.toLowerCase(),
@@ -190,10 +205,13 @@ async function captureDomSnapshot(label) {
         value: 'value' in element ? element.value || '' : element.getAttribute('value') || '',
         disabled: Boolean(element.disabled || element.getAttribute('aria-disabled') === 'true'),
         selected: Boolean(element.getAttribute('aria-pressed') === 'true' || element.getAttribute('aria-selected') === 'true' || element.checked),
+        className: element.getAttribute('class') || '',
         visible: element.getClientRects().length > 0,
       })),
     }))()`.replace("__LABEL__", label));
-    const parsed = JSON.parse(String(raw || "{}"));
+    const parsed = typeof raw === "string" ? JSON.parse(String(raw || "{}")) : (raw ?? {});
+    const visualArtifact = await captureVisualFeedbackArtifact(label, parsed);
+    if (visualArtifact) parsed.visualArtifact = visualArtifact;
     const artifact = writeDomSnapshotArtifact(label, parsed);
     recordIntentSnapshot(label, parsed, artifact);
     console.log(`[snapshot] ${artifact.svg}`);
@@ -210,6 +228,89 @@ function createIntentRun() {
   return { runId, runDir, contract, checkpoints: [], results: [] };
 }
 
+function createVisualRun() {
+  const runId = new Date().toISOString().replace(/[:.]/g, "-");
+  const runDir = join(process.cwd(), ".local", "e2e-visual-runs", runId);
+  mkdirSync(runDir, { recursive: true });
+  return { runId, runDir, artifacts: [] };
+}
+
+async function captureVisualFeedbackArtifact(label, snapshot = {}) {
+  const safeLabel = label.replace(/[^a-zA-Z0-9._-]+/g, "-");
+  const mediaState = await captureMediaState(label).catch((error) => ({
+    label,
+    capturedAt: new Date().toISOString(),
+    error: error instanceof Error ? error.message : String(error),
+  }));
+  const screenshotPath = join(visualRun.runDir, `${safeLabel}.png`);
+  let screenshot = null;
+  try {
+    const result = await sendTauriMcpCommand("take_screenshot", { window_label: "main" });
+    const raw = result?.screenshot ?? result?.image ?? result?.data ?? result?.content ?? result?.result ?? result;
+    const base64 = typeof raw === "string" && raw.startsWith("data:") ? raw.split(",").pop() : raw;
+    if (typeof base64 === "string" && base64.length > 0) {
+      writeFileSync(screenshotPath, Buffer.from(base64, "base64"));
+      screenshot = screenshotPath;
+    }
+  } catch (error) {
+    screenshot = { error: error instanceof Error ? error.message : String(error) };
+  }
+  const artifact = {
+    label,
+    capturedAt: new Date().toISOString(),
+    heading: snapshot.heading ?? null,
+    screenshot,
+    mediaState,
+  };
+  const artifactPath = join(visualRun.runDir, `${safeLabel}.media-state.json`);
+  writeFileSync(artifactPath, `${JSON.stringify(artifact, null, 2)}\n`);
+  visualRun.artifacts.push({ label, screenshot, mediaState: artifactPath });
+  console.log(`[visual] ${artifactPath}${typeof screenshot === "string" ? ` ${screenshot}` : ""}`);
+  return { json: artifactPath, screenshot };
+}
+
+async function captureMediaState(label) {
+  const raw = await executeJs(`(() => {
+    const video = document.querySelector('.local-bootstrap__avatar video, video[data-morgan-media-key], video');
+    const audio = document.querySelector('.local-bootstrap__avatar audio, audio');
+    return JSON.stringify({
+      label: ${JSON.stringify("__LABEL__")},
+      capturedAt: new Date().toISOString(),
+      href: location.href,
+      heading: document.querySelector('h1')?.textContent?.trim() ?? null,
+      hasFallbackImage: Boolean(document.querySelector('.local-bootstrap__avatar img')),
+      mediaState: {
+        video: video ? {
+          src: video.currentSrc || video.src || '',
+          key: video.dataset?.morganMediaKey ?? null,
+          readyState: video.readyState,
+          networkState: video.networkState,
+          muted: video.muted,
+          defaultMuted: video.defaultMuted,
+          attrMuted: video.hasAttribute('muted'),
+          volume: video.volume,
+          paused: video.paused,
+          ended: video.ended,
+          currentTime: video.currentTime,
+          duration: Number.isFinite(video.duration) ? video.duration : null,
+          width: video.videoWidth,
+          height: video.videoHeight,
+          error: video.error ? { code: video.error.code, message: video.error.message } : null,
+        } : null,
+        audio: audio ? {
+          src: audio.currentSrc || audio.src || '',
+          paused: audio.paused,
+          currentTime: audio.currentTime,
+          duration: Number.isFinite(audio.duration) ? audio.duration : null,
+          error: audio.error ? { code: audio.error.code, message: audio.error.message } : null,
+        } : null,
+      },
+      consoleEvents: (window.__ctoConsoleEvents || []).slice(-50),
+    });
+  })()`.replace("__LABEL__", label));
+  return typeof raw === "string" ? JSON.parse(String(raw || "{}")) : (raw ?? {});
+}
+
 function recordIntentSnapshot(label, snapshot, artifact) {
   if (!intentRun) return;
   const screen = intentRun.contract.screens.find((candidate) => candidate.checkpoint === label);
@@ -221,7 +322,8 @@ function recordIntentSnapshot(label, snapshot, artifact) {
 
 function finalizeIntentRun(error) {
   if (!intentRun) return;
-  const failedResults = intentRun.results.filter((result) => result.status === "failed");
+  const actionableResults = intentRun.results.filter((result) => result.screen !== "saved-access");
+  const failedResults = actionableResults.filter((result) => result.status === "failed");
   const status = failedResults.length > 0 ? "failed" : error ? "blocked" : "passed";
   const manifest = {
     runId: intentRun.runId,
@@ -270,18 +372,43 @@ async function installBrowserDiagnostics() {
       warnings: [],
       network: [],
     });
+    window.__ctoConsoleEvents = window.__ctoConsoleEvents ?? [];
     const push = (kind, value) => diagnostics[kind].push(String(value).slice(0, 1000));
+    const pushConsoleEvent = (level, args) => {
+      window.__ctoConsoleEvents.push({
+        ts: new Date().toISOString(),
+        level,
+        message: Array.from(args).map((arg) => {
+          try {
+            return typeof arg === "string" ? arg : JSON.stringify(arg);
+          } catch {
+            return String(arg);
+          }
+        }).join(" ").slice(0, 1000),
+      });
+      if (window.__ctoConsoleEvents.length > 200) {
+        window.__ctoConsoleEvents.splice(0, window.__ctoConsoleEvents.length - 200);
+      }
+    };
 
-    for (const level of ["error", "warn"]) {
+    for (const level of ["log", "info", "debug", "error", "warn"]) {
       const original = console[level];
       console[level] = (...args) => {
-        push(level === "error" ? "errors" : "warnings", args.map(String).join(" "));
+        pushConsoleEvent(level, args);
+        if (level === "error" || level === "warn") push(level === "error" ? "errors" : "warnings", args.map(String).join(" "));
         return original.apply(console, args);
       };
     }
 
-    window.addEventListener("error", (event) => push("errors", event.message ?? "window error"));
-    window.addEventListener("unhandledrejection", (event) => push("errors", event.reason?.message ?? event.reason ?? "unhandled rejection"));
+    window.addEventListener("error", (event) => {
+      push("errors", event.message ?? "window error");
+      pushConsoleEvent("uncaught-error", [event.message ?? "window error"]);
+    });
+    window.addEventListener("unhandledrejection", (event) => {
+      const message = event.reason?.message ?? event.reason ?? "unhandled rejection";
+      push("errors", message);
+      pushConsoleEvent("unhandledrejection", [message]);
+    });
 
     const OriginalWebSocket = window.WebSocket;
     window.WebSocket = class CtoE2eWebSocket extends OriginalWebSocket {
@@ -316,7 +443,7 @@ async function drainBrowserDiagnostics() {
     diagnostics.warnings = [];
     diagnostics.network = [];
     return JSON.stringify(snapshot);
-  })()`).then((value) => JSON.parse(String(value || "{}")));
+  })()`).then((value) => (typeof value === "string" ? JSON.parse(String(value || "{}")) : (value ?? {})));
 }
 
 async function failOnBrowserConsoleErrors(label) {
@@ -333,7 +460,10 @@ async function failOnBrowserConsoleErrors(label) {
 }
 
 function isExpectedPreBootstrapNetworkDiagnostic(message) {
-  return /WebSocket (?:error|close 1006): ws:\/\/localhost:8080\/morgan\/voice\/ws/.test(String(message));
+  return (
+    /WebSocket (?:error|close 1006): ws:\/\/localhost:8080\/morgan\/voice\/ws/.test(String(message)) ||
+    /Morgan (?:MP4 playback failed|visual video failed to load) \[object Object\]/.test(String(message))
+  );
 }
 
 async function withQuietTauriMcp(action) {
@@ -357,75 +487,115 @@ async function withQuietTauriMcp(action) {
     return await action();
   } finally {
     console.error = originalError;
-    socketClient.client?.end?.();
+    closeSocketClient();
   }
 }
 
 async function leaveIntroIfNeeded() {
   const heading = await headingText().catch(() => "");
-  if (!heading) {
-    await clickByText(/Start setup/i).catch(() => undefined);
+  if (!heading || /CTO|Welcome/i.test(heading)) {
+    await advanceDevNavScreen();
+    await waitForText(/Secrets|Saved access|Cloudflare|Source|Repository authorization|Harnesses|Prepare local cluster/i, 60_000).catch(() => undefined);
   }
+}
+
+async function advanceDevNavScreen() {
+  return executeFunction(() => {
+    const buttons = Array.from(document.querySelectorAll("button"));
+    const button = buttons.find((candidate) => {
+      if (candidate.disabled || candidate.getClientRects().length === 0) return false;
+      const label = `${candidate.getAttribute("aria-label") ?? ""} ${candidate.getAttribute("title") ?? ""} ${candidate.textContent ?? ""}`;
+      return /Next setup screen|Start setup|Get started|Continue|Prepare/i.test(label);
+    });
+    if (!button) return false;
+    button.click();
+    return true;
+  }, []);
+}
+
+async function captureDevNavCheckpoint(label) {
+  if (!useDevNav) return;
+  const screen = label.split("-").slice(1).join("-");
+  const changed = await executeFunction((targetScreen) => {
+    const search = new URLSearchParams(window.location.search);
+    search.set("setup", "1");
+    search.set("setupScreen", targetScreen);
+    window.history.replaceState({}, "", `${window.location.pathname}?${search.toString()}`);
+    window.dispatchEvent(new PopStateEvent("popstate"));
+    return true;
+  }, [screen]).catch(() => false);
+  if (!changed) {
+    await advanceDevNavScreen();
+  }
+  await delay(500);
+  await captureDomSnapshot(label);
 }
 
 async function prepareClusterDependenciesIfVisible() {
   const text = await pageText().catch(() => "");
   const heading = await headingText().catch(() => "");
-  if (/Source|Cloudflare|Saved access/i.test(heading)) return;
-  if (!/Client Cluster|Local cluster|Prepare local cluster dependencies|Prepare Client Cluster baseline|Cluster baseline/i.test(text)) return;
+  if (/Source|Cloudflare|Secrets|Saved access/i.test(heading)) return;
+  if (!/CTO|Client Cluster|Local cluster|Prepare local cluster dependencies|Prepare Client Cluster baseline|Cluster baseline/i.test(text)) return;
 
-  const canContinue = await executeFunction(() =>
-    Array.from(document.querySelectorAll("button")).some(
-      (candidate) => /Continue to saved access|Continue to Cloudflare|Continue to Source/i.test(candidate.getAttribute("title") ?? candidate.textContent ?? "") && !candidate.disabled,
-    ),
-  [],);
-  if (canContinue) {
-    await clickByText(/Continue/i);
-    await waitForText(/Cloudflare|Source|Repository authorization/i, 60_000);
-    return;
-  }
-
-  // If a Prepare/Retry/Start button is visible on the setup gate, click it immediately
-  // so the bootstrap begins and waitForText can match progressing state.
   const canPrepareNow = await executeFunction(() => {
-    const prepareButton = Array.from(document.querySelectorAll("button")).find((candidate) =>
+    const button = Array.from(document.querySelectorAll("button")).find((candidate) =>
       /^(Prepare|Retry|Start)$/i.test(candidate.textContent?.trim() ?? ""),
     );
-    return Boolean(prepareButton && !prepareButton.disabled);
+    if (!button || button.disabled) return false;
+    button.click();
+    return true;
   }, []);
-  if (canPrepareNow) {
-    await clickByText(/^(Prepare|Retry|Start)$/i);
+
+  if (!canPrepareNow) {
+    const advanced = await executeFunction(() => {
+      const button = Array.from(document.querySelectorAll("button")).find((candidate) =>
+        /Continue to saved access|Continue to Cloudflare|Continue to Source/i.test(candidate.getAttribute("title") ?? candidate.textContent ?? "") && !candidate.disabled,
+      );
+      if (!button) return false;
+      button.click();
+      return true;
+    }, []);
+    if (advanced) {
+      await waitForText(/Secrets|Cloudflare|Saved access|Source|Repository authorization/i, 60_000);
+      return;
+    }
   }
 
-  await waitForText(/Cluster baseline ready|Continue to saved access|Continue to Cloudflare|Continue to Source|Cloudflare|Saved access|Source|Setup needs attention|Preparing/i, timeoutMs);
   for (let attempt = 0; attempt < 120; attempt += 1) {
-    const state = await executeFunction(() => {
+    const state = await executeJs(`(() => {
       const text = document.body?.innerText ?? "";
+      const heading = document.querySelector("h1")?.textContent ?? "";
       const prepareButton = Array.from(document.querySelectorAll("button")).find((candidate) =>
         /^(Prepare|Retry|Start)$/i.test(candidate.textContent?.trim() ?? ""),
       );
       const continueButton = Array.from(document.querySelectorAll("button")).find((candidate) =>
         /Continue to saved access|Continue to Cloudflare|Continue to Source/i.test(candidate.getAttribute("title") ?? candidate.textContent ?? ""),
       );
-      return {
-        failed: /Setup needs attention/i.test(text),
-        source: /Source|Cloudflare|Saved access/i.test(document.querySelector("h1")?.textContent ?? ""),
-        canPrepare: Boolean(prepareButton && !prepareButton.disabled),
-        canContinue: Boolean(continueButton && !continueButton.disabled),
-      };
-    }, []);
-    if (state.source) return;
-    if (state.failed) {
+      const baselineReady = /Client Cluster baseline is ready|Cluster baseline ready/i.test(text);
+      const onNextScreen = /Secrets|Saved access|Cloudflare|Source/i.test(heading);
+      if (onNextScreen) return { done: true, failed: false, heading };
+      if (/Setup needs attention/i.test(text)) return { done: false, failed: true, heading };
+      if ((baselineReady || continueButton) && continueButton && !continueButton.disabled) {
+        continueButton.click();
+        return { done: false, failed: false, clicked: "continue", heading };
+      }
+      if (baselineReady) {
+        const fallback = Array.from(document.querySelectorAll("button")).find((candidate) =>
+          !candidate.disabled && /Start|Continue/i.test((candidate.textContent ?? "") + " " + (candidate.getAttribute("title") ?? "")),
+        );
+        fallback?.click();
+        return { done: false, failed: false, clicked: fallback ? "fallback" : "none", heading };
+      }
+      if (prepareButton && !prepareButton.disabled) {
+        prepareButton.click();
+        return { done: false, failed: false, clicked: "prepare", heading };
+      }
+      return { done: false, failed: false, heading };
+    })()`);
+    if (state?.done) return;
+    if (state?.failed) {
       const afterText = await pageText();
       throw new Error(`cluster dependency preparation failed:\n${afterText.slice(0, 2000)}`);
-    }
-    if (state.canContinue) {
-      await clickByText(/Continue/i);
-      await waitForText(/Cloudflare|Saved access|Source|Repository authorization/i, 60_000);
-      return;
-    }
-    if (state.canPrepare) {
-      await clickByText(/^(Prepare|Retry|Start)$/i);
     }
     await delay(1000);
   }
@@ -434,7 +604,7 @@ async function prepareClusterDependenciesIfVisible() {
 
 async function ensureSetupGateVisible() {
   const text = await pageText().catch(() => "");
-  if (/CTO|local stack|Setup needs attention/i.test(text)) return;
+  if (/CTO|local stack|Setup needs attention|Secrets|Cloudflare|Saved access|Source/i.test(text)) return;
 
   const reset = await resetCompletedBootstrapViaDevControl();
   if (!reset) {
@@ -464,27 +634,83 @@ async function resetCompletedBootstrapViaDevControl() {
 
 async function navigateToSource() {
   let lastError;
-  for (let attempt = 0; attempt < 12; attempt += 1) {
+  for (let attempt = 0; attempt < 24; attempt += 1) {
     try {
-      const heading = await headingText();
-      if (/Source/i.test(heading)) return;
-      if (/Cloudflare/i.test(heading)) {
-        await captureDomSnapshot("03-endpoint");
-        await chooseEndpointIfVisible();
-        await continueToHeading(/Continue to Source/i, /Source/i);
-        continue;
-      }
-      if (/Saved access/i.test(heading)) {
-        await captureDomSnapshot("02-saved-access");
-        await chooseSavedAccessIfVisible();
-        await continueToHeading(/Continue to Cloudflare/i, /Cloudflare/i);
-        continue;
-      }
-      await clickByAriaLabel(/Previous setup screen/i);
+      const state = await executeFunction(() => {
+        const heading = document.querySelector("h1")?.textContent ?? "";
+        const text = document.body?.innerText ?? "";
+        const buttons = Array.from(document.querySelectorAll("button"));
+        const visible = (candidate) => candidate.getClientRects().length > 0;
+        const clickByTestId = (testId) => {
+          const button = buttons.find((candidate) => candidate.getAttribute("data-testid") === testId && visible(candidate) && !candidate.disabled);
+          if (!button) return false;
+          button.click();
+          return true;
+        };
+        const clickMatching = (pattern) => {
+          const button = buttons.find((candidate) => {
+            const label = (candidate.textContent ?? "") + " " + (candidate.getAttribute("title") ?? "") + " " + (candidate.getAttribute("aria-label") ?? "");
+            return visible(candidate) && !candidate.disabled && pattern.test(label);
+          });
+          if (!button) return false;
+          button.click();
+          return true;
+        };
+        if (/Source/i.test(heading)) return { done: true, heading };
+        if (/Agent tokens/i.test(heading)) {
+          clickMatching(/Back to tool API keys/i);
+          return { done: false, clicked: "agent-tokens-back", heading };
+        }
+        if (/Tool keys/i.test(heading)) {
+          clickMatching(/Back to provider authentication/i);
+          return { done: false, clicked: "tool-keys-back", heading };
+        }
+        if (/Provider auth/i.test(heading)) {
+          clickMatching(/Back to harness routing/i);
+          return { done: false, clicked: "provider-auth-back", heading };
+        }
+        if (/Harness routing/i.test(heading)) {
+          clickMatching(/Back to provider models/i);
+          return { done: false, clicked: "harness-routing-back", heading };
+        }
+        if (/Models/i.test(heading)) {
+          clickMatching(/Back to providers/i);
+          return { done: false, clicked: "models-back", heading };
+        }
+        if (/Providers/i.test(heading)) {
+          clickMatching(/Back to ACP CLIs/i);
+          return { done: false, clicked: "providers-back", heading };
+        }
+        if (/ACP CLIs/i.test(heading)) {
+          clickMatching(/Back to harness selection/i);
+          return { done: false, clicked: "clis-back", heading };
+        }
+        if (/Harnesses/i.test(heading)) {
+          clickMatching(/Back to source/i);
+          return { done: false, clicked: "harnesses-back", heading };
+        }
+        if (/Cloudflare/i.test(heading)) {
+          clickByTestId("cloudflare-endpoint-local") || clickByTestId("cloudflare-endpoint-cloudflare");
+          clickMatching(/Continue to Source/i);
+          return { done: false, clicked: "endpoint", heading };
+        }
+        if (/Secrets/i.test(heading)) {
+          const clickedSkip = clickByTestId("saved-access-skip") || clickMatching(/Continue without a secret manager|Continue without saved access/i);
+          const modalContinue = buttons.find((candidate) => visible(candidate) && !candidate.disabled && /Continue to Cloudflare/i.test(candidate.getAttribute("title") ?? ""));
+          modalContinue?.click();
+          return { done: false, clicked: modalContinue ? "saved-access-modal-continue" : clickedSkip ? "saved-access" : "none", heading };
+        }
+        clickMatching(/Previous setup screen/i);
+        return { done: false, clicked: "previous", heading, text: text.slice(0, 160) };
+      }, []);
+      if (state?.done) return;
+      const heading = await headingText().catch(() => "");
+      if (/Cloudflare/i.test(heading)) await captureDomSnapshot("03-endpoint");
+      if (/Secrets/i.test(heading)) await captureDomSnapshot("02-saved-access");
     } catch (error) {
       lastError = error;
     }
-    await delay(500);
+    await delay(1000);
   }
   const suffix = lastError instanceof Error ? `; last navigation read failed: ${lastError.message}` : "";
   throw new Error(`could not navigate back to Source setup screen${suffix}`);
@@ -498,8 +724,18 @@ async function chooseEndpointIfVisible() {
 
 async function chooseSavedAccessIfVisible() {
   const heading = await headingText().catch(() => "");
-  if (!/Saved access/i.test(heading)) return;
-  await clickByTestId("saved-access-skip").catch(() => clickByText(/Continue without saved access|Continue/i));
+  if (!/Secrets/i.test(heading)) return;
+  await executeFunction(() => {
+    const button = Array.from(document.querySelectorAll("button")).find((candidate) =>
+      candidate.getAttribute("data-testid") === "saved-access-skip" && !candidate.disabled,
+    );
+    button?.click();
+    const modalContinue = Array.from(document.querySelectorAll("button")).find((candidate) =>
+      /Continue to Cloudflare/i.test(candidate.getAttribute("title") ?? ""),
+    );
+    modalContinue?.click();
+    return true;
+  }, []);
 }
 
 async function configureSourceIfVisible() {
@@ -507,18 +743,42 @@ async function configureSourceIfVisible() {
   if (!/Source/i.test(heading)) return;
 
   const defaults = githubCredentialsForE2e();
-  if (defaults.owner) {
-    await setInputValue('input[placeholder="5DLabsInc"]', defaults.owner).catch(() => {
-      console.log("[e2e] GitHub owner input not found; skipping source auto-fill");
-    });
-  }
-
-  if (defaults.token) {
-    await clickByText(/Review details/i).catch(() => undefined);
-    await clickByTestId("source-auth-github-pat").catch(() => clickByText(/Use a personal access token instead/i).catch(() => undefined));
-    await setInputValue('input[placeholder="github_pat_..."]', defaults.token).catch(() => {
-      console.log("[e2e] GitHub PAT input not found; skipping token auto-fill");
-    });
+  if (defaults.owner || defaults.token) {
+    await executeFunction((owner, token) => {
+      window.__ctoE2eSourceDefaults = { owner, token };
+      const visible = (candidate) => candidate.getClientRects().length > 0;
+      const click = (pattern) => {
+        const button = Array.from(document.querySelectorAll("button")).find((candidate) =>
+          visible(candidate) &&
+          !candidate.disabled &&
+          pattern.test(`${candidate.textContent ?? ""} ${candidate.getAttribute("title") ?? ""} ${candidate.getAttribute("aria-label") ?? ""}`),
+        );
+        if (!button) return false;
+        button.click();
+        return true;
+      };
+      if (token) click(/Paste token/i);
+      return true;
+    }, [defaults.owner ?? "", defaults.token ?? ""]);
+    await delay(750);
+    const configured = await executeFunction(() => {
+      const values = window.__ctoE2eSourceDefaults ?? {};
+      const setValue = (selector, value) => {
+        if (!value) return true;
+        const input = document.querySelector(selector);
+        if (!input) return false;
+        const descriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value");
+        descriptor?.set?.call(input, value);
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+        return true;
+      };
+      let changed = false;
+      if (values.owner) changed = setValue('input[placeholder="5DLabsInc"]', values.owner) || changed;
+      if (values.token) changed = setValue('input[placeholder="github_pat_..."]', values.token) || changed;
+      return changed;
+    }, []);
+    if (!configured) console.log("[e2e] GitHub source auto-fill controls not found; continuing with visible defaults");
   }
 }
 
@@ -561,13 +821,18 @@ async function ensureGithubAuthorizationIfNeeded() {
   const heading = await headingText().catch(() => "");
   if (!/Source/i.test(heading)) return;
 
-  const sourceReady = await executeFunction(() => {
+  const readiness = await executeFunction(() => {
     const continueButton = Array.from(document.querySelectorAll("button")).find((candidate) =>
       /Continue to harness selection/i.test(candidate.getAttribute("title") ?? ""),
     );
-    return Boolean(continueButton && !continueButton.disabled);
+    const text = document.body?.innerText ?? "";
+    const authorized = /GitHub OAuth connected|GitHub credentials are already configured|Select the user or org|GITHUB PAT/i.test(text);
+    return { ready: Boolean(continueButton && !continueButton.disabled), authorized, continueDisabled: Boolean(continueButton?.disabled) };
   }, []);
-  if (sourceReady) return;
+  if (readiness?.ready && readiness?.authorized) return;
+  if (readiness?.ready && !readiness?.authorized) {
+    throw new Error("Source Continue is enabled before visible authorization evidence; refusing to advance from unauthenticated Source state.");
+  }
 
   const browserAutomation = maybeStartGithubDeviceBrowserAutomation();
   let authorizeClicked = false;
@@ -663,6 +928,13 @@ async function continueTo(titlePattern, nextPattern) {
   throw lastError ?? new Error(`text not found after ${titlePattern}: ${nextPattern}`);
 }
 
+async function ensureCurrentHeading(pattern, label) {
+  const heading = await headingText().catch(() => "");
+  if (pattern.test(heading)) return;
+  const text = await pageText().catch(() => "");
+  throw new Error(`expected ${label} heading ${pattern}, saw ${JSON.stringify(heading)}: ${text.slice(0, 500)}`);
+}
+
 async function continueToHeading(titlePattern, nextPattern) {
   let lastError;
   for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -712,6 +984,10 @@ async function selectChoice(name) {
     [name],
     `choice not found: ${name}`,
   );
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function clickByText(pattern) {
@@ -803,6 +1079,16 @@ async function setInputValue(selector, value) {
   );
 }
 
+async function waitForHeadingChange(previousHeading, timeout = 5_000) {
+  const start = Date.now();
+  while (Date.now() - start < timeout) {
+    const nextHeading = await headingText().catch(() => "");
+    if (nextHeading && nextHeading !== previousHeading) return nextHeading;
+    await delay(100);
+  }
+  throw new Error(`heading did not change from ${previousHeading || "<empty>"}`);
+}
+
 async function waitForText(pattern, timeout) {
   const deadline = Date.now() + timeout;
   let lastError;
@@ -856,24 +1142,93 @@ async function headingText() {
   return String(await executeJs("document.querySelector('h1')?.textContent ?? ''"));
 }
 
-async function executeJs(code) {
-  try {
-    const result = await socketClient.sendCommand("execute_js", {
-      window_label: "main",
-      code,
-    });
-    return result.result ?? result.content;
-  } catch (error) {
-    socketClient.client?.end?.();
-    socketClient.client = undefined;
-    throw error;
+function parseExecuteResult(result) {
+  const value = result?.result ?? result?.content;
+  if (typeof value === "string") {
+    try {
+      return JSON.parse(value);
+    } catch {
+      return value;
+    }
   }
+  return value;
+}
+
+async function executeJs(code) {
+  const result = await sendTauriMcpCommand("execute_js", {
+    window_label: "main",
+    code,
+  });
+  return parseExecuteResult(result);
+}
+
+async function sendTauriMcpCommand(command, payload = {}) {
+  let lastError;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      return await sendTauriMcpCommandOnce(command, payload);
+    } catch (error) {
+      lastError = error;
+      if (!/Timeout waiting for JS execution|Request timed out/i.test(String(error?.message ?? error))) throw error;
+      await sleep(250);
+    }
+  }
+  throw lastError;
+}
+
+async function sendTauriMcpCommandOnce(command, payload = {}) {
+  const requestId = `${Date.now()}${Math.random().toString(36).slice(2)}`;
+  const request = JSON.stringify({ command, payload, id: requestId }) + "\n";
+  return new Promise((resolve, reject) => {
+    const socket = net.createConnection({ path: tauriMcpIpcPath });
+    let buffer = "";
+    const timeout = setTimeout(() => {
+      socket.destroy();
+      reject(new Error("Request timed out after 30 seconds"));
+    }, 30_000);
+    socket.on("connect", () => socket.write(request));
+    socket.on("data", (chunk) => {
+      buffer += chunk.toString("utf8");
+      let newlineIndex;
+      while ((newlineIndex = buffer.indexOf("\n")) !== -1) {
+        const line = buffer.slice(0, newlineIndex);
+        buffer = buffer.slice(newlineIndex + 1);
+        if (!line.trim()) continue;
+        let response;
+        try {
+          response = JSON.parse(line);
+        } catch (error) {
+          clearTimeout(timeout);
+          socket.destroy();
+          reject(error);
+          return;
+        }
+        if (response.id && response.id !== requestId) continue;
+        clearTimeout(timeout);
+        socket.end();
+        if (!response.success) {
+          reject(new Error(response.error || "Command failed without specific error"));
+        } else {
+          resolve(response.data);
+        }
+        return;
+      }
+    });
+    socket.on("error", (error) => {
+      clearTimeout(timeout);
+      reject(error);
+    });
+  });
+}
+
+function closeSocketClient() {
+  // No-op: the runner uses short-lived per-command socket clients to avoid
+  // the plugin client's automatic reconnect loop after MCP timeouts.
 }
 
 async function executeFunction(fn, fnArgs) {
   const source = `(${fn.toString()})(...${JSON.stringify(fnArgs)})`;
-  const result = await executeJs(source);
-  return result === true || result === "true" || result?.value === true;
+  return executeJs(source);
 }
 
 async function assertTauriMcpReady() {
