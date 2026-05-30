@@ -162,7 +162,9 @@ describe("secret-source Tauri API contract", () => {
     assert.match(applySdkValues, /apply_bootstrap_agent_keys\(&agent_keys\)/);
     assert.match(applySdkValues, /patch_bootstrap_cto_agent_keys\(&agent_keys\)/);
     assert.match(applySdkValues, /cto_agent_keys_values_patch|patch_bootstrap_cto_agent_keys/);
-    assert.match(applySdkValues, /patch_bootstrap_cto_config|cto_config_values_patch/);
+    assert.match(bootstrapRs, /build_saved_access_cto_config\(&setup\.saved_access\)/);
+    assert.match(bootstrapRs, /saved_access:\s*setup\.saved_access\.clone\(\)/);
+    assert.match(bootstrapRs, /cto_config_values_patch/);
   });
 
   it("does not collapse agent tokens into a generic cto-agent-keys saved-access target", () => {

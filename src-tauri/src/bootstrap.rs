@@ -581,7 +581,7 @@ pub struct SecretSourceApplySelection {
     provider_ref: String,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SecretSourceAppliedReference {
     purpose: String,
@@ -676,6 +676,13 @@ struct SecretSourceSdkValue {
 struct SecretSourceSdkApplyOutput {
     provider: String,
     values: Vec<SecretSourceSdkValue>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SecretSourceBridgeTarget {
+    target_secret_key: String,
+    purpose: String,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -889,6 +896,8 @@ pub struct BootstrapSetupProfile {
     harness: BootstrapSetupHarness,
     #[serde(default)]
     agents: Vec<BootstrapSetupAgent>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    saved_access: Vec<SecretSourceAppliedReference>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -1054,6 +1063,8 @@ struct BootstrapCtoConfig {
     source: BootstrapSetupSource,
     harness: BootstrapCtoHarnessConfig,
     clis: BTreeMap<String, BootstrapCtoCliConfig>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    saved_access: Vec<SecretSourceAppliedReference>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -3623,6 +3634,16 @@ fn secret_source_targets(requested: &[String]) -> Vec<(&'static str, &'static st
         .collect()
 }
 
+fn secret_source_bridge_targets(requested: &[String]) -> Vec<SecretSourceBridgeTarget> {
+    secret_source_targets(requested)
+        .into_iter()
+        .map(|(target_secret_key, purpose)| SecretSourceBridgeTarget {
+            target_secret_key: target_secret_key.to_string(),
+            purpose: purpose.to_string(),
+        })
+        .collect()
+}
+
 fn detect_secret_sources_inner(window: Option<&Window>) -> SecretSourceDetectionResult {
     if secret_source_legacy_cli_enabled() {
         return legacy_secret_sources_detection_impl();
@@ -4252,7 +4273,7 @@ fn onepassword_desktop_auth_probe_succeeded(config: &SecretSourceAuthConfig) -> 
 }
 
 fn bitwarden_sdk_auth_configured(config: Option<&SecretSourceAuthConfig>) -> bool {
-    config.is_some_and(bitwarden_secrets_manager_probe_succeeded)
+    config.is_some_and(|config| bitwarden_secrets_manager_probe_succeeded(config))
 }
 
 fn bitwarden_secrets_manager_probe_succeeded(config: &SecretSourceAuthConfig) -> bool {
@@ -5063,7 +5084,7 @@ fn run_secret_source_sdk_bridge(
     let payload = json!({
         "provider": provider,
         "operation": operation,
-        "targets": request.targets,
+        "targets": secret_source_bridge_targets(&request.targets),
     });
     let output =
         run_secret_source_sdk_bridge_json(window, &payload, "secret source SDK metadata preview")?;
@@ -5193,6 +5214,7 @@ fn apply_sdk_matches(
     let payload = json!({
         "provider": provider,
         "operation": "apply",
+        "targets": secret_source_bridge_targets(&[]),
         "matches": request.matches,
     });
     let output =
@@ -5257,7 +5279,7 @@ fn apply_secret_source_sdk_values(
     patch_bootstrap_cto_agent_keys(&agent_keys)?;
     // provider/model runtime consumption is wired through valuesObject.agentKeys;
     // CTO-config.json remains reference/selection metadata built by the full setup request.
-    let _saved_access_provider_refs = build_saved_access_cto_config(&agent_keys)?;
+    let _saved_access_provider_refs = build_saved_access_cto_config(&applied)?;
     let _ = patch_bootstrap_cto_config;
     Ok(SecretSourceApplyResult {
         provider: sdk_output.provider,
@@ -5292,9 +5314,9 @@ fn discord_agent_id_from_saved_access_key(target_key: &str) -> Option<&'static s
 }
 
 fn build_saved_access_cto_config(
-    agent_keys: &[BootstrapAgentKey],
+    saved_access: &[SecretSourceAppliedReference],
 ) -> BootstrapResult<Option<BTreeMap<String, BootstrapProviderCredentialConfig>>> {
-    let credential_config = saved_access_provider_credentials(agent_keys)?;
+    let credential_config = saved_access_provider_credentials(saved_access)?;
     if credential_config.is_empty() {
         return Ok(None);
     }
@@ -5303,14 +5325,16 @@ fn build_saved_access_cto_config(
 }
 
 fn saved_access_provider_credentials(
-    agent_keys: &[BootstrapAgentKey],
+    saved_access: &[SecretSourceAppliedReference],
 ) -> BootstrapResult<BTreeMap<String, BootstrapProviderCredentialConfig>> {
     let mut config = BTreeMap::new();
-    for key in agent_keys {
-        let Some((provider_id, _auth)) = saved_access_provider_for_secret_key(&key.name) else {
+    for reference in saved_access {
+        let Some((provider_id, _auth)) =
+            saved_access_provider_for_secret_key(&reference.target_secret_key)
+        else {
             continue;
         };
-        let secret_key = validate_bootstrap_agent_key_name(&key.name)?;
+        let secret_key = validate_bootstrap_agent_key_name(&reference.target_secret_key)?;
         config.insert(
             provider_id.to_string(),
             BootstrapProviderCredentialConfig {
@@ -5852,6 +5876,9 @@ fn validate_bootstrap_discord_agent_id(raw: &str) -> BootstrapResult<String> {
 }
 
 fn validate_bootstrap_secret_value(value: &str, label: &str) -> BootstrapResult<()> {
+    if value.trim() == "[REDACTED]" {
+        return Err(format!("{label} must not be the redacted placeholder"));
+    }
     if value.chars().any(char::is_control) {
         return Err(format!("{label} must not contain control characters"));
     }
@@ -5892,6 +5919,11 @@ fn build_bootstrap_cto_config(
     };
 
     validate_bootstrap_setup(setup)?;
+    let mut effective_provider_credentials =
+        build_saved_access_cto_config(&setup.saved_access)?.unwrap_or_default();
+    for (provider, credential) in provider_credentials {
+        effective_provider_credentials.insert(provider.clone(), credential.clone());
+    }
     let selected_clis = setup.harness.clis.iter().copied().collect::<HashSet<_>>();
     let mut clis = setup
         .harness
@@ -5930,7 +5962,7 @@ fn build_bootstrap_cto_config(
                     auth: provider.auth,
                     default_model: provider.model.clone(),
                     models: provider.models.clone(),
-                    credential: provider_credentials.get(&provider.id).cloned(),
+                    credential: effective_provider_credentials.get(&provider.id).cloned(),
                 },
             );
         }
@@ -5944,6 +5976,7 @@ fn build_bootstrap_cto_config(
             routing: setup.harness.routing.clone(),
         },
         clis,
+        saved_access: setup.saved_access.clone(),
     }))
 }
 
@@ -9479,9 +9512,10 @@ mod tests {
         BootstrapSetupSource, BootstrapSourceCredentials, BootstrapSourceProvider,
         BootstrapToolApiKeyRequest, BootstrapToolsRequest, KindNodeContainerState,
         OnePasswordAuthConfig, OnePasswordCliMetadataDiscovery, OnePasswordDetectionInputs,
-        OriginEngine, OriginTransferMode, OriginTransferRequest, SecretSourceAuthConfig,
-        SecretSourceAuthState, BOOTSTRAP_TEST_MODE_ENV, CTO_GITOPS_REPO_NAME,
-        GITHUB_TOKEN_SECRET_KEY, GITLAB_TOKEN_SECRET_KEY, METRICS_SERVER_KUBELET_INSECURE_TLS_ARG,
+        OriginEngine, OriginTransferMode, OriginTransferRequest, SecretSourceAppliedReference,
+        SecretSourceAuthConfig, SecretSourceAuthState, BOOTSTRAP_TEST_MODE_ENV,
+        CTO_AGENT_KEYS_SECRET, CTO_GITOPS_REPO_NAME, GITHUB_TOKEN_SECRET_KEY,
+        GITLAB_TOKEN_SECRET_KEY, METRICS_SERVER_KUBELET_INSECURE_TLS_ARG,
         METRICS_SERVER_KUBELET_PREFERRED_ADDRESS_TYPES_ARG, RUNTIME_SOCKET_RETRY_POLICY,
     };
     use serde_json::json;
@@ -10128,6 +10162,7 @@ not-json
                 routing: None,
             },
             agents: Vec::new(),
+            saved_access: Vec::new(),
         }
     }
 
@@ -10231,6 +10266,7 @@ not-json
                 routing: None,
             },
             agents: Vec::new(),
+            saved_access: Vec::new(),
         };
         let credentials = BootstrapGithubCredentials {
             token: Some("github_pat_example".to_string()),
@@ -10663,17 +10699,26 @@ stringData:
     #[test]
     fn saved_access_provider_credentials_reference_existing_secret_keys() {
         let refs = super::saved_access_provider_credentials(&[
-            BootstrapAgentKey {
-                name: "ANTHROPIC_API_KEY".to_string(),
-                value: "anthropic-secret".to_string(),
+            SecretSourceAppliedReference {
+                purpose: "provider.anthropic.apiKey".to_string(),
+                target_secret_name: CTO_AGENT_KEYS_SECRET.to_string(),
+                target_secret_key: "ANTHROPIC_API_KEY".to_string(),
+                provider_ref: "op-sdk://redacted/anthropic".to_string(),
+                status: "applied".to_string(),
             },
-            BootstrapAgentKey {
-                name: "OPENROUTER_API_KEY".to_string(),
-                value: "openrouter-secret".to_string(),
+            SecretSourceAppliedReference {
+                purpose: "provider.openrouter.apiKey".to_string(),
+                target_secret_name: CTO_AGENT_KEYS_SECRET.to_string(),
+                target_secret_key: "OPENROUTER_API_KEY".to_string(),
+                provider_ref: "bws://redacted/openrouter".to_string(),
+                status: "applied".to_string(),
             },
-            BootstrapAgentKey {
-                name: "CLOUDFLARE_API_TOKEN".to_string(),
-                value: "cloudflare-secret".to_string(),
+            SecretSourceAppliedReference {
+                purpose: "endpoint.cloudflare.apiToken".to_string(),
+                target_secret_name: CTO_AGENT_KEYS_SECRET.to_string(),
+                target_secret_key: "CLOUDFLARE_API_TOKEN".to_string(),
+                provider_ref: "op-sdk://redacted/cloudflare".to_string(),
+                status: "applied".to_string(),
             },
         ])
         .expect("saved access provider refs");
@@ -10814,6 +10859,7 @@ stringData:
                 }),
             },
             agents: Vec::new(),
+            saved_access: Vec::new(),
         };
 
         validate_bootstrap_setup(&setup).expect("valid setup");
@@ -10850,6 +10896,7 @@ stringData:
                 }),
             },
             agents: Vec::new(),
+            saved_access: Vec::new(),
         };
 
         validate_bootstrap_setup(&setup).expect("source owner is optional");
@@ -10877,6 +10924,7 @@ stringData:
                 routing: None,
             },
             agents: Vec::new(),
+            saved_access: Vec::new(),
         };
 
         let error = validate_bootstrap_setup(&setup).expect_err("missing CLI rejected");
@@ -10914,6 +10962,7 @@ stringData:
                 }),
             },
             agents: Vec::new(),
+            saved_access: Vec::new(),
         };
 
         let error = validate_bootstrap_setup(&setup).expect_err("invalid primary rejected");
@@ -10951,6 +11000,7 @@ stringData:
                 }),
             },
             agents: Vec::new(),
+            saved_access: Vec::new(),
         };
 
         let error = validate_bootstrap_setup(&setup).expect_err("invalid fallback rejected");
@@ -11105,6 +11155,7 @@ stringData:
                 }),
             },
             agents: Vec::new(),
+            saved_access: Vec::new(),
         };
         let mut credentials = BTreeMap::new();
         credentials.insert(
@@ -11172,6 +11223,7 @@ stringData:
                 id: "morgan".to_string(),
                 enabled: true,
             }],
+            saved_access: Vec::new(),
         };
         let config = build_bootstrap_cto_config(Some(&setup), &BTreeMap::new())
             .expect("config")

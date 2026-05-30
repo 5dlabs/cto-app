@@ -15,23 +15,20 @@ const request = JSON.parse(input || "{}");
 const targets = Array.isArray(request.targets) ? request.targets : [];
 const selections = Array.isArray(request.matches) ? request.matches : [];
 
-const CANONICAL_TARGETS = [
-  ["GITHUB_TOKEN", "source.github.token"],
-  ["GITLAB_TOKEN", "source.gitlab.token"],
-  ["OPENAI_API_KEY", "provider.openai.apiKey"],
-  ["OPENROUTER_API_KEY", "provider.openrouter.apiKey"],
-  ["EXA_API_KEY", "tool.exa.apiKey"],
-  ["FIRECRAWL_API_KEY", "tool.firecrawl.apiKey"],
-  ["TAVILY_API_KEY", "tool.tavily.apiKey"],
-  ["DISCORD_BOT_TOKEN", "agent.discord.botToken"],
-];
-
 function selectedTargets() {
-  if (targets.length === 0) return CANONICAL_TARGETS;
-  const requested = new Set(targets.map((target) => String(target).trim().toUpperCase()));
-  return CANONICAL_TARGETS.filter(([key, purpose]) =>
-    requested.has(key) || requested.has(String(purpose).toUpperCase()),
-  );
+  return targets
+    .map((target) => {
+      if (typeof target === "string") {
+        const targetSecretKey = target.trim().toUpperCase();
+        return targetSecretKey ? [targetSecretKey, targetSecretKey] : null;
+      }
+      const targetSecretKey = String(target?.targetSecretKey || target?.envKey || target?.name || target?.key || "")
+        .trim()
+        .toUpperCase();
+      if (!targetSecretKey) return null;
+      return [targetSecretKey, String(target?.purpose || targetSecretKey).trim() || targetSecretKey];
+    })
+    .filter(Boolean);
 }
 
 function targetMatchesName(targetKey, value) {
@@ -42,6 +39,12 @@ function targetMatchesName(targetKey, value) {
 
 function redactedPreview() {
   return "[REDACTED]";
+}
+
+function targetSecretNameFor(targetKey) {
+  return /^[A-Z0-9_]+_DISCORD_BOT_TOKEN$/.test(targetKey)
+    ? "openclaw-discord-tokens"
+    : "cto-agent-keys";
 }
 
 function writeJson(value) {
@@ -242,7 +245,7 @@ async function previewOnePassword() {
     matches.push({
       provider: "onepassword",
       purpose,
-      targetSecretName: "cto-agent-keys",
+      targetSecretName: targetSecretNameFor(targetKey),
       targetSecretKey: targetKey,
       providerRef: `op-sdk://${matched.vault.id}/${matched.item.id}`,
       label: matched.item.title || targetKey,
@@ -346,7 +349,7 @@ async function previewBitwarden() {
     matches.push({
       provider: "bitwarden",
       purpose,
-      targetSecretName: "cto-agent-keys",
+      targetSecretName: targetSecretNameFor(targetKey),
       targetSecretKey: targetKey,
       providerRef: `bws://${secret.organizationId || organizationId}/${secret.id}`,
       label: secret.key || targetKey,
@@ -384,6 +387,34 @@ async function applyBitwarden() {
   writeJson({ provider: "bitwarden", values });
 }
 
+async function previewFixture() {
+  const fixtures = Array.isArray(request.fixtures) ? request.fixtures : [];
+  const matches = [];
+  for (const [targetKey, purpose] of selectedTargets()) {
+    const fixture = fixtures.find((candidate) =>
+      targetMatchesName(targetKey, `${candidate?.key || ""} ${candidate?.title || ""} ${candidate?.id || ""}`),
+    );
+    if (!fixture) continue;
+    matches.push({
+      provider: "fixture",
+      purpose,
+      targetSecretName: targetSecretNameFor(targetKey),
+      targetSecretKey: targetKey,
+      providerRef: `fixture://${targetKey}`,
+      label: String(fixture.key || fixture.title || targetKey),
+      confidence: "name-match",
+      redactedValuePreview: redactedPreview(),
+      approvalRequired: true,
+    });
+  }
+  writeJson({
+    provider: "fixture",
+    discovery: "metadata-only",
+    matches,
+    warnings: ["Fixture metadata preview never reads raw secret values."],
+  });
+}
+
 try {
   if (request.provider === "onepassword" && request.operation === "probe" && onePasswordAuthMode() === "service-account") await probeOnePasswordServiceAccount();
   else if (request.provider === "onepassword" && request.operation === "probe") await probeOnePasswordDesktopAuth();
@@ -392,6 +423,7 @@ try {
   else if (request.provider === "bitwarden" && request.operation === "probe") await probeBitwardenSecretsManager();
   else if (request.provider === "bitwarden" && request.operation === "preview") await previewBitwarden();
   else if (request.provider === "bitwarden" && request.operation === "apply") await applyBitwarden();
+  else if (request.provider === "fixture" && request.operation === "preview") await previewFixture();
   else throw new Error(`Unsupported secret source SDK operation: ${request.provider}/${request.operation}`);
 } catch (error) {
   process.stderr.write(`${safeErrorMessage(error)}\n`);

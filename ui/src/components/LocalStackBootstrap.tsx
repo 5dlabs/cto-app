@@ -271,6 +271,7 @@ type BootstrapSetupProfile = {
     id: DiscordAgentId;
     enabled: boolean;
   }>;
+  savedAccess?: SecretSourceApplyResult["applied"];
 };
 
 type BootstrapHarnessRouting = {
@@ -400,6 +401,7 @@ type SavedAccessAuthForm = {
 
 const ONEPASSWORD_SDK_DOCS_URL = "https://developer.1password.com/docs/sdks/";
 const BITWARDEN_SECRETS_MANAGER_DOCS_URL = "https://bitwarden.com/help/secrets-manager/";
+const REDACTED_SECRET_PLACEHOLDER = "[REDACTED]";
 const SAVED_ACCESS_DETECTION_TIMEOUT_MS = 12_000;
 const SAVED_ACCESS_PREVIEW_TIMEOUT_MS = 15_000;
 const SAVED_ACCESS_APPLY_TIMEOUT_MS = 50_000;
@@ -1727,8 +1729,13 @@ function providerApiKeyName(providerId: AiProviderId): string {
   );
 }
 
+function submittedSecretValue(value: string | null | undefined): string | undefined {
+  const trimmed = value?.trim() ?? "";
+  return trimmed && trimmed !== REDACTED_SECRET_PLACEHOLDER ? trimmed : undefined;
+}
+
 function savedAccessPreviewTargets(sourceProvider: ScmProvider): string[] {
-  const sourceTarget = sourceProvider === "github" ? "GITHUB_TOKEN" : "GITLAB_TOKEN";
+  const sourceTargets = sourceProvider === "github" ? ["GITHUB_TOKEN"] : ["GITLAB_TOKEN"];
   const providerTargets = AI_PROVIDERS
     .map((provider) => providerApiKeyName(provider.id))
     .filter((target, index, targets) => targets.indexOf(target) === index);
@@ -1736,7 +1743,7 @@ function savedAccessPreviewTargets(sourceProvider: ScmProvider): string[] {
   const agentTargets = CODING_DISCORD_AGENTS.map(
     (agent) => `${agent.id.toUpperCase()}_DISCORD_BOT_TOKEN`,
   );
-  return [sourceTarget, ...providerTargets, ...toolTargets, ...agentTargets];
+  return [...sourceTargets, ...providerTargets, ...toolTargets, ...agentTargets];
 }
 
 function applySavedAccessReferencesToSetup(
@@ -1965,14 +1972,14 @@ function buildBootstrapRequest(
   const tools = {
     apiKeys: TOOL_API_KEYS.map((tool) => ({
       name: tool.name,
-      value: toolApiKeys[tool.name]?.trim() ?? "",
+      value: submittedSecretValue(toolApiKeys[tool.name]) ?? "",
     })).filter((key) => key.value.length > 0),
   };
   const providers = {
     credentials: selectedProviders
       .map((provider): BootstrapProviderCredential => {
-        const value = providerAuthInputs[provider.id]?.trim();
-        const apiKey = providerAuthApiKeys[provider.id]?.trim();
+        const value = submittedSecretValue(providerAuthInputs[provider.id]);
+        const apiKey = submittedSecretValue(providerAuthApiKeys[provider.id]);
         const secretKey = providerApiKeyName(provider.id);
 
         if (provider.auth === "api-key") {
@@ -1980,7 +1987,7 @@ function buildBootstrapRequest(
             providerId: provider.id,
             auth: provider.auth,
             secretKey,
-            value: value || undefined,
+            value,
           };
         }
 
@@ -1988,16 +1995,16 @@ function buildBootstrapRequest(
           return {
             providerId: provider.id,
             auth: provider.auth,
-            value: value || undefined,
+            value,
             apiKeySecretKey: secretKey,
-            apiKey: apiKey || undefined,
+            apiKey,
           };
         }
 
         return {
           providerId: provider.id,
           auth: provider.auth,
-          value: value || undefined,
+          value,
         };
       })
       .filter((credential) =>
@@ -2008,12 +2015,12 @@ function buildBootstrapRequest(
     discordTokens: CODING_DISCORD_AGENTS.map((agent) => ({
       id: agent.id,
       enabled: enabledDiscordAgents[agent.id] === true,
-      token: discordAgentTokens[agent.id]?.trim() || undefined,
+      token: submittedSecretValue(discordAgentTokens[agent.id]),
     })),
   };
 
   if (sourceProvider !== "github") {
-    const sourceToken = sourceCredentialToken.trim();
+    const sourceToken = submittedSecretValue(sourceCredentialToken);
     return {
       github: { enabled: false },
       scm: sourceToken
@@ -2033,7 +2040,7 @@ function buildBootstrapRequest(
 
   const githubRequest = {
     enabled: true,
-    token: githubToken.trim() || sourceCredentialToken.trim() || undefined,
+    token: submittedSecretValue(githubToken) ?? submittedSecretValue(sourceCredentialToken),
     owner: sourceOwner.trim() || undefined,
   };
   const githubScmRequest = githubAppSecretManifest
@@ -2129,6 +2136,7 @@ function buildSetupProfile({
   selectedHarnessPrimaryModelKey,
   enabledHarnessFallbacks,
   enabledDiscordAgents,
+  savedAccessApplyResult,
 }: {
   sourceProvider: ScmProvider;
   sourceHostMode: SourceHostMode;
@@ -2141,6 +2149,7 @@ function buildSetupProfile({
   selectedHarnessPrimaryModelKey: string | null;
   enabledHarnessFallbacks: Partial<Record<string, boolean>>;
   enabledDiscordAgents: Partial<Record<DiscordAgentId, true>>;
+  savedAccessApplyResult: SecretSourceApplyResult | null;
 }): BootstrapSetupProfile {
   const owner = sourceOwner.trim();
   const routeOptions = buildHarnessModelRoutes(selectedProviders, selectedModels);
@@ -2186,6 +2195,7 @@ function buildSetupProfile({
       id: agent.id,
       enabled: enabledDiscordAgents[agent.id] === true,
     })),
+    savedAccess: savedAccessApplyResult?.applied.filter((reference) => reference.status === "applied"),
   };
 }
 
@@ -2394,6 +2404,7 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
       selectedHarnessPrimaryModelKey: effectivePrimaryHarnessModelRoute?.key ?? null,
       enabledHarnessFallbacks,
       enabledDiscordAgents,
+      savedAccessApplyResult,
     }),
     [
       effectivePrimaryHarnessModelRoute?.key,
@@ -2403,6 +2414,7 @@ function LocalStackBootstrapGate({ children }: { children: ReactNode }) {
       selectedAiCliIds,
       selectedModels,
       selectedProviders,
+      savedAccessApplyResult,
       sourceHostMode,
       sourceHostUrl,
       sourceOwner,

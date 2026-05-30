@@ -37,7 +37,36 @@ describe("secret-source persistence/consumption contract", () => {
     const applySdkValues = rustFunctionBody("apply_secret_source_sdk_values");
     assert.match(applySdkValues, /apply_bootstrap_agent_keys\(&agent_keys\)/);
     assert.match(applySdkValues, /patch_bootstrap_cto_agent_keys\(&agent_keys\)/);
-    assert.match(applySdkValues, /patch_bootstrap_cto_config|cto_config_values_patch/);
+    assert.match(bootstrapRs, /build_saved_access_cto_config\(&setup\.saved_access\)/);
+    assert.match(bootstrapRs, /saved_access:\s*setup\.saved_access\.clone\(\)/);
+  });
+
+  it("persists saved-access references as metadata without fake raw values", () => {
+    const fakeRawValues = [
+      "anthropic-fake-raw-value",
+      "context7-fake-raw-value",
+      "morgan-discord-fake-raw-value",
+    ];
+    const applySdkValues = rustFunctionBody("apply_secret_source_sdk_values");
+    const buildSavedAccessConfig = rustFunctionBody("build_saved_access_cto_config");
+    const savedAccessProviderCredentials = rustFunctionBody("saved_access_provider_credentials");
+    const buildBootstrapConfig = rustFunctionBody("build_bootstrap_cto_config");
+
+    assert.match(applySdkValues, /raw_values_persisted:\s*false/);
+    assert.match(buildSavedAccessConfig, /saved_access_provider_credentials\(saved_access\)/);
+    assert.match(savedAccessProviderCredentials, /secret_ref:\s*Some\(bootstrap_secret_reference\(secret_key\)\)/);
+    assert.match(savedAccessProviderCredentials, /value:\s*None/);
+    assert.match(buildBootstrapConfig, /build_saved_access_cto_config\(&setup\.saved_access\)/);
+    assert.match(bootstrapRs, /fn validate_bootstrap_secret_value[\s\S]*"\[REDACTED\]"/);
+    assert.match(bootstrapRs, /OPENCLAW_DISCORD_TOKENS_SECRET\.to_string\(\)/);
+
+    for (const fakeRawValue of fakeRawValues) {
+      assert.doesNotMatch(applySdkValues, new RegExp(fakeRawValue));
+      assert.doesNotMatch(buildSavedAccessConfig, new RegExp(fakeRawValue));
+      assert.doesNotMatch(savedAccessProviderCredentials, new RegExp(fakeRawValue));
+      assert.doesNotMatch(buildBootstrapConfig, new RegExp(fakeRawValue));
+      assert.doesNotMatch(bridgeSource, new RegExp(fakeRawValue));
+    }
   });
 
   it("stores 1Password service-account tokens in Keychain and config metadata only", () => {
