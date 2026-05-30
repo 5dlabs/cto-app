@@ -6,7 +6,7 @@ nameOverride: ""
 replicaCount: 1
 
 image:
-  repository: ghcr.io/5dlabsinc/voice-bridge
+  repository: ghcr.io/5dlabs/voice-bridge
   tag: "desktop-python-3.11-v0.1.0"
   pullPolicy: Always
 
